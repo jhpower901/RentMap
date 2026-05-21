@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "C:/Users/ajh01/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
+      "runtimeArgs": ["C:/Users/ajh01/AppData/Local/Temp/static_server.js", "web"],
+      "port": 3000
+    }
+  ]
+}

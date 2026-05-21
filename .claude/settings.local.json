@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__43eb615b-018e-4d48-8c23-e1ed8de35c81__notion-search",
+      "mcp__43eb615b-018e-4d48-8c23-e1ed8de35c81__notion-fetch",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "WebFetch(domain:www.daangn.com)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\ajh01\\\\Documents\\\\Codex\\\\2026-05-22\\\\notion-notion-morethan-log\\\\web\" | Where-Object { $_.Extension -eq \".html\" } | Select-Object Name, @{N=\"KB\";E={[Math]::Round\\($_.Length/1024\\)}})"
+    ]
+  }
+}

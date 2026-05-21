@@ -1,0 +1,391 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>다방 - 아주대 월세 매물</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f0f0f0}
+nav a.active-nav{background:#222 !important;color:#fff !important}
+.page{max-width:1440px;margin:0 auto;padding:16px}
+h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.badge-dabang{background:#FF5C38}
+.badge-daangn{background:#FF6F00}
+.badge-zigbang{background:#6366F1}
+.badge-naver{background:#03C75A}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
+.controls label{font-size:13px;display:flex;align-items:center;gap:4px}
+.controls input[type=number]{width:74px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
+.controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
+.count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
+.layout{display:grid;grid-template-columns:1fr 400px;gap:14px;align-items:start}
+@media(max-width:960px){.layout{grid-template-columns:1fr}}
+.map-box{height:520px;border-radius:10px;overflow:hidden;border:1px solid #ddd;position:sticky;top:60px}
+.table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
+table{width:100%;border-collapse:collapse;background:#fff;min-width:780px}
+th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid #e0e0e0}
+th:hover{background:#e4e4e4}
+th .sort-arrow{font-size:10px;margin-left:2px;opacity:0.5}
+th.sorted .sort-arrow{opacity:1;color:#FF5C38}
+td{padding:7px 10px;border-top:1px solid #f0f0f0;vertical-align:middle;font-size:13px}
+tr:hover td{background:#fafafa;cursor:pointer}
+.img-thumb{width:68px;height:51px;object-fit:cover;border-radius:5px}
+.no-img{width:68px;height:51px;background:#eee;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#aaa;text-align:center;line-height:1.3}
+.price{font-weight:600}
+.total-price{color:#c00;font-weight:700}
+.agency-cell{font-size:12px;line-height:1.5;max-width:140px}
+.phone{color:#666;font-size:11px}
+.link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
+.link-btn:hover{background:#eee}
+.note-warn{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6}
+.leaflet-popup-content{font-size:13px;line-height:1.7;min-width:210px;max-width:260px}
+.popup-title{font-weight:700;margin-bottom:4px;font-size:14px;line-height:1.4}
+.popup-price{color:#c00;font-weight:700;font-size:15px}
+.popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
+.popup-meta{color:#555;font-size:12px}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">🏠 아주대 월세</span>
+  <a href="index.html">지도 전체</a>
+  <a href="dabang.html" data-src="dabang"><span class="badge badge-dabang">다방</span></a>
+  <a href="daangn.html" data-src="daangn"><span class="badge badge-daangn">당근</span></a>
+  <a href="zigbang.html" data-src="zigbang"><span class="badge badge-zigbang">직방</span></a>
+  <a href="naver.html" data-src="naver"><span class="badge badge-naver">네이버</span></a>
+</nav>
+<div class="page">
+  <h1>
+    <span class="badge badge-dabang" style="font-size:15px;padding:5px 14px">다방</span>
+    매물 목록
+  </h1>
+  
+  <div class="controls">
+    <label>보증금 최대
+      <input type="number" id="maxDeposit" value="3000" min="0" max="10000" step="100"> 만원
+    </label>
+    <label>월세 최대
+      <input type="number" id="maxRent" value="60" min="0" max="200" step="5"> 만원
+    </label>
+    <label>방 유형
+      <select id="typeFilter"><option value="">전체</option></select>
+    </label>
+    <input type="text" id="search" placeholder="검색 (지역·중개사무소·제목)..." style="min-width:180px">
+    <span class="count" id="countLabel">0건</span>
+  </div>
+  <div class="layout">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:76px">사진</th>
+            <th data-col="deposit" data-num="1">보증금<span class="sort-arrow">▼</span></th>
+            <th data-col="rent" data-num="1" class="sorted">월세<span class="sort-arrow">▼</span></th>
+            <th data-col="maint" data-num="1">관리비<span class="sort-arrow">▼</span></th>
+            <th data-col="total" data-num="1">총월납부<span class="sort-arrow">▼</span></th>
+            <th data-col="type">방유형<span class="sort-arrow">▼</span></th>
+            <th data-col="area">면적<span class="sort-arrow">▼</span></th>
+            <th data-col="floor">층<span class="sort-arrow">▼</span></th>
+            <th data-col="address">주소<span class="sort-arrow">▼</span></th>
+            <th data-col="agency">중개사무소<span class="sort-arrow">▼</span></th>
+            <th>링크</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div>
+      <div class="map-box" id="map"></div>
+    </div>
+  </div>
+</div>
+<script>
+const DATA = [{"id":57143314,"total":35,"lat":37.2758489563,"address":"경기도 수원시 팔달구 우만동","rent":28,"deposit":200,"area":19.83,"region":"경기도 수원시 팔달구 우만동","floor":"반지층/3층","title":"LINEㅣ유학생 모여라ㅣ보증금 월세 최저가ㅣ빠른입주 가능ㅣ분리형ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/J2dBwBwpaN_2LZ8a6v30D","source":"dabang","lon":127.042927489,"agency":"라인공인중개사사무소","maint":7,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/zCkETYzf2rbX-dBDgyvxB","url":"https://www.dabangapp.com/room/6a0d15daefff5a5dc390c58d"},
+{"id":57027161,"total":36,"lat":37.2758881104856,"address":"경기도 수원시 영통구 원천동","rent":30,"deposit":300,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/3층","title":"LINEㅣ아주대 최저가 풀옵션 원룸ㅣ갓성비 1등ㅣ선착순ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/YV2Dw8KKOjiGs2T7670iE","source":"dabang","lon":127.044262512598,"agency":"라인공인중개사사무소","maint":6,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/EJ734cy5tsDArJik-hKwv","url":"https://www.dabangapp.com/room/6a03d64c182b9749cdaf5cc7"},
+{"id":57006799,"total":44,"lat":37.2762529348,"address":"경기도 수원시 팔달구 우만동","rent":39,"deposit":500,"area":19.83,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"LINEㅣ최저가 원룸ㅣ아주대 8분컷ㅣ조용한 주택가ㅣ초인기매물 선착순ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/ElxDBgACOYX1C9_0Wet91","source":"dabang","lon":127.0420572573,"agency":"라인공인중개사사무소","maint":5,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/9sctEejMuHVTFKeP4lk7H","url":"https://www.dabangapp.com/room/6a0282b29451e22c3cbf7537"},
+{"id":56986319,"total":45,"lat":37.2760391737,"address":"경기도 수원시 영통구 원천동","rent":35,"deposit":1000,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/3층","title":"LINEㅣ가성비 월세 원룸ㅣ풀옵션+베란다ㅣ컨디션 굿굿 추천매물ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/53-TskYykhbTp8CbXxQz5","source":"dabang","lon":127.0450879582,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/Q-5mb1kLWBA9NZKv8gUh2","url":"https://www.dabangapp.com/room/6a013da2718c0460f647bce2"},
+{"id":57143080,"total":45,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"LINEㅣ아주대도보3분컷ㅣ가성비 1등 원룸ㅣ풀옵션ㅣ선착순ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/ZTFnT_Dmyvqu1in4remTg","source":"dabang","lon":127.0448812832,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/n90ptgfXYnhVGkIRGod05","url":"https://www.dabangapp.com/room/6a0d147779700e50d307b116"},
+{"id":56934200,"total":45,"lat":37.2760391737,"address":"경기도 수원시 영통구 원천동","rent":35,"deposit":1000,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/3층","title":"LINE l 상태좋은원룸 가성비NO1 베란다까지 l","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/GQ3322OztVVXx_rmYQ2jM","source":"dabang","lon":127.0450879582,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/c-u_gFVOkkK_COP8Vd2w3","url":"https://www.dabangapp.com/room/69fc28833c423c6206318246"},
+{"id":57143386,"total":45,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"LINE l 깔끔한 원룸 l 가성비 + 위치","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/W8bgTXQeiaNxO3uPikU-5","source":"dabang","lon":127.0448812832,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/ICuPm0JPwOFjUzzCn5nd6","url":"https://www.dabangapp.com/room/6a0d16595befe96aa776e76b"},
+{"id":57099881,"total":47,"lat":37.2739669010654,"address":"경기도 수원시 영통구 매탄동","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"5층/8층","title":"LINEㅣ깔끔원룸 1등+엘베OKㅣ아주대도보OKㅣ가성비 최고 선착순ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/6OmrsxAQFSWBMr0c62B1G","source":"dabang","lon":127.044771020618,"agency":"라인공인중개사사무소","maint":12,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/g0gqz7KdPFqbY87jehfpR","url":"https://www.dabangapp.com/room/6a0a682b8812273c6571c451"},
+{"id":57107526,"total":47,"lat":37.2739669010654,"address":"경기도 수원시 영통구 매탄동","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"5층/8층","title":"LINE l 깔끔한 가성비원룸 l 엘베있음","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/nKnmbK9PpvbhLwJ7LOpDk","source":"dabang","lon":127.044771020618,"agency":"라인공인중개사사무소","maint":12,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/Rprapl8x_N_CNQaVOAcj8","url":"https://www.dabangapp.com/room/6a0a8145a5700a63f0b3a230"},
+{"id":56757989,"total":48,"lat":37.2737940423,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":1000,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"4층/4층","title":"LINE l 깔끔한 분리형 풀옵션 원룸 아대도보10분 l","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/4u462w_bMyNMp0uRKiljq","source":"dabang","lon":127.044396587,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/ZG9UeKtdH7gWTbLM24wHX","url":"https://www.dabangapp.com/room/69eec9335982154a4fc95c1b"},
+{"id":56257251,"total":48,"lat":37.2737940423,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":1000,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"4층/4층","title":"LINEㅣ아주대 도보10분컷ㅣ깔끔 정석 원룸ㅣ분리형ㅣ갓성비ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/Q1oXBZUWZUqZ5RWkVVfgL","source":"dabang","lon":127.044396587,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/vM5t01KiEM5Jm_MirIi5F","url":"https://www.dabangapp.com/room/69c760a6d087ca44b5ad4df8"},
+{"id":57086104,"total":50,"lat":37.2737329883,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"2층/3층","title":"LINEㅣ분리형 넓은 원룸ㅣ깔끔1등ㅣ아주대삼거리주변ㅣ추천매물ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/FtHPI63yszqp_ahEmDYaB","source":"dabang","lon":127.0438147598,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/53wAVAQta_xRMo08escy8","url":"https://www.dabangapp.com/room/6a07ec2f874c251b1835e385"},
+{"id":57114289,"total":50,"lat":37.2760391737,"address":"경기도 수원시 영통구 원천동","rent":40,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/3층","title":"LINE l 깔끔한 원룸 l 아주대학생 추천","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/4sBvR6Un8D3nB6Vn7jY9o","source":"dabang","lon":127.0450879582,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/LCB7_TlxA-_7JX6f-euGw","url":"https://www.dabangapp.com/room/6a0aa99f3008c174ae67bb57"},
+{"id":57085801,"total":50,"lat":37.2737329883,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"2층/3층","title":"LINE l 넓고깔끔한 분리형+베란다까지 구조좋은원룸 l","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/-4kn073M5pnSFAj03weaY","source":"dabang","lon":127.0438147598,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/uFy7CgUwLFD3IJAeQp4aI","url":"https://www.dabangapp.com/room/6a07e88fc1febf7a67d37f93"},
+{"id":57107479,"total":50,"lat":37.2737329883,"address":"경기도 수원시 영통구 매탄동","rent":42,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"2층/3층","title":"LINE l 깔끔한 가성비 원룸 l 분리형 + 베란다","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/nE87MSxFxoElMLa9UW2WS","source":"dabang","lon":127.0438147598,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/46QqsHPO51X3U7GYXYni6","url":"https://www.dabangapp.com/room/6a0a80d5bf8d76608590f6ed"},
+{"id":57129632,"total":50,"lat":37.2736355334,"address":"경기도 수원시 영통구 매탄동","rent":42,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"3층/3층","title":"LINE l 깔끔한 원룸 l 분리형 + 베란다","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/_RnDmZEbkAo7cmxnuFz0D","source":"dabang","lon":127.0441980537,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/BXVFkAQO31y85j4eCpWEt","url":"https://www.dabangapp.com/room/6a0be02f3dd8696fc75e4cc4"},
+{"id":57165852,"total":50,"lat":37.2779538624,"address":"경기도 수원시 팔달구 우만동","rent":42,"deposit":3000,"area":26.44,"region":"경기도 수원시 팔달구 우만동","floor":"2층/3층","title":"LINE l 넓고 컨디션 좋은 방 l 분리형 + 베란다","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/w19Yt8nxmqXb-FvT-Tc-o","source":"dabang","lon":127.042716702,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/Iyov_Mzw8eoKFJOAExOIo","url":"https://www.dabangapp.com/room/6a0ea221e472e65bc91bd0f7"},
+{"id":57086589,"total":50,"lat":37.2736355334,"address":"경기도 수원시 영통구 매탄동","rent":42,"deposit":500,"area":26.44,"region":"경기도 수원시 영통구 매탄동","floor":"3층/3층","title":"LINE l 베란다부터넓다 분리형 넓은원룸 l","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/k0ebGn7EI5iF6NV8ZE-Td","source":"dabang","lon":127.0441980537,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/iGoSD-u_LpPVhbVsDIe5H","url":"https://www.dabangapp.com/room/6a07ef33ff303a73ed120cde"},
+{"id":57146473,"total":53,"lat":37.2737940423,"address":"경기도 수원시 영통구 매탄동","rent":45,"deposit":1000,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"2층/4층","title":"LINE l 컨디션 좋은 분리형 원룸","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/Pcrz8l3RzOrryC1Ps1RZt","source":"dabang","lon":127.044396587,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/z8tywpESMwbfDF2Al0oYf","url":"https://www.dabangapp.com/room/6a0d33597efe690e5508e41a"},
+{"id":57143884,"total":58,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":48,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"LINE l 남향 분리형 풀옵션원룸 넓은호실 밝은집 l","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/jca3dajK1YFK8-gY0eNQr","source":"dabang","lon":127.0448812832,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/yw2OsjiGEJGdCcN_bb-zF","url":"https://www.dabangapp.com/room/6a0d194cb841f377f6a802fd"},
+{"id":57143971,"total":58,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":48,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"3층/4층","title":"LINE l 깔끔한 분리형 원룸 l 위치 채광 최고","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/fp0tQcx9Ne5s78hjejK6Y","source":"dabang","lon":127.0448812832,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/phoZlpqAdHDh2kF6O5tpP","url":"https://www.dabangapp.com/room/6a0d19ab98123c7e2a68ae00"},
+{"id":57142210,"total":58,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":48,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"3층/4층","title":"LINEㅣ아주대3분컷ㅣ채광GOODㅣ분리형 원룸ㅣ풀옵션ㅣ즉시입주ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/V3IVfJCwVIJJo3eSliIjE","source":"dabang","lon":127.0448812832,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/W36uI3mNC3HBI21LNUHEo","url":"https://www.dabangapp.com/room/6a0d0f6fe445384bebb9c87c"},
+{"id":57116555,"total":58,"lat":37.2762024203,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":1000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"LINE l 아주대 원룸 l 깔끔 + 베란다","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/d7uplo0IvlhdMT1EfPMJG","source":"dabang","lon":127.0422150847,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/z7zmznzF77cQhTetm31SS","url":"https://www.dabangapp.com/room/6a0ab9939647e266a531bdf4"},
+{"id":56779127,"total":58,"lat":37.2762024203,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":1000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/4층","title":"LINEㅣ아주대 도보10분컷ㅣ베란다OKㅣ넓고 깔끔한 원룸 여기에요ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/5sfqDuv-EQVsx7zOKrAQk","source":"dabang","lon":127.0422150847,"agency":"라인공인중개사사무소","maint":8,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/3XGJIohMnA-EUIukVJRHg","url":"https://www.dabangapp.com/room/69f0100d7b10f242d1972d59"},
+{"id":56659505,"total":60,"lat":37.2759967987,"address":"경기도 수원시 팔달구 우만동","rent":42,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/4층","title":"LINE l 깔끔 리모델링원룸 풀옵션 빠른입주 l","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/5PoiuNyI812kZT0SMSHk2","source":"dabang","lon":127.0427291266,"agency":"라인공인중개사사무소","maint":18,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/t-ikBXPuaKxBZhSeQRYwy","url":"https://www.dabangapp.com/room/69e6e59f4f23b231e49a9c31"},
+{"id":57134175,"total":60,"lat":37.2780582800928,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2층/4층","title":"LINE l 아주대 깔끔한 원룸 l 가성비 l 분리형 + 베란다","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/VL9gwijNpeDoIJ40WmLg9","source":"dabang","lon":127.043000907941,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/nsQmt3ELVKe4wNnsVY64V","url":"https://www.dabangapp.com/room/6a0c05627593662c416118f5"},
+{"id":57135099,"total":60,"lat":37.2780582800928,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":500,"area":26.44,"region":"경기도 수원시 팔달구 우만동","floor":"2층/4층","title":"LINE l 공원앞 대형원룸 구조최상급 분리형 풀옵션 l","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/yYjdrD1FjZXZKxy6iFR_2","source":"dabang","lon":127.043000907941,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/7-OW34vL0DCOiy2a81sAR","url":"https://www.dabangapp.com/room/6a0c0afb2ef22747ec0d2b0f"},
+{"id":57134709,"total":60,"lat":37.2780582800928,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2층/3층","title":"LINEㅣ아주대 초대박 원룸ㅣ넓은 방+풀옵션+베란다ㅣ놓치면 후회해요ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/FeV4ILPKoABvCggDJbl31","source":"dabang","lon":127.043000907941,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/JKXoPx8maHKjoE-UojzwG","url":"https://www.dabangapp.com/room/6a0c08cec03feb4a1796d18a"},
+{"id":56635796,"total":63,"lat":37.2759967987,"address":"경기도 수원시 팔달구 우만동","rent":42,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/4층","title":"LINEㅣ깔끔 리모델링 원룸ㅣ컨디션최상ㅣ풀옵션+베란다ㅣ아주대 도보OKㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/LRsN1R0ikWJolg4G4LgTf","source":"dabang","lon":127.0427291266,"agency":"라인공인중개사사무소","maint":21,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/dct1ZjJfrJ5OXLNb4DSDD","url":"https://www.dabangapp.com/room/69e583c893539c2c05fa829a"},
+{"id":57133803,"total":63,"lat":37.2759967987,"address":"경기도 수원시 팔달구 우만동","rent":42,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/4층","title":"LINE l 깔끔한 원룸 l 풀옵션 + 베란다","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/q0Y0DtTmxMC2QPuJ1Xxkq","source":"dabang","lon":127.0427291266,"agency":"라인공인중개사사무소","maint":21,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/KkSqX4cAN7a2E4QrRRW6j","url":"https://www.dabangapp.com/room/6a0c0238bb7d9528a8c94595"},
+{"id":56236625,"total":63,"lat":37.2743691476369,"address":"경기도 수원시 영통구 원천동","rent":53,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"LINEㅣ넓은 분리형 원룸ㅣ채광 굿ㅣ베란다OKㅣ깔끔 1등ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/INXGxESMMHSYQwGWU8QqZ","source":"dabang","lon":127.048379297994,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/88R42y8K2t6s5e3XvdQG_","url":"https://www.dabangapp.com/room/69c5f3d4f6c4bc4a1258d2a4"},
+{"id":56202188,"total":65,"lat":37.2776935960578,"address":"경기도 수원시 영통구 원천동","rent":50,"deposit":500,"area":26.44,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"LINE l 도보3분+깔끔리모델링+풀옵션+베란다 l","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/kJuoHEdS3vV_NDS17ZNTj","source":"dabang","lon":127.044791268687,"agency":"라인공인중개사사무소","maint":15,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/KprQugI0u8KFjcH4P39He","url":"https://www.dabangapp.com/room/69c38e8282a2820b08e0b845"},
+{"id":57116533,"total":66,"lat":37.2776077536346,"address":"경기도 수원시 팔달구 우만동","rent":56,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"LINE l 아주대원룸 l 분리형 + 베란다 l 주택가 인기매물","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/1eirp9RnuoYmqrsMkgLCU","source":"dabang","lon":127.04301869263,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/F7DcBLdwfPDp2HS4rzxZc","url":"https://www.dabangapp.com/room/6a0ab97276e60a6aa4ee66ad"},
+{"id":56874231,"total":66,"lat":37.2776077536346,"address":"경기도 수원시 팔달구 우만동","rent":56,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"LINEㅣ아주대 7분컷ㅣ주택가 넓은 분리형 원룸ㅣ풀옵션+베란다ㅣ인기매물ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/8TuzEJh4fwFxOiGJE5Zqq","source":"dabang","lon":127.04301869263,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/esjmxcjq45L4i_00-_WuZ","url":"https://www.dabangapp.com/room/69f8146aac5425243b5b0aa2"},
+{"id":55930580,"total":75,"lat":37.2763500584,"address":"경기도 수원시 팔달구 우만동","rent":60,"deposit":1000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/3층","title":"LINEㅣ컨디션 최상ㅣ넓은 분리형 원룸ㅣ풀옵션은 기본ㅣ꿀매물ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/cOcaYlueXwUOXhSJ-1nUy","source":"dabang","lon":127.0425850009,"agency":"라인공인중개사사무소","maint":15,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/MWKi1fOzsk0wobtfLxCqv","url":"https://www.dabangapp.com/room/69af8d1da7f16e73b983381e"},
+{"id":55887623,"total":29.5,"lat":37.2789515699251,"address":"경기도 수원시 영통구 원천동","rent":25,"deposit":80,"area":13.22,"region":"경기도 수원시 영통구 원천동","floor":"5층/5층","title":"O아주대+유학생 환영 도보 끝판왕 O","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/Lo5XxAJIvdUnBLjNLTE4l","source":"dabang","lon":127.044467270884,"agency":"런공인중개사사무소","maint":4.5,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/LVZkybteu-gSt_0vfI9pe","url":"https://www.dabangapp.com/room/69abd23008a6541d95e198ca"},
+{"id":56962925,"total":29.5,"lat":37.2789515699251,"address":"경기도 수원시 영통구 원천동","rent":25,"deposit":80,"area":13.22,"region":"경기도 수원시 영통구 원천동","floor":"4층/5층","title":"H 아주대 초근접, 유학생 가능 H","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/bEKYemu8VCJ55ejERsZEd","source":"dabang","lon":127.044467270884,"agency":"런공인중개사사무소","maint":4.5,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/HLnKi_R28JiFiR_0mOOC4","url":"https://www.dabangapp.com/room/69fe8b952fc89d4086412a06"},
+{"id":56356931,"total":40,"lat":37.2790029083711,"address":"경기도 수원시 팔달구 우만동","rent":35,"deposit":500,"area":16.52,"region":"경기도 수원시 팔달구 우만동","floor":"3층/3층","title":"Ooㅣ아주대 도보 5분컷ㅣ즉시입주ㅣ선착순 ㅣoO","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/nSvUEDSGlCIfJYFFMVfKz","source":"dabang","lon":127.04205878728,"agency":"런공인중개사사무소","maint":5,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/MBhd_VVGrmSkJbUo4cJAU","url":"https://www.dabangapp.com/room/69cf289fee6e2b5924be7a22"},
+{"id":57019155,"total":45,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"oO 아주대2분컷ㅣ위치최강ㅣ가격최고ㅣ풀옵션 강추  Oo","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/aXdTi5LK6DnwJy3MJ9xxu","source":"dabang","lon":127.0448812832,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/mBe-3UlmBUWgivfG-TnUS","url":"https://www.dabangapp.com/room/6a02d29ca403213baeaa805d"},
+{"id":57052626,"total":45,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":35,"deposit":500,"area":16.52,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"H 아주대 초근접, 빠른 입주 가능, 가성비 매물 H","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/O44iB8dWRNw9NMn6Ew_LU","source":"dabang","lon":127.0448812832,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/DjCffZ2rHC3OP7V_nMVzB","url":"https://www.dabangapp.com/room/6a05572e43dd472faf9031ee"},
+{"id":57111557,"total":45,"lat":37.2766377454092,"address":"경기도 수원시 영통구 원천동","rent":40,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"3층/4층","title":"8RUN 전속매물 아주대3분 초인기매물 주방분리형 풀옵션8","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/uk49-BcsNxB8xlBbxOAcl","source":"dabang","lon":127.044344134833,"agency":"런공인중개사사무소","maint":5,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/Pa-a6RGraZbMKem6it8gO","url":"https://www.dabangapp.com/room/6a0a9a83df19bf0cbb279c3a"},
+{"id":57138132,"total":48,"lat":37.2776077536346,"address":"경기도 수원시 팔달구 우만동","rent":38,"deposit":300,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"반지층/3층","title":"8Run학교가까운 1층 높이 저렴한 원룸8","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/NWxOc9dH-CtFgdcSKnUed","source":"dabang","lon":127.04301869263,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/Kh5luebMtF37R4-wgFvcl","url":"https://www.dabangapp.com/room/6a0c2e345cc7012b43fb736d"},
+{"id":56285685,"total":48,"lat":37.2737940423,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":1000,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"4층/4층","title":"O 아주대삼거리 / / 화이트톤 풀옵션 // 선착순 O","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/sTGiB8-u7HdJJSJwhpqV2","source":"dabang","lon":127.044396587,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/YtjR5LiECLFp-4Uiv7Y2O","url":"https://www.dabangapp.com/room/69ca1d09e02a1d7e7e76e95e"},
+{"id":56544473,"total":50,"lat":37.2739752421952,"address":"경기도 수원시 영통구 매탄동","rent":42,"deposit":300,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"2층/3층","title":"8Run아주대삼거리인근. 분리형원룸. 깔끔함8","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/Icdmv9LLR83PqThuVnXha","source":"dabang","lon":127.041668127998,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/EHfHyCWrXg4aUk3-H4hek","url":"https://www.dabangapp.com/room/69dda9e2e622750cdf151cf9"},
+{"id":56077858,"total":50,"lat":37.2774487840702,"address":"경기도 수원시 영통구 원천동","rent":45,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"4층/4층","title":"O아주대 1분컷/ 대로변 안전한집 /빅 사이즈 원룸O","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/pGBjElPgjrRujLSlwsqra","source":"dabang","lon":127.044069486394,"agency":"런공인중개사사무소","maint":5,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/qA3tBK8fdfiBA28XTFXMC","url":"https://www.dabangapp.com/room/69ba2fd6eee2bd5267c559de"},
+{"id":57082390,"total":53,"lat":37.2737940423,"address":"경기도 수원시 영통구 매탄동","rent":45,"deposit":1000,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"2층/4층","title":"H 주방분리, 남동향, 빠른입주, 버스정류장 가까움 H","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/b5u80x7OZQKe-Yh8P9cMT","source":"dabang","lon":127.044396587,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/tHV1TXNydP_Zrlp9dtm7h","url":"https://www.dabangapp.com/room/6a07cb8a7f24cf3c6c255267"},
+{"id":57049767,"total":55,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":45,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"3층/4층","title":"oOㅣ아주대 도보 1분컷 ㅣ갓성비 분리형ㅣ남향ㅣOo","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/5cL21duMRPZCjdq8NtSFC","source":"dabang","lon":127.0448812832,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/rnLuc3nITob-AdbasR58A","url":"https://www.dabangapp.com/room/6a0540e6e895d54e3b58f36c"},
+{"id":56986991,"total":56,"lat":37.2782990999,"address":"경기도 수원시 영통구 원천동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/3층","title":"H 아주대,아주대 병원 초근접, 가성비 원룸 H","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/taKpYLH158M_gRQeuY5hu","source":"dabang","lon":127.0447780966,"agency":"런공인중개사사무소","maint":6,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/WFNKxu9xsBkTIn_97IQUd","url":"https://www.dabangapp.com/room/6a013fb83b5194098947ed6c"},
+{"id":56980338,"total":56,"lat":37.2782990999,"address":"경기도 수원시 영통구 원천동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/3층","title":"8아주대코앞 큰원룸 저렴함 풀옵션 즉시입주 인기매물8","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/LPuhyqOANmKf3CllKDKVy","source":"dabang","lon":127.0447780966,"agency":"런공인중개사사무소","maint":6,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/9zmoJdPIrXC6wRCfJZNsM","url":"https://www.dabangapp.com/room/6a01294f8fd87c619e26046a"},
+{"id":57083177,"total":58,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":48,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"H 학생 , 직장인 추천 , 버스정류장 근처, 남향 H","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/Z2jNIimg_LDgycB_IiJiw","source":"dabang","lon":127.0448812832,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/faPd7IOV80ZYmoL6BQqe3","url":"https://www.dabangapp.com/room/6a07d0180d4e3a394fa600e4"},
+{"id":57112390,"total":60,"lat":37.2780582800928,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2층/4층","title":"8아주대도보5분컷,주방분리 조용한 원룸8","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/vtPg9zrfnjpuoZsjWQyT0","source":"dabang","lon":127.043000907941,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/vimEAZgngh7q12bQQv3kR","url":"https://www.dabangapp.com/room/6a0a9ee684a1d54779af8fcc"},
+{"id":57119650,"total":60,"lat":37.2780582800928,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2층/4층","title":"Oㅣ떳다ㅣ침대까지 풀옵션ㅣ아주대 도보3분컷ㅣO","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/qV6Df7wRI6Qh2fw4Y3xu0","source":"dabang","lon":127.043000907941,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/3z32PriQpJaoUEeluq07O","url":"https://www.dabangapp.com/room/6a0ad840f01bda05830122b7"},
+{"id":56792540,"total":63,"lat":37.2743691476369,"address":"경기도 수원시 영통구 원천동","rent":53,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"8아주대학교 인근 즉시입주 깔끔한 원룸8","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/9DW_1APjfXnxaEHWAnQBs","source":"dabang","lon":127.048379297994,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/noHdZLWDLEZH6tiltNxbK","url":"https://www.dabangapp.com/room/69f079aff7f9ac5a342f8e6e"},
+{"id":57156012,"total":63,"lat":37.2785587454153,"address":"경기도 수원시 영통구 원천동","rent":55,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"3층/3층","title":"H 아주대 초근접, 리모델링 풀옵션, 인기매물 H","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/lhYP-quVW_Te0t7JeWGxw","source":"dabang","lon":127.044390364717,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/0Fh9FNwiXqYece7PO0X7J","url":"https://www.dabangapp.com/room/6a0e5933bd531e5b305042df"},
+{"id":57106203,"total":65,"lat":37.2785587454153,"address":"경기도 수원시 영통구 원천동","rent":57,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"3층/3층","title":"8전속매물,리모델링 화이트톤 공용건조기까지8","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/QWaUdFWIy81wdIZ0Gqo98","source":"dabang","lon":127.044390364717,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/p9E_pn61Y0l0DRDfmT4bz","url":"https://www.dabangapp.com/room/6a0a7bcd8fe99141a86fa78c"},
+{"id":57001303,"total":66,"lat":37.2776077536346,"address":"경기도 수원시 팔달구 우만동","rent":56,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"oO ㅣ화이트톤 풀옵션ㅣ7월입주ㅣ아주대 도보 3분ㅣOo","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/Sypqno66_doyNI0PNRMzc","source":"dabang","lon":127.04301869263,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/fbXtWSErwi5qo1C8JQxAX","url":"https://www.dabangapp.com/room/6a0199e8b6cdcd2a42e1af9d"},
+{"id":56959633,"total":66,"lat":37.2776077536346,"address":"경기도 수원시 팔달구 우만동","rent":56,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"H 간호사,여학생 추천, 조용한 주거환경, 선착순 H","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/T7wppR4Cj4kSOWs-KOheG","source":"dabang","lon":127.04301869263,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://d1774jszgerdmk.cloudfront.net/1024/goEG9wqgz222rmiRCE1s0","url":"https://www.dabangapp.com/room/69fda849673db43bb5a43000"},
+{"id":57029307,"total":43,"lat":37.2737874480021,"address":"경기도 수원시 영통구 매탄동","rent":35,"deposit":300,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"1층/4층","title":"아주대삼거리 초입 + 신축급 분리형 원룸 +","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/RMZpA4JJHZlhWYgh3GSiX","source":"dabang","lon":127.042727877867,"agency":"매탄호수공인중개사사무소","maint":8,"phone":"031-214-8183","img1":"https://d1774jszgerdmk.cloudfront.net/1024/viUOyBfYajCpjtj4ibeLD","url":"https://www.dabangapp.com/room/6a03e14e376c82774bd48e37"},
+{"id":57029226,"total":60,"lat":37.2737651616,"address":"경기도 수원시 영통구 매탄동","rent":51,"deposit":500,"area":29.75,"region":"경기도 수원시 영통구 매탄동","floor":"2층/4층","title":"아주대삼거리초입 I 큰방 분리형구조 I 보증금 조정가능","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/3iJr_DgEJa3MIHPitTAIv","source":"dabang","lon":127.0445228504,"agency":"매탄호수공인중개사사무소","maint":9,"phone":"031-214-8183","img1":"https://d1774jszgerdmk.cloudfront.net/1024/hXZABWmmps8wFAHZA5WDR","url":"https://www.dabangapp.com/room/6a03e0c2a0fa387bef05f530"},
+{"id":56560287,"total":40,"lat":37.27459346,"address":"경기도 수원시 영통구 원천동","rent":30,"deposit":300,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"ll MoA ll 초저렴o 넓은구조o 저렴한가격o","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/n5R5i32cMOKxiExr2Sy2V","source":"dabang","lon":127.046241672,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/lC8elIj9mTXiRUnhMJ2Op","url":"https://www.dabangapp.com/room/69deec60c0690b3f9050a628"},
+{"id":57092021,"total":40,"lat":37.2770857609069,"address":"경기도 수원시 팔달구 우만동","rent":32,"deposit":3000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"4층/4층","title":"ll MoA ll 전속매물o 완전풀옵션o 깔끔내부o 꿀매물o","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/cDLb5hVt2MClScK57t_db","source":"dabang","lon":127.041304515359,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/wEl97XiCyElf3HbqbSJz3","url":"https://www.dabangapp.com/room/6a082e1dabbd750d5a316f80"},
+{"id":57126642,"total":47,"lat":37.2739669010654,"address":"경기도 수원시 영통구 매탄동","rent":35,"deposit":500,"area":16.52,"region":"경기도 수원시 영통구 매탄동","floor":"5층/7층","title":"MOAㅣ갓성비원룸ㅣㅡ햇빛이 쏟아져요ㅡㅣ먼저 선점 하세요ㅣ아주대O","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/pKAxOlJ5BxyVZTqyHFQa0","source":"dabang","lon":127.044771020618,"agency":"모아공인중개사사무소","maint":12,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/B440eLPkr-uNaHfTbZv10","url":"https://www.dabangapp.com/room/6a0bc7e971e82660de8fac69"},
+{"id":57147255,"total":47,"lat":37.2739669010654,"address":"경기도 수원시 영통구 매탄동","rent":35,"deposit":500,"area":19.0,"region":"경기도 수원시 영통구 매탄동","floor":"5층/7층","title":"ll MoA ll 핵저렴o 남향o 채광좋은원룸o 엘베보유o 주차o","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/Raj6Q9SFaKVPrpPVExEvG","source":"dabang","lon":127.044771020618,"agency":"모아공인중개사사무소","maint":12,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/PKcC-LZ-NzLlO84XF_Hgb","url":"https://www.dabangapp.com/room/6a0d390a28f1a22df12e8cdd"},
+{"id":56988525,"total":48,"lat":37.2737940423,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":1000,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"4층/4층","title":"-MoA- 갓성비 최고, 깔끔한 방, 주방 분리형, 빠른 입주 가능","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/HpjkB1YKb3CkWUmFUzN5T","source":"dabang","lon":127.044396587,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/7PFGgZRbsxyuM3MSn7MSe","url":"https://www.dabangapp.com/room/6a0144b408af870cbb18a6ac"},
+{"id":56987973,"total":48,"lat":37.2737940423,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":1000,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"4층/4층","title":"ll MoA ll 분리형원룸o 가성비최고o 깔끔내부o","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/-cociJfnPxjAje52efVDB","source":"dabang","lon":127.044396587,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/p73nOwvfmkaRDWPQtovYk","url":"https://www.dabangapp.com/room/6a0143588a1b4c1b1b0bea3f"},
+{"id":56905523,"total":50,"lat":37.2762024203,"address":"경기도 수원시 팔달구 우만동","rent":35,"deposit":2000,"area":19.83,"region":"경기도 수원시 팔달구 우만동","floor":"2층/4층","title":"MOAㅣ깔끔원룸ㅣㅡ화이트톤 원룸ㅡㅣ안전한매물ㅣ 베란다보유","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/j44f7XwvSf-QdOXDwsdA0","source":"dabang","lon":127.0422150847,"agency":"모아공인중개사사무소","maint":15,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/EiuMeLSxvBIy6hcDGZ_jM","url":"https://www.dabangapp.com/room/69fab1584e46125c8f209f64"},
+{"id":57135585,"total":50,"lat":37.2736355334,"address":"경기도 수원시 영통구 매탄동","rent":41,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"3층/3층","title":"-MoA- 가성비 최고, 넓은 사이즈, 주방 분리형, 베란다까지","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/MvHZDrVExeB-ZFQoycxN1","source":"dabang","lon":127.0441980537,"agency":"모아공인중개사사무소","maint":9,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/GRDEZMmNzrc_RngR9utqs","url":"https://www.dabangapp.com/room/6a0c0ead3969f265149757f7"},
+{"id":57091889,"total":55,"lat":37.2764476249518,"address":"경기도 수원시 팔달구 우만동","rent":45,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/5층","title":"ll MoA ll  초특가o 떳다o 엘베o 가성비최고o","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/uEJpuG54Nkx850StS8Zs6","source":"dabang","lon":127.041872448496,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/fuDmPt1GBdTvHgekVpeoE","url":"https://www.dabangapp.com/room/6a082af3a30ac0641a3266f0"},
+{"id":57057991,"total":55,"lat":37.2764476249518,"address":"경기도 수원시 팔달구 우만동","rent":45,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/6층","title":"-MoA- 떳다 꿀 매물,위치, 구조, 채광, 가성비 모두 최고","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/0YCJ6QwJR39SmV0mlh_jH","source":"dabang","lon":127.041872448496,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/ko3FxzizFg8nGCTkQCHtn","url":"https://www.dabangapp.com/room/6a05844cf5f32e15787c8da0"},
+{"id":57164056,"total":55,"lat":37.2742162698047,"address":"경기도 수원시 영통구 매탄동","rent":50,"deposit":1000,"area":26.44,"region":"경기도 수원시 영통구 매탄동","floor":"2층/4층","title":"MOAㅣ주차가능ㅣㅡ화이트톤 대형 원룸ㅡㅣ베란다ㅣ주방분리형","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/ieHxJtYFrpIhdnEUy1HyF","source":"dabang","lon":127.042931072015,"agency":"모아공인중개사사무소","maint":5,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/D7YC7-6DCa-YebI7TXt5h","url":"https://www.dabangapp.com/room/6a0e91ff424ac10c211b87b9"},
+{"id":57145373,"total":55,"lat":37.2742162698047,"address":"경기도 수원시 영통구 매탄동","rent":50,"deposit":1000,"area":26.44,"region":"경기도 수원시 영통구 매탄동","floor":"2층/4층","title":"-MoA- 왕 넓은 분리형, 채광 최고, 베란다까지, 보증금 조절가능","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/E8ahyGmcf3QT21tDCtUZA","source":"dabang","lon":127.042931072015,"agency":"모아공인중개사사무소","maint":5,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/qMNz7RXH7HZwI1m3F7BIi","url":"https://www.dabangapp.com/room/6a0d24f424493050c94ae78b"},
+{"id":57092103,"total":58,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":48,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"3층/4층","title":"ll MoA ll 남향o 채광좋음o 깔끔한내부o 풀옵션o 학교앞원룸o","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/7wuqWcWoKmBeahQYjl7qf","source":"dabang","lon":127.0448812832,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/K_es1_U5vQOu_ihG0UaY5","url":"https://www.dabangapp.com/room/6a08301105fd4908fe1aa0bd"},
+{"id":56994122,"total":58,"lat":37.2765628250732,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":1000,"area":14.71,"region":"경기도 수원시 팔달구 우만동","floor":"4층/5층","title":"ll MoA ll 아주대원픽o 오피스텔형o 정남향o 엘베o","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/ZHR1k8lpTxC7AvisOvAEs","source":"dabang","lon":127.042246857237,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/iMH91U_bTW4prwXXghNP4","url":"https://www.dabangapp.com/room/6a016619520a5f31459451d8"},
+{"id":57132970,"total":60,"lat":37.2780582800928,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2층/4층","title":"ll MoA ll 채광좋음o 완전깔끔o 넓은구조o 무융자o","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/yGit8ZUYDzg12fvX64Rw2","source":"dabang","lon":127.043000907941,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/KCwaSAAcBGxamcSWlcQbH","url":"https://www.dabangapp.com/room/6a0bfa7773e921031fe06607"},
+{"id":57135022,"total":60,"lat":37.2780582800928,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2층/3층","title":"I MoA I 왕 넓은 분리형, 남향, 학교 정문 도보 4분","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/yVSLjboODioCuMzoDvxP6","source":"dabang","lon":127.043000907941,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/4yNi_OaeYGQ0sJlgQbpqQ","url":"https://www.dabangapp.com/room/6a0c0a5e8797d14ba37b8238"},
+{"id":56480154,"total":63,"lat":37.2759967987,"address":"경기도 수원시 팔달구 우만동","rent":42,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/4층","title":"MoA 리모델링, 깔끔한 컨디션, 채광 좋은 방, 베란다까지","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/3B-KzVOxmkvuzIBu0Qcsa","source":"dabang","lon":127.0427291266,"agency":"모아공인중개사사무소","maint":21,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/DiYHg-DUnx_DWHLWO11Kl","url":"https://www.dabangapp.com/room/69d856283fd32272557d7f94"},
+{"id":56992930,"total":63,"lat":37.2759967987,"address":"경기도 수원시 팔달구 우만동","rent":42,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/4층","title":"MOAㅣ도배장판완료Oㅣㅡ에어컨교체완료ㅡㅣ보안Oㅣ풀옵션O","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/qtcnxJkdpUhoSjmxA4AcL","source":"dabang","lon":127.0427291266,"agency":"모아공인중개사사무소","maint":21,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/0yJOUQdBDkQfZ3dCyRAVH","url":"https://www.dabangapp.com/room/6a015ec14e0dac0de4c0015d"},
+{"id":56988515,"total":63,"lat":37.2743691476369,"address":"경기도 수원시 영통구 원천동","rent":53,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"-MoA- 넓은 사이즈, 주방 분리형, 남동향, 베란다까지","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/4_2u5ZKQ6ZjncR01W-Z1R","source":"dabang","lon":127.048379297994,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/NH1Br2BmdtF73Zy8PeKg2","url":"https://www.dabangapp.com/room/6a0144abaeed4e066c5b71d3"},
+{"id":57016401,"total":63,"lat":37.2743691476369,"address":"경기도 수원시 영통구 원천동","rent":53,"deposit":500,"area":26.44,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"MOAㅣ화장실깔끔Oㅣ주방분리형Oㅣ식당없음Xㅣ부분리모델링Oㅣ꿀매물","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/rT3WWq2xJdcAdHmnX3-lV","source":"dabang","lon":127.048379297994,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/gwPkofdfbPTaB7a0slLmK","url":"https://www.dabangapp.com/room/6a02be54a408c4444451ec3e"},
+{"id":56988512,"total":63,"lat":37.2765628250732,"address":"경기도 수원시 팔달구 우만동","rent":55,"deposit":1000,"area":14.71,"region":"경기도 수원시 팔달구 우만동","floor":"3층/5층","title":"-MoA- 아주대 귀한 신축, 남향, ACE매물, 보증금 조절가능","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/OXCpQFVdY5xVp120e6N8q","source":"dabang","lon":127.042246857237,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/MN7AIGcD5H4Y4-jsrHGzb","url":"https://www.dabangapp.com/room/6a0144a43b7c361ea2570015"},
+{"id":56988464,"total":72,"lat":37.2767283763346,"address":"경기도 수원시 팔달구 우만동","rent":55,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3층/5층","title":"-MoA- 넓은 분리형, 신축급, 아주대 위치 최고","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/bKgWYxYmc8hUar0x2ucJ_","source":"dabang","lon":127.042914457842,"agency":"모아공인중개사사무소","maint":17,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/bOw45_vtE4d6pi5IeOw5V","url":"https://www.dabangapp.com/room/6a0144820b4bb41c9566de01"},
+{"id":56988475,"total":75,"lat":37.2763500584,"address":"경기도 수원시 팔달구 우만동","rent":60,"deposit":1000,"area":26.44,"region":"경기도 수원시 팔달구 우만동","floor":"3층/3층","title":"-MoA- 왕 넓은 분리형, 남향, 빠른 입주 가능, 선착순","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/3f3TS75OFrPOPYin-uCL5","source":"dabang","lon":127.0425850009,"agency":"모아공인중개사사무소","maint":15,"phone":"031-895-6170","img1":"https://d1774jszgerdmk.cloudfront.net/1024/vBVY7kagk_agCDrWtcamy","url":"https://www.dabangapp.com/room/6a014487c58ae90970c08431"},
+{"id":56972396,"total":35,"lat":37.2771319668374,"address":"경기도 수원시 팔달구 우만동","rent":28,"deposit":3000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"4층/5층","title":"아주대 엘베있는 희귀매물 전면도배 착한임대인 가성비굳","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/IMC-Lq-rtR8wwOaQaz1He","source":"dabang","lon":127.043122156792,"agency":"아리수공인중개사사무소","maint":7,"phone":"031-214-2828","img1":"https://d1774jszgerdmk.cloudfront.net/1024/q5GUccbMgsskifhSnHGP9","url":"https://www.dabangapp.com/room/69fedfed338dd2223be16408"},
+{"id":56994013,"total":37,"lat":37.2767241385,"address":"경기도 수원시 영통구 원천동","rent":30,"deposit":3000,"area":16.52,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"무융자건물 분리형 원룸 반전세 리모델링 완료 여학생 추천","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/5HNYuPQIjAdMpmjcD9W5k","source":"dabang","lon":127.0446283274,"agency":"아리수공인중개사사무소","maint":7,"phone":"031-214-2828","img1":"https://d1774jszgerdmk.cloudfront.net/1024/oJMh93Kr8OCjDmfiZgogI","url":"https://www.dabangapp.com/room/6a016562d93b4d32bdd23d7a"},
+{"id":56707762,"total":40,"lat":37.2771319668374,"address":"경기도 수원시 팔달구 우만동","rent":33,"deposit":2000,"area":27.52,"region":"경기도 수원시 팔달구 우만동","floor":"4층/5층","title":"주방분리 깔금원룸 아주대 도보권","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/COMQTjVn7qogK8dOfkPUC","source":"dabang","lon":127.043122156792,"agency":"아리수공인중개사사무소","maint":7,"phone":"031-214-2828","img1":"https://d1774jszgerdmk.cloudfront.net/1024/8ijujCrbDudJuE-yRdbky","url":"https://www.dabangapp.com/room/69e9c6e967e57a14da831caf"},
+{"id":56994501,"total":36,"lat":37.2742973408,"address":"경기도 수원시 영통구 원천동","rent":30,"deposit":300,"area":16.52,"region":"경기도 수원시 영통구 원천동","floor":"4층/5층","title":"가격저렴한 아담싸이즈 원룸","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/kdenPE7Ox_L6QLr8g2WeU","source":"dabang","lon":127.0476982353,"agency":"아주공인중개사사무소","maint":6,"phone":"031-213-9100","img1":"https://d1774jszgerdmk.cloudfront.net/1024/CAKDkWVHmHMQffou1v33k","url":"https://www.dabangapp.com/room/6a01687bb187093b4413a734"},
+{"id":56994494,"total":40,"lat":37.2742504211405,"address":"경기도 수원시 영통구 원천동","rent":32,"deposit":300,"area":19.82,"region":"경기도 수원시 영통구 원천동","floor":"3층/5층","title":"가격저렴한 원룸","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/706d6fb2-6c30-49ab-935b-2861b222ccc3-2","source":"dabang","lon":127.047860567206,"agency":"아주공인중개사사무소","maint":8,"phone":"031-213-9100","img1":"https://d1774jszgerdmk.cloudfront.net/1024/_KtbQthJkce6VzHAzRGyp","url":"https://www.dabangapp.com/room/6a0168751214ec393266b6ee"},
+{"id":56994519,"total":45,"lat":37.2748988521,"address":"경기도 수원시 영통구 원천동","rent":40,"deposit":300,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"3층/4층","title":"깨끗한 원룸","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/1WeZ8F0ECr0GOOjMjH4cw","source":"dabang","lon":127.0486412216,"agency":"아주공인중개사사무소","maint":5,"phone":"031-213-9100","img1":"https://d1774jszgerdmk.cloudfront.net/1024/OFShbD0IxkcoXnS7FK1W6","url":"https://www.dabangapp.com/room/6a016896e4257d3929951d98"},
+{"id":56994610,"total":46,"lat":37.2754401715488,"address":"경기도 수원시 영통구 원천동","rent":40,"deposit":3000,"area":30.0,"region":"경기도 수원시 영통구 원천동","floor":"1층/4층","title":"깨끗하고 넓은 남향1층","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/eoKx2Hntl-P0yNLXWGPKa","source":"dabang","lon":127.046918706818,"agency":"아주공인중개사사무소","maint":6,"phone":"031-213-9100","img1":"https://d1774jszgerdmk.cloudfront.net/1024/7kxswKZhN0FFvRnvzkL7-","url":"https://www.dabangapp.com/room/6a01691095cc1a3929221682"},
+{"id":56636363,"total":58,"lat":37.2762024203,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":1000,"area":25.95,"region":"경기도 수원시 팔달구 우만동","floor":"중층/3층","title":"에이벨 I 원룸 풀옵션 매물이 나오면 바로 나가는 초인기 매물","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/u6gS0z0I9fTPD0OjZjCK2","source":"dabang","lon":127.0422150847,"agency":"에이벨공인중개사사무소","maint":8,"phone":"031-238-8858","img1":"https://d1774jszgerdmk.cloudfront.net/1024/5MhqBE-VAvrMJkxbFXuOy","url":"https://www.dabangapp.com/room/69e585f58bbcb13719bf7136"},
+{"id":56200881,"total":43,"lat":37.2794315983,"address":"경기도 수원시 팔달구 우만동","rent":38,"deposit":300,"area":19.0,"region":"경기도 수원시 팔달구 우만동","floor":"1층/2층","title":"ㅁ일등ㅁ 아주대 2분 가성비 원룸","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/-44Dn26Iv7gHp6ne9ix4L","source":"dabang","lon":127.0426318404,"agency":"일등공인중개사사무소","maint":5,"phone":"031-215-0017","img1":"https://d1774jszgerdmk.cloudfront.net/1024/qXR-YPFebJ94q2JiljtM2","url":"https://www.dabangapp.com/room/69c383bb828e566204534706"},
+{"id":57067568,"total":50,"lat":37.2796191456,"address":"경기도 수원시 팔달구 우만동","rent":41,"deposit":500,"area":21.0,"region":"경기도 수원시 팔달구 우만동","floor":"4층/4층","title":"ㅁ일등ㅁ 아주대 1분 테라스가 있는 환한 방","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/c6481650-a861-4c07-a2c7-df437c17d768","source":"dabang","lon":127.0422666068,"agency":"일등공인중개사사무소","maint":9,"phone":"031-215-0017","img1":"https://d1774jszgerdmk.cloudfront.net/1024/1266042d-d074-4d07-aaa4-954713b034db","url":"https://www.dabangapp.com/room/6a0686f065766f4efaa03d34"},
+{"id":56845339,"total":47,"lat":37.2737506888532,"address":"경기도 수원시 영통구 매탄동","rent":40,"deposit":300,"area":27.0,"region":"경기도 수원시 영통구 매탄동","floor":"3층/4층","title":"구조좋은원룸아주대삼거리대로변에서 구매탄시장후문방향","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/250ce4a8-b423-4607-b14c-3c7060da7d5a","source":"dabang","lon":127.044671672315,"agency":"징검다리공인중개사사무소","maint":7,"phone":"031-213-5400","img1":"https://d1774jszgerdmk.cloudfront.net/1024/71c999dd-a7ca-4efa-8fe8-489108b041f7","url":"https://www.dabangapp.com/room/69f55163dda2ef66d08ccec6"},
+{"id":57084119,"total":50,"lat":37.2737329883,"address":"경기도 수원시 영통구 매탄동","rent":42,"deposit":500,"area":26.44,"region":"경기도 수원시 영통구 매탄동","floor":"2층/4층","title":"주방분리,베란다 아주대삼거리대로변에서 구매탄시장후문방향","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/fa1dcc3e-22fe-4ed5-89b8-214bfd95f7d5","source":"dabang","lon":127.0438147598,"agency":"징검다리공인중개사사무소","maint":8,"phone":"031-213-5400","img1":"https://d1774jszgerdmk.cloudfront.net/1024/724443fa-d74a-4b8f-b73d-3e8719b3a538","url":"https://www.dabangapp.com/room/6a07d60433cfb95f9b1938a1"},
+{"id":57163424,"total":50,"lat":37.2779538624,"address":"경기도 수원시 팔달구 우만동","rent":42,"deposit":3000,"area":29.75,"region":"경기도 수원시 팔달구 우만동","floor":"2층/3층","title":"+포돌이 추천+ 아주대 인근 넓은 분리형 풀옵션 깔끔 원룸","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/9rkkoFM0zRDVipNHB-Gp-","source":"dabang","lon":127.042716702,"agency":"포돌이부동산공인중개사사무소","maint":8,"phone":"010-3091-0527","img1":"https://d1774jszgerdmk.cloudfront.net/1024/uupJQZQ0RNH3ZKyHX66z6","url":"https://www.dabangapp.com/room/6a0e8bfbe11a7f6bc3421747"},
+{"id":57161205,"total":58,"lat":37.2762024203,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":1000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"+포돌이 추천+ 1층인데 2층 느낌 풀옵션 넓은 원룸","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/H9vgCdkn5TxJRpBHSFzr3","source":"dabang","lon":127.0422150847,"agency":"포돌이부동산공인중개사사무소","maint":8,"phone":"010-3091-0527","img1":"https://d1774jszgerdmk.cloudfront.net/1024/bcLR4YNLL6eahoHtencOj","url":"https://www.dabangapp.com/room/6a0e74e8b1c8380858ebc792"}];
+const SOURCE = "dabang";
+const ACCENT = "#FF5C38";
+
+(function() {
+  // Mark active nav
+  document.querySelectorAll('nav a[data-src]').forEach(a => {
+    if (a.dataset.src === SOURCE) a.classList.add('active-nav');
+  });
+
+  // Populate type filter
+  const types = [...new Set(DATA.map(r => r.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
+  const sel = document.getElementById('typeFilter');
+  types.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  });
+
+  // Map init
+  const ajouLat = 37.2785, ajouLon = 127.0434;
+  const mapCenter = DATA.some(r => r.lat && r.lat > 37.3) ? [37.365, 127.11] : [ajouLat, ajouLon];
+  const map = L.map('map').setView(mapCenter, 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19
+  }).addTo(map);
+
+  if (mapCenter[0] === ajouLat) {
+    L.marker([ajouLat, ajouLon]).addTo(map)
+      .bindPopup('<b>아주대학교 정문</b>');
+  }
+
+  const allMarkers = [];
+  DATA.forEach(r => {
+    if (!r.lat || !r.lon || r.lat === 0 || r.lon === 0) return;
+    const m = L.circleMarker([r.lat, r.lon], {
+      radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
+    }).addTo(map);
+
+    const imgHtml = r.img1
+      ? `<img class="popup-img" src="${r.img1}" onerror="this.style.display='none'">`
+      : '';
+    const agencyLabel = SOURCE === 'daangn'
+      ? (r.agency === 'DIRECT' ? '직거래' : '중개사')
+      : (r.agency || '');
+
+    m.bindPopup(`<div class="popup-title">${r.title || ''}</div>
+${imgHtml}
+<div class="popup-price">보 ${fmtDeposit(r.deposit)} / 월 ${fmtRent(r.rent)}</div>
+<div class="popup-meta">관리비 ${fmtRent(r.maint)} &nbsp;|&nbsp; 총 <b>${fmtRent(r.total)}</b></div>
+<div class="popup-meta">${r.type || ''} &nbsp;|&nbsp; ${r.floor || ''}</div>
+<div class="popup-meta">${agencyLabel}${r.phone ? ' ' + r.phone : ''}</div>
+<div class="popup-meta" style="word-break:break-all">${r.address || r.region || ''}</div>
+<div style="margin-top:6px">
+  <a href="${r.url}" target="_blank" class="link-btn">매물 보기 →</a>
+</div>`);
+
+    allMarkers.push({ marker: m, data: r });
+  });
+
+  // Sorting state
+  let sortCol = 'rent', sortAsc = true;
+
+  function fmtDeposit(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '억';
+    return v + '만';
+  }
+  function fmtRent(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    return v + '만';
+  }
+  function fmtArea(v) {
+    if (!v && v !== 0) return '-';
+    const n = parseFloat(v);
+    if (isNaN(n)) return v || '-';
+    return n.toFixed(1) + 'm²';
+  }
+  // Expose fmtDeposit/fmtRent for popup closures
+  window.fmtDeposit = fmtDeposit;
+  window.fmtRent = fmtRent;
+
+  function sortArr(arr) {
+    return [...arr].sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va === null || va === undefined) va = sortAsc ? Infinity : -Infinity;
+      if (vb === null || vb === undefined) vb = sortAsc ? Infinity : -Infinity;
+      if (typeof va === 'string') return sortAsc ? va.localeCompare(vb, 'ko') : vb.localeCompare(va, 'ko');
+      return sortAsc ? va - vb : vb - va;
+    });
+  }
+
+  function getFiltered() {
+    const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 99999;
+    const maxRent = parseFloat(document.getElementById('maxRent').value) || 9999;
+    const type    = document.getElementById('typeFilter').value;
+    const q       = document.getElementById('search').value.toLowerCase();
+    return DATA.filter(r => {
+      if (r.deposit !== null && r.deposit !== undefined && r.deposit > maxDep) return false;
+      if (r.rent    !== null && r.rent    !== undefined && r.rent    > maxRent) return false;
+      if (type && r.type !== type) return false;
+      if (q) {
+        const hay = [r.title, r.address, r.region, r.agency, r.type].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function render() {
+    const filtered = sortArr(getFiltered());
+    document.getElementById('countLabel').textContent = filtered.length + '건';
+
+    const visibleIds = new Set(filtered.map(r => r.id));
+    allMarkers.forEach(({ marker, data }) => {
+      if (visibleIds.has(data.id)) {
+        marker.setStyle({ fillOpacity: 0.85, opacity: 1 });
+      } else {
+        marker.setStyle({ fillOpacity: 0.1, opacity: 0.2 });
+      }
+    });
+
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    filtered.forEach(r => {
+      const agencyLabel = SOURCE === 'daangn'
+        ? (r.agency === 'DIRECT' ? '직거래' : '중개사')
+        : (r.agency || '-');
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = r.img1
+        ? `<td><img class="img-thumb" src="${r.img1}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'no-img\\'>사진없음</div>'"></td>`
+        : `<td><div class="no-img">사진<br>없음</div></td>`;
+      tr.innerHTML += `
+        <td class="price">${fmtDeposit(r.deposit)}</td>
+        <td class="price">${fmtRent(r.rent)}</td>
+        <td>${fmtRent(r.maint)}</td>
+        <td class="total-price">${fmtRent(r.total)}</td>
+        <td>${r.type || '-'}</td>
+        <td>${fmtArea(r.area)}</td>
+        <td>${r.floor || '-'}</td>
+        <td style="max-width:160px;word-break:break-all;font-size:12px">${r.address || r.region || '-'}</td>
+        <td class="agency-cell">${agencyLabel}${r.phone ? '<br><span class="phone">' + r.phone + '</span>' : ''}</td>
+        <td><a href="${r.url}" target="_blank" class="link-btn">보기</a></td>`;
+
+      tr.addEventListener('click', e => {
+        if (e.target.tagName === 'A') return;
+        const m = allMarkers.find(x => x.data.id === r.id);
+        if (m && r.lat && r.lon) {
+          map.flyTo([r.lat, r.lon], 17, { duration: 0.6 });
+          m.marker.openPopup();
+        }
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Sort on header click
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = (th.dataset.num === '1'); // numeric: ascending first; text: ascending first
+      }
+      document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
+      th.classList.add('sorted');
+      render();
+    });
+  });
+
+  ['maxDeposit', 'maxRent', 'typeFilter', 'search'].forEach(id => {
+    document.getElementById(id).addEventListener('input', render);
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

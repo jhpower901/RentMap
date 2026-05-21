@@ -1,0 +1,395 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>네이버부동산 - 아주대 월세 매물</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f0f0f0}
+nav a.active-nav{background:#222 !important;color:#fff !important}
+.page{max-width:1440px;margin:0 auto;padding:16px}
+h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.badge-dabang{background:#FF5C38}
+.badge-daangn{background:#FF6F00}
+.badge-zigbang{background:#6366F1}
+.badge-naver{background:#03C75A}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
+.controls label{font-size:13px;display:flex;align-items:center;gap:4px}
+.controls input[type=number]{width:74px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
+.controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
+.count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
+.layout{display:grid;grid-template-columns:1fr 400px;gap:14px;align-items:start}
+@media(max-width:960px){.layout{grid-template-columns:1fr}}
+.map-box{height:520px;border-radius:10px;overflow:hidden;border:1px solid #ddd;position:sticky;top:60px}
+.table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
+table{width:100%;border-collapse:collapse;background:#fff;min-width:780px}
+th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid #e0e0e0}
+th:hover{background:#e4e4e4}
+th .sort-arrow{font-size:10px;margin-left:2px;opacity:0.5}
+th.sorted .sort-arrow{opacity:1;color:#03C75A}
+td{padding:7px 10px;border-top:1px solid #f0f0f0;vertical-align:middle;font-size:13px}
+tr:hover td{background:#fafafa;cursor:pointer}
+.img-thumb{width:68px;height:51px;object-fit:cover;border-radius:5px}
+.no-img{width:68px;height:51px;background:#eee;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#aaa;text-align:center;line-height:1.3}
+.price{font-weight:600}
+.total-price{color:#c00;font-weight:700}
+.agency-cell{font-size:12px;line-height:1.5;max-width:140px}
+.phone{color:#666;font-size:11px}
+.link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
+.link-btn:hover{background:#eee}
+.note-warn{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6}
+.leaflet-popup-content{font-size:13px;line-height:1.7;min-width:210px;max-width:260px}
+.popup-title{font-weight:700;margin-bottom:4px;font-size:14px;line-height:1.4}
+.popup-price{color:#c00;font-weight:700;font-size:15px}
+.popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
+.popup-meta{color:#555;font-size:12px}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">🏠 아주대 월세</span>
+  <a href="index.html">지도 전체</a>
+  <a href="dabang.html" data-src="dabang"><span class="badge badge-dabang">다방</span></a>
+  <a href="daangn.html" data-src="daangn"><span class="badge badge-daangn">당근</span></a>
+  <a href="zigbang.html" data-src="zigbang"><span class="badge badge-zigbang">직방</span></a>
+  <a href="naver.html" data-src="naver"><span class="badge badge-naver">네이버</span></a>
+</nav>
+<div class="page">
+  <h1>
+    <span class="badge badge-naver" style="font-size:15px;padding:5px 14px">네이버부동산</span>
+    매물 목록
+  </h1>
+  <div class="note-warn">⚠️ <b>주의:</b> 네이버부동산 크롤링 데이터는 아주대 정문 근처가 아닌 <b>분당 정자역 일대</b> 매물을 포함합니다. 지도가 분당 지역을 중심으로 표시됩니다.</div>
+  <div class="controls">
+    <label>보증금 최대
+      <input type="number" id="maxDeposit" value="3000" min="0" max="10000" step="100"> 만원
+    </label>
+    <label>월세 최대
+      <input type="number" id="maxRent" value="60" min="0" max="200" step="5"> 만원
+    </label>
+    <label>방 유형
+      <select id="typeFilter"><option value="">전체</option></select>
+    </label>
+    <input type="text" id="search" placeholder="검색 (지역·중개사무소·제목)..." style="min-width:180px">
+    <span class="count" id="countLabel">0건</span>
+  </div>
+  <div class="layout">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:76px">사진</th>
+            <th data-col="deposit" data-num="1">보증금<span class="sort-arrow">▼</span></th>
+            <th data-col="rent" data-num="1" class="sorted">월세<span class="sort-arrow">▼</span></th>
+            <th data-col="maint" data-num="1">관리비<span class="sort-arrow">▼</span></th>
+            <th data-col="total" data-num="1">총월납부<span class="sort-arrow">▼</span></th>
+            <th data-col="type">방유형<span class="sort-arrow">▼</span></th>
+            <th data-col="area">면적<span class="sort-arrow">▼</span></th>
+            <th data-col="floor">층<span class="sort-arrow">▼</span></th>
+            <th data-col="address">주소<span class="sort-arrow">▼</span></th>
+            <th data-col="agency">중개사무소<span class="sort-arrow">▼</span></th>
+            <th>링크</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div>
+      <div class="map-box" id="map"></div>
+    </div>
+  </div>
+</div>
+<script>
+const DATA = [{"id":2626909845,"total":95,"lat":37.361863,"address":"정자푸르지오시티3차","rent":95,"deposit":1000,"area":"63/25","region":"","floor":"고/29","title":"19 주인직 남향 밝고 조용한 조망 입주협의","type":"오피스텔","img2":"","source":"naver","lon":127.105227,"agency":"개포명성부동산공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260518_94/1779077299895RvVEf_JPEG/2626909845_20260518130818841152.jpg","url":"https://new.land.naver.com/rooms?articleNo=2626909845"},
+{"id":2625732180,"total":55,"lat":37.372926,"address":"일반원룸","rent":55,"deposit":5000,"area":"25/25","region":"","floor":"2/3","title":"o고래o l 원룸 l 분리형 l 완전깔끔 l 바로입주","type":"원룸","img2":"","source":"naver","lon":127.112653,"agency":"고래부동산공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260512_155/1778548173903qECeG_JPEG/2625732180_20260512100930315908.jpg","url":"https://new.land.naver.com/rooms?articleNo=2625732180"},
+{"id":2627249655,"total":65,"lat":37.372124,"address":"일반원룸","rent":65,"deposit":1000,"area":"23/23","region":"","floor":"4/4","title":"옥탑 분리형 풀옵션원룸 7월초협의","type":"원룸","img2":"","source":"naver","lon":127.113365,"agency":"까치공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627249655"},
+{"id":2627576850,"total":70,"lat":37.369606,"address":"일반원룸","rent":70,"deposit":2000,"area":"23/23","region":"","floor":"3/4","title":"방큼 풀옵션원룸 도배 입주청소완료  정자역7분경","type":"원룸","img2":"","source":"naver","lon":127.113762,"agency":"까치공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627576850"},
+{"id":2627386392,"total":90,"lat":37.370213,"address":"단독","rent":90,"deposit":2000,"area":"49/49","region":"","floor":"2/3","title":"빠른입주 수리 깨끗 정자역7분경","type":"단독/다가구","img2":"","source":"naver","lon":127.112237,"agency":"까치공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627386392"},
+{"id":2625889592,"total":null,"lat":37.364111,"address":"한솔6단지주공","rent":null,"deposit":40000,"area":"53/37","region":"","floor":"2/15","title":"한솔6단지주공","type":"아파트","img2":"","source":"naver","lon":127.115338,"agency":"대박(031-706-8945)공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2625889592"},
+{"id":2626893812,"total":null,"lat":37.364373,"address":"한솔6단지주공","rent":null,"deposit":43000,"area":"57/39","region":"","floor":"17/20","title":"18.샷시포함 특올수리후 첫입주.입주일협의.융무","type":"아파트","img2":"","source":"naver","lon":127.116644,"agency":"대박공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2626893812"},
+{"id":2627587573,"total":90,"lat":37.362569,"address":"정자푸르지오시티3차","rent":90,"deposit":1000,"area":"62/25","region":"","floor":"16/34","title":"깨끗 양창 전망굿 사업자","type":"오피스텔","img2":"","source":"naver","lon":127.105704,"agency":"대우드림공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627587573"},
+{"id":2627548888,"total":80,"lat":37.365562,"address":"한솔1단지청구","rent":80,"deposit":37000,"area":"64/49","region":"","floor":"13/14","title":"정상 특올수리 조용하고 전망좋은동 주차편리","type":"아파트","img2":"","source":"naver","lon":127.121496,"agency":"럭키공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627548888"},
+{"id":2627499421,"total":80,"lat":37.365562,"address":"한솔1단지청구","rent":80,"deposit":37000,"area":"64/49","region":"","floor":"13/14","title":"입주협의. 특올수리. 정자역이용편리. 전망굿","type":"아파트","img2":"","source":"naver","lon":127.121496,"agency":"매일공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627499421"},
+{"id":2627456387,"total":110,"lat":37.361853,"address":"정자역엠코헤리츠4단지","rent":110,"deposit":1000,"area":"69/29","region":"","floor":"6/12","title":"즉시입주가능한 남향집  단기임대도 가능입니다","type":"오피스텔","img2":"","source":"naver","lon":127.106277,"agency":"명문루체공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627456387"},
+{"id":2627265592,"total":55,"lat":37.358532,"address":"단독","rent":55,"deposit":1000,"area":"24/24","region":"","floor":"1/3","title":"분리형 원룸,풀옵션,마을입구","type":"단독/다가구","img2":"","source":"naver","lon":127.122643,"agency":"명심공인중개사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260519_41/1779179454488h8LPG_JPEG/2627265592_20260519173052872327.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627265592"},
+{"id":2627246402,"total":90,"lat":37.371474,"address":"다가구","rent":90,"deposit":4000,"area":"52/46","region":"","floor":"2/3","title":"투룸월세, 올수리, 6월중","type":"단독/다가구","img2":"","source":"naver","lon":127.115324,"agency":"미래공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627246402"},
+{"id":2627613774,"total":15,"lat":37.361863,"address":"정자푸르지오시티3차","rent":15,"deposit":18900,"area":"61/24","region":"","floor":"25/29","title":"주거용 전입신고 보증보험 융자무 전망 풀옵션","type":"오피스텔","img2":"","source":"naver","lon":127.105227,"agency":"믿음엠코공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_229/1779345476958D9I2E_JPEG/2627613774_20260521153755977236.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627613774"},
+{"id":2627629499,"total":90,"lat":37.362569,"address":"정자푸르지오시티3차","rent":90,"deposit":1000,"area":"61/24","region":"","floor":"16/34","title":"풀옵션 사업자월세 부가세별도 전입X 전망","type":"오피스텔","img2":"","source":"naver","lon":127.105704,"agency":"믿음엠코공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627629499"},
+{"id":2627558032,"total":90,"lat":37.362569,"address":"정자푸르지오시티3차","rent":90,"deposit":1000,"area":"62/25","region":"","floor":"16/34","title":"사업자월세,부가세별도,풀옵션,전입X,전망","type":"오피스텔","img2":"","source":"naver","lon":127.105704,"agency":"믿음엠코공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627558032"},
+{"id":2627368468,"total":100,"lat":37.368183,"address":"정자푸르지오시티2차","rent":100,"deposit":1000,"area":"74/30","region":"","floor":"14/20","title":"전입 보조정가 4천95도 융무 남향","type":"오피스텔","img2":"","source":"naver","lon":127.105705,"agency":"백궁파라곤공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627368468"},
+{"id":2627239919,"total":65,"lat":37.372124,"address":"일반원룸","rent":65,"deposit":1000,"area":"23/23","region":"","floor":"3/3","title":"상태 좋은 넓은 분리형 원룸, 입주 협의","type":"원룸","img2":"","source":"naver","lon":127.113365,"agency":"백현공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627239919"},
+{"id":2627617997,"total":60,"lat":37.362311,"address":"정자푸르지오시티3차","rent":60,"deposit":12000,"area":"61/24","region":"","floor":"고/34","title":"귀한동향,이중창전망깨끗 18타입 전입 융무 전체풀옵션 정자역5분 주차편리","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"부동산1번지훼미리공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627617997"},
+{"id":2627273569,"total":20,"lat":37.368321,"address":"정자역AK와이즈플레이스","rent":20,"deposit":22900,"area":"64/26","region":"","floor":"22/29","title":"19, 개인, 보증보험, 허그버팀목대출가, 전망굿, 7월 말 입주협의","type":"오피스텔","img2":"","source":"naver","lon":127.104845,"agency":"분당공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627273569"},
+{"id":2627271964,"total":null,"lat":37.364111,"address":"한솔6단지주공","rent":null,"deposit":40000,"area":"53/37","region":"","floor":"2/15","title":"빠른입주가능 전세자금대출가능","type":"아파트","img2":"","source":"naver","lon":127.115338,"agency":"분당공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627271964"},
+{"id":2627302092,"total":null,"lat":37.368321,"address":"정자역AK와이즈플레이스","rent":null,"deposit":27000,"area":"64/26","region":"","floor":"22/29","title":"19, 개인, 전망굿, 완전깨끗,7월 말 입주협의","type":"오피스텔","img2":"","source":"naver","lon":127.104845,"agency":"분당공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627302092"},
+{"id":2627383515,"total":null,"lat":37.361395,"address":"단독","rent":null,"deposit":24000,"area":"47/42","region":"","floor":"2/4","title":"하시,서북향,수리깨끗,전세자금대출X,조용,정자역도보15분","type":"단독/다가구","img2":"","source":"naver","lon":127.114138,"agency":"분당공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_276/1779250850366TdVaj_JPEG/2627383515_20260520132048720198.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627383515"},
+{"id":2627262211,"total":80,"lat":37.366315,"address":"분당인텔리지2","rent":80,"deposit":1000,"area":"64/34","region":"","floor":"8/35","title":"정자역 사업자월세 6월20일 전입불가","type":"오피스텔","img2":"","source":"naver","lon":127.105377,"agency":"분당푸르지오공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627262211"},
+{"id":2627615196,"total":90,"lat":37.362569,"address":"정자푸르지오시티3차","rent":90,"deposit":1000,"area":"62/25","region":"","floor":"16/34","title":"사업자월세, 전입불가, 전망, 편리한주차","type":"오피스텔","img2":"","source":"naver","lon":127.105704,"agency":"분당푸르지오공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627615196"},
+{"id":2627607213,"total":150,"lat":37.366137,"address":"분당인텔리지2","rent":150,"deposit":200,"area":"71/38","region":"","floor":"34/35","title":"정자역풀옵션단기,2개월이상,5월말부터","type":"오피스텔","img2":"","source":"naver","lon":127.105639,"agency":"분당푸르지오공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627607213"},
+{"id":2627543272,"total":null,"lat":37.363097,"address":"대림아크로텔","rent":null,"deposit":20000,"area":"58/30","region":"","floor":"6/10","title":"내부컨디션깨끗하고좋아요,법인소유,전입가능","type":"오피스텔","img2":"","source":"naver","lon":127.107594,"agency":"비젼공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627543272"},
+{"id":2627640440,"total":10,"lat":37.362311,"address":"정자푸르지오시티3차","rent":10,"deposit":21200,"area":"61/24","region":"","floor":"31/34","title":"고층8월입주가능 전망좋고 깨끗한집","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"산야공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627640440"},
+{"id":2627564710,"total":65,"lat":37.372124,"address":"일반원룸","rent":65,"deposit":1000,"area":"26/26","region":"","floor":"3/3","title":"정자역과 수내역사이 탑층 원룸입니다","type":"원룸","img2":"","source":"naver","lon":127.113365,"agency":"삼성1공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_237/1779337022386G0h1c_JPEG/2627564710_20260521131701331718.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627564710"},
+{"id":2627377103,"total":50,"lat":37.373299,"address":"일반원룸","rent":50,"deposit":1000,"area":"21/21","region":"","floor":"1/3","title":"리모델링된 원룸,세탁기없음.빠른입주가능","type":"원룸","img2":"","source":"naver","lon":127.113173,"agency":"상록공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627377103"},
+{"id":2627375093,"total":50,"lat":37.369994,"address":"단독","rent":50,"deposit":500,"area":"21/21","region":"","floor":"1/3","title":"정자역도보권. 빠른입주가능","type":"단독/다가구","img2":"","source":"naver","lon":127.110448,"agency":"상록공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_78/1779250456834Q30dH_JPEG/2627375093_20260520131408457784.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627375093"},
+{"id":2627476267,"total":60,"lat":37.373219,"address":"기타","rent":60,"deposit":1000,"area":"21/21","region":"","floor":"5/5","title":"보증금조정가능,깔끔한 원룸.","type":"원룸","img2":"","source":"naver","lon":127.11431,"agency":"상록공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627476267"},
+{"id":2627627218,"total":null,"lat":37.368209,"address":"한솔4단지주공","rent":null,"deposit":40000,"area":"57/41","region":"","floor":"12/15","title":"샤시 포함 특 올수리,  남향","type":"아파트","img2":"","source":"naver","lon":127.117604,"agency":"상록공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627627218"},
+{"id":2627199211,"total":80,"lat":37.363097,"address":"대림아크로텔","rent":80,"deposit":2000,"area":"64/34","region":"","floor":"8/10","title":"사업자, 부가세별도, 세금계산서발행, 내부깨끗","type":"오피스텔","img2":"","source":"naver","lon":127.107594,"agency":"시티공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627199211"},
+{"id":2627188610,"total":60,"lat":37.371253,"address":"일반원룸","rent":60,"deposit":1000,"area":"23/23","region":"","floor":"4/4","title":"정자역10분 분리형 원룸 풀옵션  26.7.9부터입주","type":"원룸","img2":"","source":"naver","lon":127.11308,"agency":"신좋은집공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627188610"},
+{"id":2626519584,"total":null,"lat":37.364373,"address":"한솔6단지주공","rent":null,"deposit":43000,"area":"57/39","region":"","floor":"17/20","title":"샷시포함전체특올수리.융무. 바로입주가능함","type":"아파트","img2":"","source":"naver","lon":127.116644,"agency":"신한공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2626519584"},
+{"id":2627310295,"total":null,"lat":37.364373,"address":"한솔6단지주공","rent":null,"deposit":43000,"area":"57/39","region":"","floor":"17/20","title":"샷시포함전체특올수리 남향 전망최고","type":"아파트","img2":"","source":"naver","lon":127.116644,"agency":"신화공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627310295"},
+{"id":2627506037,"total":null,"lat":37.368203,"address":"백궁동양파라곤","rent":null,"deposit":39000,"area":"83/44","region":"","floor":"30/32","title":"25  하시입주 원목교체 도배 및 일부수리함 전망최고 교통편리","type":"오피스텔","img2":"","source":"naver","lon":127.106845,"agency":"엘리트공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627506037"},
+{"id":2627175520,"total":90,"lat":37.362268,"address":"정자역엠코헤리츠3단지","rent":90,"deposit":2000,"area":"58/25","region":"","floor":"9/12","title":"20p, 원룸타입, 전입가능, 대출없음, 6월말입주가능","type":"오피스텔","img2":"","source":"naver","lon":127.106306,"agency":"엠코 해마루공인중개사","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260519_259/1779163777750mx8aE_JPEG/2627175520_20260519130936249723.JPG","url":"https://new.land.naver.com/rooms?articleNo=2627175520"},
+{"id":2627309851,"total":82,"lat":37.362311,"address":"정자푸르지오시티3차","rent":82,"deposit":1000,"area":"61/24","region":"","floor":"4/34","title":"사업자 부가세별도 융무","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"엠코스타파크공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627309851"},
+{"id":2627534594,"total":10,"lat":37.361875,"address":"정자역엠코헤리츠4단지","rent":10,"deposit":23100,"area":"69/29","region":"","floor":"3/12","title":"개인 보증보험 전세자금대출 가능","type":"오피스텔","img2":"","source":"naver","lon":127.106751,"agency":"엠코탑공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627534594"},
+{"id":2627401334,"total":10,"lat":37.361853,"address":"정자역엠코헤리츠4단지","rent":10,"deposit":23100,"area":"69/29","region":"","floor":"3/12","title":"전세자금대출  보증보험가입 가능한 매물 ","type":"오피스텔","img2":"","source":"naver","lon":127.106277,"agency":"엠코탑공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627401334"},
+{"id":2626903433,"total":92,"lat":37.36228,"address":"정자역엠코헤리츠3단지","rent":92,"deposit":1000,"area":"58/25","region":"","floor":"10/12","title":"임대인개인 융무 고층동향","type":"오피스텔","img2":"","source":"naver","lon":127.106768,"agency":"엠코헤리츠 공인중개사","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260518_116/1779072556928zmwfl_JPEG/2626903433_20260518114915993603.jpg","url":"https://new.land.naver.com/rooms?articleNo=2626903433"},
+{"id":2626480812,"total":92,"lat":37.363006,"address":"정자역엠코헤리츠1단지","rent":92,"deposit":1000,"area":"58/25","region":"","floor":"9/14","title":"동향 트인전망 6월말 상태최고","type":"오피스텔","img2":"","source":"naver","lon":127.106297,"agency":"엠코헤리츠 공인중개사","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260515_172/1778817817412GyWnr_JPEG/2626480812_20260515130336714485.jpg","url":"https://new.land.naver.com/rooms?articleNo=2626480812"},
+{"id":2626904677,"total":100,"lat":37.362686,"address":"정자역엠코헤리츠2단지","rent":100,"deposit":1000,"area":"68/29","region":"","floor":"5/12","title":"빠른입주가능  전입 동향 임대인개인","type":"오피스텔","img2":"","source":"naver","lon":127.10682,"agency":"엠코헤리츠 공인중개사","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260518_52/1779072618428dqnt3_JPEG/2626904677_20260518115017475662.jpg","url":"https://new.land.naver.com/rooms?articleNo=2626904677"},
+{"id":2627169207,"total":130,"lat":37.363006,"address":"정자역엠코헤리츠1단지","rent":130,"deposit":150,"area":"68/29","region":"","floor":"6/14","title":"단기 5월26일부터 남향 3개월기준","type":"오피스텔","img2":"","source":"naver","lon":127.106297,"agency":"엠코헤리츠 공인중개사","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260519_178/1779163347049SwAXy_JPEG/2627169207_20260519130225663916.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627169207"},
+{"id":2627640410,"total":40,"lat":37.372911,"address":"일반원룸","rent":40,"deposit":8000,"area":"24/24","region":"","floor":"3/3","title":"코너집,분리형원룸,밝고 환한집","type":"원룸","img2":"","source":"naver","lon":127.113034,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627640410"},
+{"id":2627639963,"total":40,"lat":37.372876,"address":"일반원룸","rent":40,"deposit":15000,"area":"49/48","region":"","floor":"2/3","title":"정자역8분수내역8분,방2화1","type":"원룸","img2":"","source":"naver","lon":127.113275,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627639963"},
+{"id":2627417507,"total":40,"lat":37.372876,"address":"일반원룸","rent":40,"deposit":15000,"area":"46/45","region":"","floor":"2/3","title":"정자역8분수내역8분.백현초","type":"원룸","img2":"","source":"naver","lon":127.113275,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627417507"},
+{"id":2627418079,"total":40,"lat":37.372926,"address":"일반원룸","rent":40,"deposit":8000,"area":"25/24","region":"","floor":"3/3","title":"일반원룸","type":"원룸","img2":"","source":"naver","lon":127.112653,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627418079"},
+{"id":2627417993,"total":45,"lat":37.372926,"address":"일반원룸","rent":45,"deposit":7000,"area":"25/24","region":"","floor":"2/3","title":"일반원룸","type":"원룸","img2":"","source":"naver","lon":127.112653,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_11/1779258877311y9dOd_JPEG/2627417993_20260520153434965548.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627417993"},
+{"id":2627417635,"total":50,"lat":37.36907,"address":"일반원룸","rent":50,"deposit":1000,"area":"25/24","region":"","floor":"B1/3","title":"정자역초역세권,탄천,올수리,분리형","type":"원룸","img2":"","source":"naver","lon":127.110458,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_203/1779258807870z2pgo_JPEG/2627417635_20260520153326787361.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627417635"},
+{"id":2627417873,"total":55,"lat":37.372926,"address":"일반원룸","rent":55,"deposit":5000,"area":"26/25","region":"","floor":"2/3","title":"일반원룸","type":"원룸","img2":"","source":"naver","lon":127.112653,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_15/1779258802879s3N9L_JPEG/2627417873_20260520153321283262.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627417873"},
+{"id":2627418283,"total":60,"lat":37.369991,"address":"일반원룸","rent":60,"deposit":1000,"area":"25/24","region":"","floor":"2/3","title":"정자역8분 탄천 양창이라 환기잘됨","type":"원룸","img2":"","source":"naver","lon":127.110302,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627418283"},
+{"id":2627343169,"total":65,"lat":37.369251,"address":"단독","rent":65,"deposit":2000,"area":"29/29","region":"","floor":"3/3","title":"정자역7분내, 수리, 6월중순,  분리형방 구조좋아요","type":"단독/다가구","img2":"","source":"naver","lon":127.114046,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627343169"},
+{"id":2627343450,"total":65,"lat":37.371814,"address":"단독","rent":65,"deposit":2000,"area":"46/45","region":"","floor":"B1/3","title":"밝은지층,에어컨 옵션,도배,장판,LED등 교체","type":"단독/다가구","img2":"","source":"naver","lon":127.114943,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627343450"},
+{"id":2627642752,"total":80,"lat":37.371337,"address":"단독","rent":80,"deposit":6000,"area":"49/48","region":"","floor":"2/3","title":"정자역수내역사이.남서향,밝은집","type":"단독/다가구","img2":"","source":"naver","lon":127.113164,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627642752"},
+{"id":2627640211,"total":90,"lat":37.371981,"address":"일반원룸","rent":90,"deposit":1000,"area":"25/24","region":"","floor":"4/4","title":"정자역8분수내역8분,방3화1","type":"원룸","img2":"","source":"naver","lon":127.113723,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627640211"},
+{"id":2627641154,"total":90,"lat":37.370213,"address":"단독","rent":90,"deposit":2000,"area":"49/48","region":"","floor":"2/3","title":"정자역8분,올수리 정남향,코너집.","type":"단독/다가구","img2":"","source":"naver","lon":127.112237,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_97/1779351781280LVcdh_JPEG/2627641154_20260521172259956700.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627641154"},
+{"id":2627164916,"total":95,"lat":37.371175,"address":"일반원룸","rent":95,"deposit":1000,"area":"48/47","region":"","floor":"2/3","title":"정자역수내역사이,넓은투룸.밝고 환한방","type":"원룸","img2":"","source":"naver","lon":127.113794,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627164916"},
+{"id":2627640998,"total":100,"lat":37.369995,"address":"단독","rent":100,"deposit":5000,"area":"49/48","region":"","floor":"2/3","title":"정자역7분,특 올수리,화장실,샤시베란다,조용한주택가,탄천,","type":"단독/다가구","img2":"","source":"naver","lon":127.110886,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627640998"},
+{"id":2627409087,"total":120,"lat":37.369081,"address":"다가구","rent":120,"deposit":2000,"area":"46/45","region":"","floor":"2/3","title":"정자역7분,정남향,특올수리","type":"단독/다가구","img2":"","source":"naver","lon":127.111807,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_54/17792569175081uwIF_JPEG/2627409087_20260520150156386586.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627409087"},
+{"id":2627419243,"total":null,"lat":37.369845,"address":"단독","rent":null,"deposit":27000,"area":"55/50","region":"","floor":"2/3","title":"즉시입주 정자역5분 탄천바로 특올수리 투룸전세","type":"단독/다가구","img2":"","source":"naver","lon":127.110089,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627419243"},
+{"id":2627419030,"total":null,"lat":37.360592,"address":"일반원룸","rent":null,"deposit":13000,"area":"34/24","region":"","floor":"2/3","title":"Kt,계원예중고,이마트","type":"원룸","img2":"","source":"naver","lon":127.114499,"agency":"연세공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627419030"},
+{"id":2627368010,"total":null,"lat":37.363911,"address":"한솔6단지주공","rent":null,"deposit":40000,"area":"57/39","region":"","floor":"8/20","title":"남향 샷시포함 특올수리 융자없음 전세대출협조 정자역도보이용 교통편리","type":"아파트","img2":"","source":"naver","lon":127.1163,"agency":"열린공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627368010"},
+{"id":2626398568,"total":null,"lat":37.364111,"address":"한솔6단지주공","rent":null,"deposit":40000,"area":"53/37","region":"","floor":"2/15","title":"즉시입주  ,특깨끗 , 편안한정원뷰","type":"아파트","img2":"","source":"naver","lon":127.115338,"agency":"오늘공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260515_97/17788079096397OtzS_JPEG/2626398568_20260515101828817399.jpg","url":"https://new.land.naver.com/rooms?articleNo=2626398568"},
+{"id":2627549760,"total":15,"lat":37.361863,"address":"정자푸르지오시티3차","rent":15,"deposit":18900,"area":"61/24","region":"","floor":"25/29","title":"정자푸르지오시티3차","type":"오피스텔","img2":"","source":"naver","lon":127.105227,"agency":"우리엠코공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627549760"},
+{"id":2627083566,"total":40,"lat":37.359274,"address":"일반원룸","rent":40,"deposit":500,"area":"33/30","region":"","floor":"B1/3","title":"1.5룸,위치,구조,넓은원룸","type":"원룸","img2":"","source":"naver","lon":127.125254,"agency":"우석공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260519_67/17791538452463tmGh_JPEG/2627083566_20260519102358067330.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627083566"},
+{"id":2627084784,"total":55,"lat":37.358532,"address":"일반원룸","rent":55,"deposit":1000,"area":"24/21","region":"","floor":"1/3","title":"원룸풀옵션,위치,구조,주방분리형원룸","type":"원룸","img2":"","source":"naver","lon":127.122643,"agency":"우석공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627084784"},
+{"id":2627609452,"total":null,"lat":37.364373,"address":"한솔6단지주공","rent":null,"deposit":43000,"area":"57/39","region":"","floor":"17/20","title":"샷시포함 전체 올수리중 빠른입주 가능","type":"아파트","img2":"","source":"naver","lon":127.116644,"agency":"우성공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627609452"},
+{"id":2627627998,"total":null,"lat":37.369344,"address":"한솔4단지주공","rent":null,"deposit":35000,"area":"50/35","region":"","floor":"1/15","title":"샷시포함 올수리 8월초부터 10.21.까지","type":"아파트","img2":"","source":"naver","lon":127.118686,"agency":"유진공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627627998"},
+{"id":2626992548,"total":null,"lat":37.357701,"address":"상록임광보성","rent":null,"deposit":36460,"area":"65/48","region":"","floor":"5/14","title":"20 착한전세 법인만가능 주임사 올수리깨끗 2년거주","type":"아파트","img2":"","source":"naver","lon":127.107714,"agency":"이삭부동산공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2626992548"},
+{"id":2627094431,"total":95,"lat":37.366137,"address":"분당인텔리지2","rent":95,"deposit":1000,"area":"64/34","region":"","floor":"27/35","title":"19타입 전입 6월말이후 청계산방향","type":"오피스텔","img2":"","source":"naver","lon":127.105639,"agency":"인텔리지114공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627094431"},
+{"id":2627098284,"total":100,"lat":37.366137,"address":"분당인텔리지2","rent":100,"deposit":1000,"area":"71/38","region":"","floor":"12/35","title":"21타입 전입 정상입주 남동향","type":"오피스텔","img2":"","source":"naver","lon":127.105639,"agency":"인텔리지114공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627098284"},
+{"id":2627590999,"total":150,"lat":37.366137,"address":"분당인텔리지2","rent":150,"deposit":200,"area":"71/38","region":"","floor":"34/35","title":"21타입 단기 풀욥션 2개월이상 5월말부터","type":"오피스텔","img2":"","source":"naver","lon":127.105639,"agency":"인텔리지114공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627590999"},
+{"id":2627221849,"total":120,"lat":37.36198,"address":"대림아크로텔","rent":120,"deposit":2000,"area":"82/43","region":"","floor":"7/10","title":"분리형 전입  조용한 탄천향 탁트인뷰","type":"오피스텔","img2":"","source":"naver","lon":127.107562,"agency":"인텔리지타임브릿지공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627221849"},
+{"id":2627623818,"total":120,"lat":37.361863,"address":"정자푸르지오시티3차","rent":120,"deposit":1000,"area":"72/29","region":"","floor":"12/29","title":"방1별도 전망 깨끗 융무","type":"오피스텔","img2":"","source":"naver","lon":127.105227,"agency":"정도공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627623818"},
+{"id":2627317815,"total":10,"lat":37.368183,"address":"정자푸르지오시티2차","rent":10,"deposit":23800,"area":"74/30","region":"","floor":"9/20","title":"서향으로 트인전망 보증보험 가입가능  전세자금대출가능","type":"오피스텔","img2":"","source":"naver","lon":127.105705,"agency":"정자푸르지오부동산중개","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_125/1779240212483kLi7D_JPEG/2627317815_20260520102331603864.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627317815"},
+{"id":2627502886,"total":null,"lat":37.368069,"address":"한솔4단지주공","rent":null,"deposit":38000,"area":"50/35","region":"","floor":"5/10","title":"샤시포함올수리.에어컨융무정상","type":"아파트","img2":"","source":"naver","lon":127.119355,"agency":"중앙공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627502886"},
+{"id":2627567825,"total":80,"lat":37.365562,"address":"한솔1단지청구","rent":80,"deposit":37000,"area":"64/49","region":"","floor":"13/14","title":"특올수리된 추천물건 입니다","type":"아파트","img2":"","source":"naver","lon":127.121496,"agency":"청구공인","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627567825"},
+{"id":2627541804,"total":78,"lat":37.364528,"address":"로얄비즈텔","rent":78,"deposit":1000,"area":"52/38","region":"","floor":"2/5","title":"하시입주가능 전입 사업자둘다가능 풀옵션  정자역세권","type":"오피스텔","img2":"","source":"naver","lon":127.107374,"agency":"타임공인중개사","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627541804"},
+{"id":2627142669,"total":110,"lat":37.37196,"address":"분당두산위브파빌리온","rent":110,"deposit":3000,"area":"74/37","region":"","floor":"4/33","title":"22타입,사업자.100프로업무용사용,주거사용안됨","type":"오피스텔","img2":"","source":"naver","lon":127.107094,"agency":"탑파빌리온공인중개사","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627142669"},
+{"id":2627515006,"total":120,"lat":37.37196,"address":"분당두산위브파빌리온","rent":120,"deposit":1000,"area":"74/37","region":"","floor":"4/33","title":"22타입,사업자.100프로업무용사용,주거사용안됨,도배해줌","type":"오피스텔","img2":"","source":"naver","lon":127.107094,"agency":"탑파빌리온공인중개사","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627515006"},
+{"id":2627004490,"total":null,"lat":37.361395,"address":"단독","rent":null,"deposit":24000,"area":"55/48","region":"","floor":"2/3","title":"조용하고깨끗한투룸","type":"단독/다가구","img2":"","source":"naver","lon":127.114138,"agency":"태양공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627004490"},
+{"id":2627406441,"total":110,"lat":37.37196,"address":"분당두산위브파빌리온","rent":110,"deposit":3000,"area":"74/37","region":"","floor":"4/33","title":"22,사업자.업무용으로만가능.5얼중순","type":"오피스텔","img2":"","source":"naver","lon":127.107094,"agency":"파빌리온늘푸른공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627406441"},
+{"id":2627615049,"total":110,"lat":37.362311,"address":"정자푸르지오시티3차","rent":110,"deposit":110,"area":"62/25","region":"","floor":"25/34","title":"정자푸르지오시티3차","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"푸르지오3공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_300/1779345608301qY1dH_JPEG/2627615049_20260521154007057580.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627615049"},
+{"id":2627228513,"total":null,"lat":37.362311,"address":"정자푸르지오시티3차","rent":null,"deposit":21200,"area":"62/25","region":"","floor":"20/34","title":"청계산멋진전망 블루 기둥없는 임대인개인전세 보증대출가능 6월말경","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"푸르지오3공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_68/1779253361444XRq2a_JPEG/2627228513_20260520140240333407.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627228513"},
+{"id":2627447688,"total":5,"lat":37.362268,"address":"정자역엠코헤리츠3단지","rent":5,"deposit":23100,"area":"69/29","region":"","floor":"9/12","title":"엠코20P 전입 융무 입주일협의 남향  임대인개인","type":"오피스텔","img2":"","source":"naver","lon":127.106306,"agency":"푸르지오스타공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627447688"},
+{"id":2627448784,"total":5,"lat":37.362311,"address":"정자푸르지오시티3차","rent":5,"deposit":21250,"area":"62/25","region":"","floor":"5/34","title":"3차19P 전입 융무 청계산향 깨끗 입주일협의","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"푸르지오스타공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_262/1779324028136heQ2I_JPEG/2627448784_20260521094026831796.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627448784"},
+{"id":2627448427,"total":85,"lat":37.361863,"address":"정자푸르지오시티3차","rent":85,"deposit":3000,"area":"63/25","region":"","floor":"19/29","title":"3차19P 6월29일입주협의 전입 융무 남향","type":"오피스텔","img2":"","source":"naver","lon":127.105227,"agency":"푸르지오스타공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_186/1779324035109TmIdt_JPEG/2627448427_20260521094034397157.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627448427"},
+{"id":2627279883,"total":95,"lat":37.362311,"address":"정자푸르지오시티3차","rent":95,"deposit":1000,"area":"62/25","region":"","floor":"8/34","title":"3차19P 전입 융무 청계산향 깨끗 입주일협의","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"푸르지오스타공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_208/1779238081191fYXtB_JPEG/2627279883_20260520094800264029.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627279883"},
+{"id":2627278755,"total":95,"lat":37.362569,"address":"정자푸르지오시티3차","rent":95,"deposit":1000,"area":"62/25","region":"","floor":"11/34","title":"3차19P 전입 융무  청계산향 입주일협의 깨끗","type":"오피스텔","img2":"","source":"naver","lon":127.105704,"agency":"푸르지오스타공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_210/1779238001308LSYXU_JPEG/2627278755_20260520094640325476.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627278755"},
+{"id":2627278979,"total":95,"lat":37.362311,"address":"정자푸르지오시티3차","rent":95,"deposit":1000,"area":"62/25","region":"","floor":"20/34","title":"3차19P  전입 융무 청계산향  굳뷰 깨끗 넉넉한수납","type":"오피스텔","img2":"","source":"naver","lon":127.104849,"agency":"푸르지오스타공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_167/1779238000167A0WDQ_JPEG/2627278979_20260520094639333037.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627278979"},
+{"id":2627279377,"total":95,"lat":37.363006,"address":"정자역엠코헤리츠1단지","rent":95,"deposit":1000,"area":"68/29","region":"","floor":"5/14","title":"엠코20P 전입X 7월초입주 사업자 부가세별도 계산서발행 남향","type":"오피스텔","img2":"","source":"naver","lon":127.106297,"agency":"푸르지오스타공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260520_18/1779238000524rEYrm_JPEG/2627279377_20260520094639738893.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627279377"},
+{"id":2627063591,"total":null,"lat":37.357149,"address":"상록임광보성","rent":null,"deposit":54000,"area":"65/48","region":"","floor":"12/14","title":"샤시포함 확장특올수리, 트인 뷰굿 조용, 9월","type":"아파트","img2":"","source":"naver","lon":127.106208,"agency":"학사공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627063591"},
+{"id":2627573334,"total":40,"lat":37.369844,"address":"일반원룸","rent":40,"deposit":4000,"area":"26/19","region":"","floor":"1/3","title":"빠른입주가능계약일후 일주일 이내 풀옵션 깔끔한 지상 원룸","type":"원룸","img2":"","source":"naver","lon":127.112702,"agency":"희망공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_76/1779345780533UT2dg_JPEG/2627573334_20260521154259191400.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627573334"},
+{"id":2627520704,"total":40,"lat":37.369844,"address":"일반원룸","rent":40,"deposit":4000,"area":"26/19","region":"","floor":"1/3","title":"분리형 깔끔한 지상 원룸, 보46천사이 가능","type":"원룸","img2":"","source":"naver","lon":127.112702,"agency":"희망공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627520704"},
+{"id":2627520393,"total":48,"lat":37.370307,"address":"일반원룸","rent":48,"deposit":500,"area":"26/19","region":"","floor":"B1/3","title":"분리형 반지층원룸, 풀옵션, 깔끔함","type":"원룸","img2":"","source":"naver","lon":127.113363,"agency":"희망공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260521_73/1779329431302yXJKo_JPEG/2627520393_20260521111030091957.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627520393"},
+{"id":2627204671,"total":100,"lat":37.368303,"address":"정자역AK와이즈플레이스","rent":100,"deposit":1000,"area":"64/26","region":"","floor":"20/29","title":"사업자 부가세별도  입주6월말부터가능  동향  탄천뷰","type":"오피스텔","img2":"","source":"naver","lon":127.104868,"agency":"AK공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627204671"},
+{"id":2627284055,"total":5,"lat":37.36198,"address":"대림아크로텔","rent":5,"deposit":20000,"area":"66/34","region":"","floor":"5/10","title":"방1개전입7월30일융무","type":"오피스텔","img2":"","source":"naver","lon":127.107562,"agency":"LBA롯데공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2627284055"}];
+const SOURCE = "naver";
+const ACCENT = "#03C75A";
+
+(function() {
+  // Mark active nav
+  document.querySelectorAll('nav a[data-src]').forEach(a => {
+    if (a.dataset.src === SOURCE) a.classList.add('active-nav');
+  });
+
+  // Populate type filter
+  const types = [...new Set(DATA.map(r => r.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
+  const sel = document.getElementById('typeFilter');
+  types.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  });
+
+  // Map init
+  const ajouLat = 37.2785, ajouLon = 127.0434;
+  const mapCenter = DATA.some(r => r.lat && r.lat > 37.3) ? [37.365, 127.11] : [ajouLat, ajouLon];
+  const map = L.map('map').setView(mapCenter, 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19
+  }).addTo(map);
+
+  if (mapCenter[0] === ajouLat) {
+    L.marker([ajouLat, ajouLon]).addTo(map)
+      .bindPopup('<b>아주대학교 정문</b>');
+  }
+
+  const allMarkers = [];
+  DATA.forEach(r => {
+    if (!r.lat || !r.lon || r.lat === 0 || r.lon === 0) return;
+    const m = L.circleMarker([r.lat, r.lon], {
+      radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
+    }).addTo(map);
+
+    const imgHtml = r.img1
+      ? `<img class="popup-img" src="${r.img1}" onerror="this.style.display='none'">`
+      : '';
+    const agencyLabel = SOURCE === 'daangn'
+      ? (r.agency === 'DIRECT' ? '직거래' : '중개사')
+      : (r.agency || '');
+
+    m.bindPopup(`<div class="popup-title">${r.title || ''}</div>
+${imgHtml}
+<div class="popup-price">보 ${fmtDeposit(r.deposit)} / 월 ${fmtRent(r.rent)}</div>
+<div class="popup-meta">관리비 ${fmtRent(r.maint)} &nbsp;|&nbsp; 총 <b>${fmtRent(r.total)}</b></div>
+<div class="popup-meta">${r.type || ''} &nbsp;|&nbsp; ${r.floor || ''}</div>
+<div class="popup-meta">${agencyLabel}${r.phone ? ' ' + r.phone : ''}</div>
+<div class="popup-meta" style="word-break:break-all">${r.address || r.region || ''}</div>
+<div style="margin-top:6px">
+  <a href="${r.url}" target="_blank" class="link-btn">매물 보기 →</a>
+</div>`);
+
+    allMarkers.push({ marker: m, data: r });
+  });
+
+  // Sorting state
+  let sortCol = 'rent', sortAsc = true;
+
+  function fmtDeposit(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '억';
+    return v + '만';
+  }
+  function fmtRent(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    return v + '만';
+  }
+  function fmtArea(v) {
+    if (!v && v !== 0) return '-';
+    const n = parseFloat(v);
+    if (isNaN(n)) return v || '-';
+    return n.toFixed(1) + 'm²';
+  }
+  // Expose fmtDeposit/fmtRent for popup closures
+  window.fmtDeposit = fmtDeposit;
+  window.fmtRent = fmtRent;
+
+  function sortArr(arr) {
+    return [...arr].sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va === null || va === undefined) va = sortAsc ? Infinity : -Infinity;
+      if (vb === null || vb === undefined) vb = sortAsc ? Infinity : -Infinity;
+      if (typeof va === 'string') return sortAsc ? va.localeCompare(vb, 'ko') : vb.localeCompare(va, 'ko');
+      return sortAsc ? va - vb : vb - va;
+    });
+  }
+
+  function getFiltered() {
+    const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 99999;
+    const maxRent = parseFloat(document.getElementById('maxRent').value) || 9999;
+    const type    = document.getElementById('typeFilter').value;
+    const q       = document.getElementById('search').value.toLowerCase();
+    return DATA.filter(r => {
+      if (r.deposit !== null && r.deposit !== undefined && r.deposit > maxDep) return false;
+      if (r.rent    !== null && r.rent    !== undefined && r.rent    > maxRent) return false;
+      if (type && r.type !== type) return false;
+      if (q) {
+        const hay = [r.title, r.address, r.region, r.agency, r.type].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function render() {
+    const filtered = sortArr(getFiltered());
+    document.getElementById('countLabel').textContent = filtered.length + '건';
+
+    const visibleIds = new Set(filtered.map(r => r.id));
+    allMarkers.forEach(({ marker, data }) => {
+      if (visibleIds.has(data.id)) {
+        marker.setStyle({ fillOpacity: 0.85, opacity: 1 });
+      } else {
+        marker.setStyle({ fillOpacity: 0.1, opacity: 0.2 });
+      }
+    });
+
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    filtered.forEach(r => {
+      const agencyLabel = SOURCE === 'daangn'
+        ? (r.agency === 'DIRECT' ? '직거래' : '중개사')
+        : (r.agency || '-');
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = r.img1
+        ? `<td><img class="img-thumb" src="${r.img1}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'no-img\\'>사진없음</div>'"></td>`
+        : `<td><div class="no-img">사진<br>없음</div></td>`;
+      tr.innerHTML += `
+        <td class="price">${fmtDeposit(r.deposit)}</td>
+        <td class="price">${fmtRent(r.rent)}</td>
+        <td>${fmtRent(r.maint)}</td>
+        <td class="total-price">${fmtRent(r.total)}</td>
+        <td>${r.type || '-'}</td>
+        <td>${fmtArea(r.area)}</td>
+        <td>${r.floor || '-'}</td>
+        <td style="max-width:160px;word-break:break-all;font-size:12px">${r.address || r.region || '-'}</td>
+        <td class="agency-cell">${agencyLabel}${r.phone ? '<br><span class="phone">' + r.phone + '</span>' : ''}</td>
+        <td><a href="${r.url}" target="_blank" class="link-btn">보기</a></td>`;
+
+      tr.addEventListener('click', e => {
+        if (e.target.tagName === 'A') return;
+        const m = allMarkers.find(x => x.data.id === r.id);
+        if (m && r.lat && r.lon) {
+          map.flyTo([r.lat, r.lon], 17, { duration: 0.6 });
+          m.marker.openPopup();
+        }
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Sort on header click
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = (th.dataset.num === '1'); // numeric: ascending first; text: ascending first
+      }
+      document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
+      th.classList.add('sorted');
+      render();
+    });
+  });
+
+  ['maxDeposit', 'maxRent', 'typeFilter', 'search'].forEach(id => {
+    document.getElementById(id).addEventListener('input', render);
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

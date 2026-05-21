@@ -1,0 +1,340 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>직방 - 아주대 월세 매물</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f0f0f0}
+nav a.active-nav{background:#222 !important;color:#fff !important}
+.page{max-width:1440px;margin:0 auto;padding:16px}
+h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.badge-dabang{background:#FF5C38}
+.badge-daangn{background:#FF6F00}
+.badge-zigbang{background:#6366F1}
+.badge-naver{background:#03C75A}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
+.controls label{font-size:13px;display:flex;align-items:center;gap:4px}
+.controls input[type=number]{width:74px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
+.controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
+.count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
+.layout{display:grid;grid-template-columns:1fr 400px;gap:14px;align-items:start}
+@media(max-width:960px){.layout{grid-template-columns:1fr}}
+.map-box{height:520px;border-radius:10px;overflow:hidden;border:1px solid #ddd;position:sticky;top:60px}
+.table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
+table{width:100%;border-collapse:collapse;background:#fff;min-width:780px}
+th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid #e0e0e0}
+th:hover{background:#e4e4e4}
+th .sort-arrow{font-size:10px;margin-left:2px;opacity:0.5}
+th.sorted .sort-arrow{opacity:1;color:#6366F1}
+td{padding:7px 10px;border-top:1px solid #f0f0f0;vertical-align:middle;font-size:13px}
+tr:hover td{background:#fafafa;cursor:pointer}
+.img-thumb{width:68px;height:51px;object-fit:cover;border-radius:5px}
+.no-img{width:68px;height:51px;background:#eee;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#aaa;text-align:center;line-height:1.3}
+.price{font-weight:600}
+.total-price{color:#c00;font-weight:700}
+.agency-cell{font-size:12px;line-height:1.5;max-width:140px}
+.phone{color:#666;font-size:11px}
+.link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
+.link-btn:hover{background:#eee}
+.note-warn{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6}
+.leaflet-popup-content{font-size:13px;line-height:1.7;min-width:210px;max-width:260px}
+.popup-title{font-weight:700;margin-bottom:4px;font-size:14px;line-height:1.4}
+.popup-price{color:#c00;font-weight:700;font-size:15px}
+.popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
+.popup-meta{color:#555;font-size:12px}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">🏠 아주대 월세</span>
+  <a href="index.html">지도 전체</a>
+  <a href="dabang.html" data-src="dabang"><span class="badge badge-dabang">다방</span></a>
+  <a href="daangn.html" data-src="daangn"><span class="badge badge-daangn">당근</span></a>
+  <a href="zigbang.html" data-src="zigbang"><span class="badge badge-zigbang">직방</span></a>
+  <a href="naver.html" data-src="naver"><span class="badge badge-naver">네이버</span></a>
+</nav>
+<div class="page">
+  <h1>
+    <span class="badge badge-zigbang" style="font-size:15px;padding:5px 14px">직방</span>
+    매물 목록
+  </h1>
+  
+  <div class="controls">
+    <label>보증금 최대
+      <input type="number" id="maxDeposit" value="3000" min="0" max="10000" step="100"> 만원
+    </label>
+    <label>월세 최대
+      <input type="number" id="maxRent" value="60" min="0" max="200" step="5"> 만원
+    </label>
+    <label>방 유형
+      <select id="typeFilter"><option value="">전체</option></select>
+    </label>
+    <input type="text" id="search" placeholder="검색 (지역·중개사무소·제목)..." style="min-width:180px">
+    <span class="count" id="countLabel">0건</span>
+  </div>
+  <div class="layout">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:76px">사진</th>
+            <th data-col="deposit" data-num="1">보증금<span class="sort-arrow">▼</span></th>
+            <th data-col="rent" data-num="1" class="sorted">월세<span class="sort-arrow">▼</span></th>
+            <th data-col="maint" data-num="1">관리비<span class="sort-arrow">▼</span></th>
+            <th data-col="total" data-num="1">총월납부<span class="sort-arrow">▼</span></th>
+            <th data-col="type">방유형<span class="sort-arrow">▼</span></th>
+            <th data-col="area">면적<span class="sort-arrow">▼</span></th>
+            <th data-col="floor">층<span class="sort-arrow">▼</span></th>
+            <th data-col="address">주소<span class="sort-arrow">▼</span></th>
+            <th data-col="agency">중개사무소<span class="sort-arrow">▼</span></th>
+            <th>링크</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div>
+      <div class="map-box" id="map"></div>
+    </div>
+  </div>
+</div>
+<script>
+const DATA = [{"id":48970154,"total":29,"lat":37.2789819404129,"address":"수원시 영통구 원천동 17","rent":25,"deposit":80,"area":13.22,"region":"경기도 수원시 영통구 원천동","floor":"4/5","title":"H 아주대 초근접, 유학생 가능 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48970154/2.jpg","source":"zigbang","lon":127.044452742954,"agency":"런공인중개사사무소","maint":4.5,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48970154/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48970154?itemDetailType=ZIGBANG"},
+{"id":48981361,"total":45,"lat":37.2774272314727,"address":"수원시 영통구 원천동 29-45","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2/4","title":"C 아주대 도보 3분컷. 저렴. 깨끗. 입주협의가능","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48981361/2.jpg","source":"zigbang","lon":127.044836551441,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48981361/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48981361?itemDetailType=ZIGBANG"},
+{"id":48993831,"total":45,"lat":37.2774272314727,"address":"수원시 영통구 원천동 29-45","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2/4","title":"oO 아주대2분컷ㅣ위치최강ㅣ가격최고ㅣ풀옵션 강추  Oo","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48993831/2.jpg","source":"zigbang","lon":127.044836551441,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48993831/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48993831?itemDetailType=ZIGBANG"},
+{"id":49056208,"total":45,"lat":37.2766713677422,"address":"수원시 영통구 원천동 29-98","rent":40,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"3/4","title":"C RUN 전속매물 아주대3분 초인기매물 주방분리형 풀옵션","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49056208/2.jpg","source":"zigbang","lon":127.044307960309,"agency":"런공인중개사사무소","maint":5,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49056208/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49056208?itemDetailType=ZIGBANG"},
+{"id":49015914,"total":50,"lat":37.273988315999,"address":"수원시 영통구 매탄동 153-132","rent":42,"deposit":300,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"2/3","title":"8아주대삼거리인근. 분리형원룸. 깔끔함8","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49015914/2.jpg","source":"zigbang","lon":127.041643330059,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49015914/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49015914?itemDetailType=ZIGBANG"},
+{"id":49025454,"total":55,"lat":37.2774272314727,"address":"수원시 영통구 원천동 29-45","rent":45,"deposit":500,"area":20,"region":"경기도 수원시 영통구 원천동","floor":"3/4","title":"oOㅣ아주대 도보 1분컷 ㅣ갓성비 분리형ㅣ남향ㅣOo","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49025454/2.jpg","source":"zigbang","lon":127.044836551441,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49025454/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49025454?itemDetailType=ZIGBANG"},
+{"id":49012097,"total":50,"lat":37.2774471627758,"address":"수원시 영통구 원천동 25-3","rent":45,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"4/4","title":"O아주대 3분컷, 빅사이즈 원룸 ,미친꿀매물O","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49012097/2.jpg","source":"zigbang","lon":127.044067906867,"agency":"런공인중개사사무소","maint":5,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49012097/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49012097?itemDetailType=ZIGBANG"},
+{"id":49038297,"total":53,"lat":37.2737961140333,"address":"수원시 영통구 매탄동 153-41","rent":45,"deposit":1000,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"2/4","title":"H 주방분리, 남동향, 빠른입주, 버스정류장 가까움 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49038297/2.jpg","source":"zigbang","lon":127.044398279507,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49038297/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49038297?itemDetailType=ZIGBANG"},
+{"id":49038742,"total":58,"lat":37.2774272314727,"address":"수원시 영통구 원천동 29-45","rent":48,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2/4","title":"H 학생 , 직장인 추천 , 버스정류장 근처, 남향 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49038742/2.jpg","source":"zigbang","lon":127.044836551441,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49038742/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49038742?itemDetailType=ZIGBANG"},
+{"id":49056728,"total":60,"lat":37.2780568391151,"address":"수원시 팔달구 우만동 64-8","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2/4","title":"8아주대도보5분컷,주방분리 조용한 원룸8","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49056728/2.jpg","source":"zigbang","lon":127.042998990257,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49056728/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49056728?itemDetailType=ZIGBANG"},
+{"id":48970169,"total":56,"lat":37.2783296642289,"address":"수원시 영통구 원천동 29-56","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2/3","title":"C 아주대코앞 큰원룸 저렴함 풀옵션 즉시입주 인기매물","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48970169/2.jpg","source":"zigbang","lon":127.044727599531,"agency":"런공인중개사사무소","maint":6,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48970169/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48970169?itemDetailType=ZIGBANG"},
+{"id":48972783,"total":56,"lat":37.2783296642289,"address":"수원시 영통구 원천동 29-56","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"2/3","title":"H 아주대,아주대 병원 초근접, 가성비 원룸 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48972783/2.jpg","source":"zigbang","lon":127.044727599531,"agency":"런공인중개사사무소","maint":6,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48972783/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48972783?itemDetailType=ZIGBANG"},
+{"id":49062589,"total":60,"lat":37.2780568391151,"address":"수원시 팔달구 우만동 64-8","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3/4","title":"Oㅣ떳다ㅣ침대까지 풀옵션ㅣ아주대 도보3분컷ㅣO","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49062589/2.jpg","source":"zigbang","lon":127.042998990257,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49062589/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49062589?itemDetailType=ZIGBANG"},
+{"id":49012411,"total":63,"lat":37.2744415796947,"address":"수원시 영통구 원천동 78-55","rent":53,"deposit":500,"area":21,"region":"경기도 수원시 영통구 원천동","floor":"2/4","title":"O I 빅사이즈 I 주방 분리형 조용함 I 도배새로 I O","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49012411/2.jpg","source":"zigbang","lon":127.048407644928,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49012411/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49012411?itemDetailType=ZIGBANG"},
+{"id":48864208,"total":66,"lat":37.2776112677206,"address":"수원시 팔달구 우만동 72-10","rent":56,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1/3","title":"oOㅣ깔끔화이트톤ㅣ넓은 분v리형ㅣ아주대 3분컷ㅣOo","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/48864208/2.jpg","source":"zigbang","lon":127.043018581874,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48864208/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48864208?itemDetailType=ZIGBANG"},
+{"id":48863811,"total":66,"lat":37.2776112677206,"address":"수원시 팔달구 우만동 72-10","rent":56,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1/3","title":"H 간호사,여학생 추천, 조용한 주거환경, 선착순 H","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/48863811/2.jpg","source":"zigbang","lon":127.043018581874,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48863811/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48863811?itemDetailType=ZIGBANG"},
+{"id":49053263,"total":65,"lat":37.2786087693778,"address":"수원시 영통구 원천동 18-16","rent":57,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"3/3","title":"H 여기 살면 지각 걱정 X, 아주대 원룸 옵션 끝판왕 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49053263/2.jpg","source":"zigbang","lon":127.044346982437,"agency":"런공인중개사사무소","maint":8,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/49053263/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49053263?itemDetailType=ZIGBANG"},
+{"id":49038499,"total":40,"lat":37.2746188686649,"address":"수원시 영통구 원천동 72-86","rent":30,"deposit":300,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"3/5","title":"가성비최고o 아주대10분o 베란다보유o 선착순o","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49038499/2.jpg","source":"zigbang","lon":127.046243266053,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49038499/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49038499?itemDetailType=ZIGBANG"},
+{"id":49073595,"total":40,"lat":37.277095841957,"address":"수원시 팔달구 우만동 102-1","rent":32,"deposit":3000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"4/4","title":"전속매물o 반전세o 완전풀옵션o 분리형원룸o","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49073595/2.jpg","source":"zigbang","lon":127.041334852041,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49073595/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49073595?itemDetailType=ZIGBANG"},
+{"id":49066830,"total":47,"lat":37.2739588837143,"address":"수원시 영통구 매탄동 153-5","rent":35,"deposit":500,"area":16.53,"region":"경기도 수원시 영통구 매탄동","floor":"5/7","title":"아주대Oㅣ갓성비원룸ㅣㅡ햇빛이 쏟아져요ㅡㅣ먼저 선점 하세요ㅣ","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49066830/2.jpg","source":"zigbang","lon":127.044765942092,"agency":"모아공인중개사사무소","maint":12,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49066830/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49066830?itemDetailType=ZIGBANG"},
+{"id":49081932,"total":47,"lat":37.2739588837143,"address":"수원시 영통구 매탄동 153-5","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"5/7","title":"초저렴o 남향o 엘베보유o 깔끔한o 원룸o","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49081932/2.jpg","source":"zigbang","lon":127.044765942092,"agency":"모아공인중개사사무소","maint":12,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49081932/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49081932?itemDetailType=ZIGBANG"},
+{"id":48976175,"total":45,"lat":37.2760878464199,"address":"수원시 영통구 원천동 30-56","rent":35,"deposit":1000,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2/3","title":"풀옵션ㅣ아주대코앞ㅣㅡ갓성비원룸 ㅡㅣ베란다있어요ㅣ안전매물","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48976175/2.jpg","source":"zigbang","lon":127.045044577065,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48976175/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48976175?itemDetailType=ZIGBANG"},
+{"id":48820601,"total":48,"lat":37.2737961140333,"address":"수원시 영통구 매탄동 153-41","rent":40,"deposit":1000,"area":19.83,"region":"경기도 수원시 영통구 매탄동","floor":"4/4","title":"아주대o 깔끔한시설o 빠른입주가능o","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/48820601/2.jpg","source":"zigbang","lon":127.044398279507,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48820601/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48820601?itemDetailType=ZIGBANG"},
+{"id":48513574,"total":48,"lat":37.2737961140333,"address":"수원시 영통구 매탄동 153-41","rent":40,"deposit":1000,"area":20,"region":"경기도 수원시 영통구 매탄동","floor":"4/4","title":"갓성비 최고, 주방 분리형, 깔끔한 방, 빠른 입주 가능","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48513574/2.jpg","source":"zigbang","lon":127.044398279507,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48513574/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48513574?itemDetailType=ZIGBANG"},
+{"id":49073192,"total":50,"lat":37.2736418407389,"address":"수원시 영통구 매탄동 153-42","rent":41,"deposit":500,"area":24,"region":"경기도 수원시 영통구 매탄동","floor":"3/3","title":"가성비 최고, 넓은 사이즈, 주방 분리형, 베란다까지","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49073192/2.jpg","source":"zigbang","lon":127.044197944662,"agency":"모아공인중개사사무소","maint":9,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49073192/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49073192?itemDetailType=ZIGBANG"},
+{"id":48975985,"total":63,"lat":37.2759913009377,"address":"수원시 팔달구 우만동 89-13","rent":42,"deposit":500,"area":23.15,"region":"경기도 수원시 팔달구 우만동","floor":"3/4","title":"화장실깔끔ㅣ도배장판교체완료ㅣㅡ에어컨교체완료 ㅡㅣ베란다O","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48975985/2.jpg","source":"zigbang","lon":127.042733069825,"agency":"모아공인중개사사무소","maint":21,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48975985/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48975985?itemDetailType=ZIGBANG"},
+{"id":49045027,"total":55,"lat":37.276459519627,"address":"수원시 팔달구 우만동 94-25","rent":45,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"3/5","title":"단독매물o 떳다o 초특가o 인기원룸o","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49045027/2.jpg","source":"zigbang","lon":127.04186974898,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49045027/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49045027?itemDetailType=ZIGBANG"},
+{"id":49045334,"total":55,"lat":37.2774272314727,"address":"수원시 영통구 원천동 29-45","rent":45,"deposit":500,"area":23.14,"region":"경기도 수원시 영통구 원천동","floor":"3/4","title":"남동향o 위치좋음o 아주대코앞o 분리형원룸o","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49045334/2.jpg","source":"zigbang","lon":127.044836551441,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49045334/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49045334?itemDetailType=ZIGBANG"},
+{"id":49072816,"total":60,"lat":37.2780568391151,"address":"수원시 팔달구 우만동 64-8","rent":50,"deposit":500,"area":24,"region":"경기도 수원시 팔달구 우만동","floor":"2/4","title":"왕 넓은 분리형, 남향, 학교 정문 도보 4분","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49072816/2.jpg","source":"zigbang","lon":127.042998990257,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49072816/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49072816?itemDetailType=ZIGBANG"},
+{"id":49071155,"total":60,"lat":37.2780568391151,"address":"수원시 팔달구 우만동 64-8","rent":50,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"2/4","title":"주차널널o 아주대초근접o 공원앞o 조용한동네o 풀옵션o","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49071155/2.jpg","source":"zigbang","lon":127.042998990257,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49071155/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49071155?itemDetailType=ZIGBANG"},
+{"id":48927670,"total":58,"lat":37.2761921533986,"address":"수원시 팔달구 우만동 89-25","rent":50,"deposit":1000,"area":24,"region":"경기도 수원시 팔달구 우만동","floor":"2/4","title":"넓은 사이즈, 풀풀옵션, 입주일 협의가능, 보증금 조절가능","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48927670/2.jpg","source":"zigbang","lon":127.04220121025,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48927670/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48927670?itemDetailType=ZIGBANG"},
+{"id":49094293,"total":55,"lat":37.2742187984307,"address":"수원시 영통구 매탄동 153-64","rent":50,"deposit":1000,"area":26.45,"region":"경기도 수원시 영통구 매탄동","floor":"2/4","title":"화이트톤ㅣ주방분리형ㅣㅡ넓은 평수 대형 원룸ㅡㅣ베란다O","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49094293/2.jpg","source":"zigbang","lon":127.04291528831,"agency":"모아공인중개사사무소","maint":5,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49094293/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49094293?itemDetailType=ZIGBANG"},
+{"id":48819926,"total":58,"lat":37.2765644466935,"address":"수원시 팔달구 우만동 89-37","rent":50,"deposit":1000,"area":14.71,"region":"경기도 수원시 팔달구 우만동","floor":"4/5","title":"전속매물o 오피스텔형o 엘베o 풀옵션o","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48819926/2.jpg","source":"zigbang","lon":127.04224753467,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48819926/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48819926?itemDetailType=ZIGBANG"},
+{"id":48820915,"total":58,"lat":37.2765644466935,"address":"수원시 팔달구 우만동 89-37","rent":50,"deposit":1000,"area":14.71,"region":"경기도 수원시 팔달구 우만동","floor":"4/5","title":"인기매물Oㅣ깔끔원룸Oㅣ엘베보유Oㅣ주차가능Oㅣ꿀매물O","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48820915/2.jpg","source":"zigbang","lon":127.04224753467,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48820915/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48820915?itemDetailType=ZIGBANG"},
+{"id":48840285,"total":63,"lat":37.2744415796947,"address":"수원시 영통구 원천동 78-55","rent":53,"deposit":500,"area":24,"region":"경기도 수원시 영통구 원천동","floor":"2/4","title":"넓은 사이즈, 주방 분리형, 남동향, 베란다까지","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/48840285/2.jpg","source":"zigbang","lon":127.048407644928,"agency":"모아공인중개사사무소","maint":10,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48840285/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48840285?itemDetailType=ZIGBANG"},
+{"id":49080690,"total":60,"lat":37.2742187984307,"address":"수원시 영통구 매탄동 153-64","rent":55,"deposit":500,"area":26.5,"region":"경기도 수원시 영통구 매탄동","floor":"2/4","title":"왕 넓은 분리형, 채광 최고, 베란다까지, 보증금 조절가능","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49080690/2.jpg","source":"zigbang","lon":127.04291528831,"agency":"모아공인중개사사무소","maint":5,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49080690/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49080690?itemDetailType=ZIGBANG"},
+{"id":49043935,"total":68,"lat":37.2765644466935,"address":"수원시 팔달구 우만동 89-37","rent":60,"deposit":500,"area":14.71,"region":"경기도 수원시 팔달구 우만동","floor":"3/5","title":"정남향ㅇ아주대ACEㅇ선착순 매물ㅇ보증금 조절가능","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49043935/2.jpg","source":"zigbang","lon":127.04224753467,"agency":"모아공인중개사사무소","maint":8,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/49043935/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49043935?itemDetailType=ZIGBANG"},
+{"id":48883447,"total":75,"lat":37.2763556454741,"address":"수원시 팔달구 우만동 89-22","rent":60,"deposit":1000,"area":28,"region":"경기도 수원시 팔달구 우만동","floor":"3/3","title":"왕 넓은 분리형,빠른 입주 가능, 풀풀옵션, 베란다까지","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/48883447/2.jpg","source":"zigbang","lon":127.042583312708,"agency":"모아공인중개사사무소","maint":15,"phone":"031-895-6170","img1":"https://ic.zigbang.com/ic/items/48883447/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48883447?itemDetailType=ZIGBANG"},
+{"id":49023084,"total":36,"lat":37.2742795845356,"address":"수원시 영통구 원천동 78-64","rent":30,"deposit":300,"area":20,"region":"경기도 수원시 영통구 원천동","floor":"4/5","title":"깨끗하고 조용한 원룸","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49023084/2.jpg","source":"zigbang","lon":127.047712430735,"agency":"아주공인중개사사무소","maint":6,"phone":"031-213-9100","img1":"https://ic.zigbang.com/ic/items/49023084/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49023084?itemDetailType=ZIGBANG"},
+{"id":49023176,"total":40,"lat":37.2742323948638,"address":"수원시 영통구 원천동 78-59","rent":32,"deposit":300,"area":20,"region":"경기도 수원시 영통구 원천동","floor":"3/5","title":"가격저렴하고  깨끗한 원룸","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49023176/2.jpg","source":"zigbang","lon":127.047874085917,"agency":"아주공인중개사사무소","maint":8,"phone":"031-213-9100","img1":"https://ic.zigbang.com/ic/items/49023176/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49023176?itemDetailType=ZIGBANG"},
+{"id":49023077,"total":40,"lat":37.2742321244502,"address":"수원시 영통구 원천동 78-59","rent":33,"deposit":300,"area":20,"region":"경기도 수원시 영통구 원천동","floor":"2/5","title":"아담싸이즈 깨끗한 원룸","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/49023077/2.jpg","source":"zigbang","lon":127.047874311247,"agency":"아주공인중개사사무소","maint":7,"phone":"031-213-9100","img1":"https://ic.zigbang.com/ic/items/49023077/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49023077?itemDetailType=ZIGBANG"},
+{"id":49023116,"total":40,"lat":37.2750685425318,"address":"수원시 영통구 원천동 78-83","rent":40,"deposit":500,"area":26.45,"region":"경기도 수원시 영통구 원천동","floor":"2/3","title":"가격저렴한하고 깨끗한 원룸","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49023116/2.jpg","source":"zigbang","lon":127.04923576076,"agency":"아주공인중개사사무소","maint":0,"phone":"031-213-9100","img1":"https://ic.zigbang.com/ic/items/49023116/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49023116?itemDetailType=ZIGBANG"},
+{"id":49023206,"total":47,"lat":37.2754415239477,"address":"수원시 영통구 원천동 70-31","rent":40,"deposit":3000,"area":27,"region":"경기도 수원시 영통구 원천동","floor":"1/4","title":"깨끗하고 조용한 반전세 원룸","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/49023206/2.jpg","source":"zigbang","lon":127.046916565353,"agency":"아주공인중개사사무소","maint":7,"phone":"031-213-9100","img1":"https://ic.zigbang.com/ic/items/49023206/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/49023206?itemDetailType=ZIGBANG"},
+{"id":48869137,"total":48,"lat":37.2761921533986,"address":"수원시 팔달구 우만동 89-25","rent":40,"deposit":500,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1/3","title":"ㅣ아주대ㅣ풀옵션ㅣ오세요ㅣ","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48869137/2.jpg","source":"zigbang","lon":127.04220121025,"agency":"청춘공인중개사사무소","maint":8,"phone":"031-235-4333","img1":"https://ic.zigbang.com/ic/items/48869137/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48869137?itemDetailType=ZIGBANG"},
+{"id":48795664,"total":48,"lat":37.2737961140333,"address":"수원시 영통구 매탄동 153-41","rent":40,"deposit":1000,"area":23.14,"region":"경기도 수원시 영통구 매탄동","floor":"4/4","title":"o 아주대삼거리 o 분리형 o 깔끔 o","type":"분리형원룸","img2":"https://ic.zigbang.com/ic/items/48795664/2.jpg","source":"zigbang","lon":127.044398279507,"agency":"청춘공인중개사사무소","maint":8,"phone":"031-235-4333","img1":"https://ic.zigbang.com/ic/items/48795664/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48795664?itemDetailType=ZIGBANG"}];
+const SOURCE = "zigbang";
+const ACCENT = "#6366F1";
+
+(function() {
+  // Mark active nav
+  document.querySelectorAll('nav a[data-src]').forEach(a => {
+    if (a.dataset.src === SOURCE) a.classList.add('active-nav');
+  });
+
+  // Populate type filter
+  const types = [...new Set(DATA.map(r => r.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
+  const sel = document.getElementById('typeFilter');
+  types.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  });
+
+  // Map init
+  const ajouLat = 37.2785, ajouLon = 127.0434;
+  const mapCenter = DATA.some(r => r.lat && r.lat > 37.3) ? [37.365, 127.11] : [ajouLat, ajouLon];
+  const map = L.map('map').setView(mapCenter, 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19
+  }).addTo(map);
+
+  if (mapCenter[0] === ajouLat) {
+    L.marker([ajouLat, ajouLon]).addTo(map)
+      .bindPopup('<b>아주대학교 정문</b>');
+  }
+
+  const allMarkers = [];
+  DATA.forEach(r => {
+    if (!r.lat || !r.lon || r.lat === 0 || r.lon === 0) return;
+    const m = L.circleMarker([r.lat, r.lon], {
+      radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
+    }).addTo(map);
+
+    const imgHtml = r.img1
+      ? `<img class="popup-img" src="${r.img1}" onerror="this.style.display='none'">`
+      : '';
+    const agencyLabel = SOURCE === 'daangn'
+      ? (r.agency === 'DIRECT' ? '직거래' : '중개사')
+      : (r.agency || '');
+
+    m.bindPopup(`<div class="popup-title">${r.title || ''}</div>
+${imgHtml}
+<div class="popup-price">보 ${fmtDeposit(r.deposit)} / 월 ${fmtRent(r.rent)}</div>
+<div class="popup-meta">관리비 ${fmtRent(r.maint)} &nbsp;|&nbsp; 총 <b>${fmtRent(r.total)}</b></div>
+<div class="popup-meta">${r.type || ''} &nbsp;|&nbsp; ${r.floor || ''}</div>
+<div class="popup-meta">${agencyLabel}${r.phone ? ' ' + r.phone : ''}</div>
+<div class="popup-meta" style="word-break:break-all">${r.address || r.region || ''}</div>
+<div style="margin-top:6px">
+  <a href="${r.url}" target="_blank" class="link-btn">매물 보기 →</a>
+</div>`);
+
+    allMarkers.push({ marker: m, data: r });
+  });
+
+  // Sorting state
+  let sortCol = 'rent', sortAsc = true;
+
+  function fmtDeposit(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '억';
+    return v + '만';
+  }
+  function fmtRent(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    return v + '만';
+  }
+  function fmtArea(v) {
+    if (!v && v !== 0) return '-';
+    const n = parseFloat(v);
+    if (isNaN(n)) return v || '-';
+    return n.toFixed(1) + 'm²';
+  }
+  // Expose fmtDeposit/fmtRent for popup closures
+  window.fmtDeposit = fmtDeposit;
+  window.fmtRent = fmtRent;
+
+  function sortArr(arr) {
+    return [...arr].sort((a, b) => {
+      let va = a[sortCol], vb = b[sortCol];
+      if (va === null || va === undefined) va = sortAsc ? Infinity : -Infinity;
+      if (vb === null || vb === undefined) vb = sortAsc ? Infinity : -Infinity;
+      if (typeof va === 'string') return sortAsc ? va.localeCompare(vb, 'ko') : vb.localeCompare(va, 'ko');
+      return sortAsc ? va - vb : vb - va;
+    });
+  }
+
+  function getFiltered() {
+    const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 99999;
+    const maxRent = parseFloat(document.getElementById('maxRent').value) || 9999;
+    const type    = document.getElementById('typeFilter').value;
+    const q       = document.getElementById('search').value.toLowerCase();
+    return DATA.filter(r => {
+      if (r.deposit !== null && r.deposit !== undefined && r.deposit > maxDep) return false;
+      if (r.rent    !== null && r.rent    !== undefined && r.rent    > maxRent) return false;
+      if (type && r.type !== type) return false;
+      if (q) {
+        const hay = [r.title, r.address, r.region, r.agency, r.type].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function render() {
+    const filtered = sortArr(getFiltered());
+    document.getElementById('countLabel').textContent = filtered.length + '건';
+
+    const visibleIds = new Set(filtered.map(r => r.id));
+    allMarkers.forEach(({ marker, data }) => {
+      if (visibleIds.has(data.id)) {
+        marker.setStyle({ fillOpacity: 0.85, opacity: 1 });
+      } else {
+        marker.setStyle({ fillOpacity: 0.1, opacity: 0.2 });
+      }
+    });
+
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    filtered.forEach(r => {
+      const agencyLabel = SOURCE === 'daangn'
+        ? (r.agency === 'DIRECT' ? '직거래' : '중개사')
+        : (r.agency || '-');
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = r.img1
+        ? `<td><img class="img-thumb" src="${r.img1}" alt="" loading="lazy" onerror="this.parentNode.innerHTML='<div class=\\'no-img\\'>사진없음</div>'"></td>`
+        : `<td><div class="no-img">사진<br>없음</div></td>`;
+      tr.innerHTML += `
+        <td class="price">${fmtDeposit(r.deposit)}</td>
+        <td class="price">${fmtRent(r.rent)}</td>
+        <td>${fmtRent(r.maint)}</td>
+        <td class="total-price">${fmtRent(r.total)}</td>
+        <td>${r.type || '-'}</td>
+        <td>${fmtArea(r.area)}</td>
+        <td>${r.floor || '-'}</td>
+        <td style="max-width:160px;word-break:break-all;font-size:12px">${r.address || r.region || '-'}</td>
+        <td class="agency-cell">${agencyLabel}${r.phone ? '<br><span class="phone">' + r.phone + '</span>' : ''}</td>
+        <td><a href="${r.url}" target="_blank" class="link-btn">보기</a></td>`;
+
+      tr.addEventListener('click', e => {
+        if (e.target.tagName === 'A') return;
+        const m = allMarkers.find(x => x.data.id === r.id);
+        if (m && r.lat && r.lon) {
+          map.flyTo([r.lat, r.lon], 17, { duration: 0.6 });
+          m.marker.openPopup();
+        }
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Sort on header click
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) {
+        sortAsc = !sortAsc;
+      } else {
+        sortCol = col;
+        sortAsc = (th.dataset.num === '1'); // numeric: ascending first; text: ascending first
+      }
+      document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
+      th.classList.add('sorted');
+      render();
+    });
+  });
+
+  ['maxDeposit', 'maxRent', 'typeFilter', 'search'].forEach(id => {
+    document.getElementById(id).addEventListener('input', render);
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

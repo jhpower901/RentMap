@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>아주대 월세 매물 통합지도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'Noto Sans KR',sans-serif;font-size:14px;color:#222}
+nav{display:flex;align-items:center;gap:4px;padding:8px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:relative;z-index:600}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f0f0f0}
+nav a.active-nav{background:#222!important;color:#fff!important}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff}
+.badge-dabang{background:#FF5C38}
+.badge-daangn{background:#FF6F00}
+.badge-zigbang{background:#6366F1}
+.badge-naver{background:#03C75A}
+.map-wrap{position:relative;height:calc(100vh - 47px)}
+#map{height:100%;width:100%}
+.panel{position:absolute;top:12px;left:12px;z-index:500;background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 2px 12px rgba(0,0,0,.15);width:240px;max-height:calc(100vh - 100px);overflow-y:auto}
+.panel h2{font-size:15px;font-weight:700;margin-bottom:12px}
+.src-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.src-row label{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px}
+.src-row input[type=checkbox]{width:15px;height:15px;accent-color:#444;flex-shrink:0}
+.src-count{font-size:12px;color:#888;min-width:30px;text-align:right}
+.divider{border:none;border-top:1px solid #eee;margin:10px 0}
+.price-group{margin-bottom:10px}
+.price-group label{font-size:12px;color:#666;display:block;margin-bottom:3px}
+.price-group input[type=number]{width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px}
+.total-row{display:flex;justify-content:space-between;font-size:13px;color:#555;margin-bottom:10px}
+.total-row span{font-weight:700;color:#222}
+.page-links{display:flex;flex-direction:column;gap:5px}
+.page-links a{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:13px;transition:background .15s}
+.page-links a:hover{background:#f5f5f5}
+.page-links .cnt{font-size:12px;color:#888;margin-left:auto}
+.note-warn{font-size:11px;color:#856404;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:7px 9px;margin-top:10px;line-height:1.5}
+.leaflet-popup-content{font-size:13px;line-height:1.7;min-width:210px;max-width:265px}
+.popup-title{font-weight:700;margin-bottom:3px;font-size:14px;line-height:1.4}
+.popup-price{color:#c00;font-weight:700;font-size:15px}
+.popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
+.popup-meta{color:#555;font-size:12px}
+.link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;margin-top:5px;margin-right:4px}
+.link-btn:hover{background:#eee}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">🏠 아주대 월세</span>
+  <a href="index.html" class="active-nav">지도 전체</a>
+  <a href="dabang.html"><span class="badge badge-dabang">다방</span></a>
+  <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
+  <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
+  <a href="naver.html"><span class="badge badge-naver">네이버</span></a>
+</nav>
+<div class="map-wrap">
+  <div class="panel">
+    <h2>📍 통합 필터</h2>
+    <div class="src-row">
+      <label><input type="checkbox" id="chk_dabang" checked>
+        <span class="badge badge-dabang">다방</span>
+      </label>
+      <span class="src-count" id="cnt_dabang">-</span>
+    </div>
+    <div class="src-row">
+      <label><input type="checkbox" id="chk_daangn" checked>
+        <span class="badge badge-daangn">당근</span>
+      </label>
+      <span class="src-count" id="cnt_daangn">-</span>
+    </div>
+    <div class="src-row">
+      <label><input type="checkbox" id="chk_zigbang" checked>
+        <span class="badge badge-zigbang">직방</span>
+      </label>
+      <span class="src-count" id="cnt_zigbang">-</span>
+    </div>
+    <div class="src-row">
+      <label><input type="checkbox" id="chk_naver" checked>
+        <span class="badge badge-naver">네이버</span>
+      </label>
+      <span class="src-count" id="cnt_naver">-</span>
+    </div>
+    <hr class="divider">
+    <div class="price-group">
+      <label>보증금 최대 (만원)</label>
+      <input type="number" id="maxDeposit" value="3000" min="0" max="10000" step="100">
+    </div>
+    <div class="price-group">
+      <label>월세 최대 (만원)</label>
+      <input type="number" id="maxRent" value="60" min="0" max="200" step="5">
+    </div>
+    <div class="total-row">표시 중 <span id="totalCount">0</span>건</div>
+    <hr class="divider">
+    <div class="page-links">
+      <a href="dabang.html"><span class="badge badge-dabang">다방</span> 목록<span class="cnt" id="link_cnt_dabang"></span></a>
+      <a href="daangn.html"><span class="badge badge-daangn">당근</span> 목록<span class="cnt" id="link_cnt_daangn"></span></a>
+      <a href="zigbang.html"><span class="badge badge-zigbang">직방</span> 목록<span class="cnt" id="link_cnt_zigbang"></span></a>
+      <a href="naver.html"><span class="badge badge-naver">네이버</span> 목록<span class="cnt" id="link_cnt_naver"></span></a>
+    </div>
+    <div class="note-warn">⚠️ 네이버 데이터는 분당 지역 매물 포함 (지도 위치 다름)</div>
+  </div>
+  <div id="map"></div>
+</div>
+<script>
+// __DATA_DABANG__
+// __DATA_DAANGN__
+// __DATA_ZIGBANG__
+// __DATA_NAVER__
+
+(function() {
+  const ALL_DATA = {
+    dabang:  DATA_DABANG,
+    daangn:  DATA_DAANGN,
+    zigbang: DATA_ZIGBANG,
+    naver:   DATA_NAVER
+  };
+  const COLORS = {dabang:'#FF5C38', daangn:'#FF6F00', zigbang:'#6366F1', naver:'#03C75A'};
+  const NAMES  = {dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버'};
+
+  const map = L.map('map').setView([37.2769, 127.0435], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19
+  }).addTo(map);
+
+  // Ajou University marker
+  L.marker([37.2785, 127.0434]).addTo(map)
+    .bindPopup('<b>🎓 아주대학교 정문</b>');
+
+  function fmtDeposit(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '억';
+    return v + '만';
+  }
+  function fmtRent(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    return v + '만';
+  }
+
+  const allMarkers = [];
+
+  Object.entries(ALL_DATA).forEach(([src, rows]) => {
+    rows.forEach(r => {
+      if (!r.lat || !r.lon || r.lat === 0 || r.lon === 0) return;
+      const m = L.circleMarker([r.lat, r.lon], {
+        radius: 6,
+        fillColor: COLORS[src],
+        color: '#fff',
+        weight: 1.5,
+        fillOpacity: 0.85
+      }).addTo(map);
+
+      const agencyLabel = src === 'daangn'
+        ? (r.agency === 'DIRECT' ? '직거래' : '중개사')
+        : (r.agency || '');
+
+      const imgHtml = r.img1
+        ? `<img class="popup-img" src="${r.img1}" onerror="this.style.display='none'">`
+        : '';
+
+      m.bindPopup(`<div class="popup-title">
+  <span class="badge badge-${src}">${NAMES[src]}</span>
+  ${r.title || ''}
+</div>
+${imgHtml}
+<div class="popup-price">보증금 ${fmtDeposit(r.deposit)} / 월세 ${fmtRent(r.rent)}</div>
+<div class="popup-meta">관리비 ${fmtRent(r.maint)} &nbsp;|&nbsp; 총 <b>${fmtRent(r.total)}</b></div>
+<div class="popup-meta">${r.type || ''} &nbsp;|&nbsp; ${r.floor || ''}</div>
+<div class="popup-meta">${agencyLabel}${r.phone ? ' ' + r.phone : ''}</div>
+<div class="popup-meta" style="word-break:break-all">${r.address || r.region || ''}</div>
+<div>
+  <a href="${r.url}" target="_blank" class="link-btn">매물 보기 →</a>
+  <a href="${src}.html" class="link-btn">${NAMES[src]} 목록</a>
+</div>`);
+
+      allMarkers.push({ marker: m, src, data: r });
+    });
+  });
+
+  // Show total counts in panel links
+  Object.keys(ALL_DATA).forEach(src => {
+    const el = document.getElementById('link_cnt_' + src);
+    if (el) el.textContent = ALL_DATA[src].length + '건';
+  });
+
+  function applyFilter() {
+    const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 99999;
+    const maxRent = parseFloat(document.getElementById('maxRent').value) || 9999;
+    const shown   = {dabang: 0, daangn: 0, zigbang: 0, naver: 0};
+
+    allMarkers.forEach(({ marker, src, data }) => {
+      const chk     = document.getElementById('chk_' + src).checked;
+      const depOk   = data.deposit === null || data.deposit === undefined || data.deposit <= maxDep;
+      const rentOk  = data.rent    === null || data.rent    === undefined || data.rent    <= maxRent;
+      const visible = chk && depOk && rentOk;
+      marker.setStyle({
+        fillOpacity: visible ? 0.85 : 0,
+        opacity:     visible ? 1    : 0
+      });
+      if (visible) shown[src]++;
+    });
+
+    Object.keys(shown).forEach(src => {
+      const el = document.getElementById('cnt_' + src);
+      if (el) el.textContent = shown[src] + '건';
+    });
+    const total = Object.values(shown).reduce((a, b) => a + b, 0);
+    document.getElementById('totalCount').textContent = total;
+  }
+
+  ['chk_dabang','chk_daangn','chk_zigbang','chk_naver','maxDeposit','maxRent'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('change', applyFilter);
+    el.addEventListener('input',  applyFilter);
+  });
+
+  applyFilter();
+})();
+</script>
+</body>
+</html>
