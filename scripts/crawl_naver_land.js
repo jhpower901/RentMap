@@ -3,7 +3,7 @@ const path = require("node:path");
 const { chromium } = require("playwright");
 
 const DEFAULT_URL =
-  "https://new.land.naver.com/rooms?ms=2AzVQ9,3zkrDJ,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT";
+  "https://new.land.naver.com/rooms?ms=2AzWj5,3zkqG6,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT";
 
 function parseArgs(argv) {
   const args = {
@@ -15,6 +15,10 @@ function parseArgs(argv) {
     headed: false,
     cortarNo: "",   // force-override the cortarNo in the captured API URL
     skipHome: false, // skip initial home page visit
+    minLat: 37.273187,
+    maxLat: 37.282688,
+    minLng: 127.038562,
+    maxLng: 127.049312,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -28,9 +32,20 @@ function parseArgs(argv) {
     else if (arg === "--headed") args.headed = true;
     else if (arg === "--cortar-no" && next) args.cortarNo = next, i += 1;
     else if (arg === "--skip-home") args.skipHome = true;
+    else if (arg === "--min-lat" && next) args.minLat = Number(next), i += 1;
+    else if (arg === "--max-lat" && next) args.maxLat = Number(next), i += 1;
+    else if (arg === "--min-lng" && next) args.minLng = Number(next), i += 1;
+    else if (arg === "--max-lng" && next) args.maxLng = Number(next), i += 1;
   }
 
   return args;
+}
+
+function isInBbox(record, args) {
+  const lat = Number(record.latitude);
+  const lng = Number(record.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return true;
+  return lat >= args.minLat && lat <= args.maxLat && lng >= args.minLng && lng <= args.maxLng;
 }
 
 function findChrome(explicitPath) {
@@ -325,7 +340,8 @@ async function main() {
         const articleNo = getFirst(article, ["articleNo"]);
         if (articleNo && seen.has(articleNo)) continue;
         if (articleNo) seen.add(articleNo);
-        records.push(normalizeArticle(article, args.url, center));
+        const record = normalizeArticle(article, args.url, center);
+        if (isInBbox(record, args)) records.push(record);
       }
     }
 

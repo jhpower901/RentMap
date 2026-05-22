@@ -1,10 +1,14 @@
 param(
-    [string]$Url = "https://new.land.naver.com/rooms?ms=2AzVQ9,3zkrDJ,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT",
+    [string]$Url = "https://new.land.naver.com/rooms?ms=2AzWj5,3zkqG6,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT",
     [string]$OutputCsv = ".\data\naver_land_ajou_2026-05-22.csv",
     [string]$RawJson = "",
     [int]$MaxPages = 5,
     [string]$ChromePath = "",
-    [switch]$Headed
+    [switch]$Headed,
+    [double]$MinLat = 37.273187,
+    [double]$MaxLat = 37.282688,
+    [double]$MinLng = 127.038562,
+    [double]$MaxLng = 127.049312
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +30,10 @@ $args = @(
     "--url", $Url,
     "--output-csv", $OutputCsv,
     "--max-pages", "$MaxPages",
+    "--min-lat", "$MinLat",
+    "--max-lat", "$MaxLat",
+    "--min-lng", "$MinLng",
+    "--max-lng", "$MaxLng",
     "--skip-home"   # avoids Naver home page setting wrong cortarNo via IP geolocation
 )
 

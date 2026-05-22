@@ -151,7 +151,7 @@ function NormalNaver($r) {
 
 function ToJsArray($rows, $normFn) {
     $objs = $rows | ForEach-Object { & $normFn $_ }
-    return "[\n" + ($objs -join ",`n") + "`n]"
+    return "[`n" + ($objs -join ",`n") + "`n]"
 }
 
 # ---------------------------------------------------------------------------
@@ -195,13 +195,8 @@ Write-Platform "naver.html"   "naver"   "#03C75A" $jsNaver   ""
 
 # ---------------------------------------------------------------------------
 # Combined map page (index.html)
+# Async CSV loading via listing-data-source.js; no inline data needed.
 # ---------------------------------------------------------------------------
-$allJs = "const ALL_DATA = {`n  dabang:`n"  + $jsDabang  + ",`n" +
-                            "  daangn:`n"  + $jsDaangn  + ",`n" +
-                            "  zigbang:`n" + $jsZigbang + ",`n" +
-                            "  naver:`n"   + $jsNaver   + "`n};"
-
-$indexHtml = $tplIndex.Replace('__ALL_JS__', $allJs)
-[System.IO.File]::WriteAllText("$OutDir\index.html", $indexHtml, $enc)
+[System.IO.File]::WriteAllText("$OutDir\index.html", $tplIndex, $enc)
 Write-Host "Wrote $OutDir\index.html"
 Write-Host "Done. Open web\index.html in a browser (port 3000 via static server)."

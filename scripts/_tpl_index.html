@@ -40,7 +40,7 @@ nav a.active-nav{background:#222;color:#fff}
 .source-links{display:flex;flex-direction:column;gap:4px}
 .source-links a{display:flex;align-items:center;gap:7px;font-size:13px;padding:5px 6px;border-radius:7px;transition:background .15s}
 .source-links a:hover{background:#f5f5f5}
-.note-warn{font-size:11px;color:#a06000;background:#fff8e1;border-radius:5px;padding:5px 8px;line-height:1.5}
+.load-status{font-size:12px;color:#888;margin-top:6px;text-align:center}
 .leaflet-popup-content{font-size:13px;line-height:1.7;min-width:200px;max-width:250px}
 .popup-title{font-weight:700;margin-bottom:4px;font-size:14px}
 .popup-price{color:#c00;font-weight:700;font-size:14px}
@@ -61,10 +61,10 @@ nav a.active-nav{background:#222;color:#fff}
   <div id="map"></div>
   <div class="panel">
     <h2>통합 필터</h2>
-    <label><input type="checkbox" id="chk_dabang" checked> <span class="badge badge-dabang">다방</span> <span id="cnt_dabang">0</span>건</label>
-    <label><input type="checkbox" id="chk_daangn" checked> <span class="badge badge-daangn">당근</span> <span id="cnt_daangn">0</span>건</label>
-    <label><input type="checkbox" id="chk_zigbang" checked> <span class="badge badge-zigbang">직방</span> <span id="cnt_zigbang">0</span>건</label>
-    <label><input type="checkbox" id="chk_naver" checked> <span class="badge badge-naver">네이버</span> <span id="cnt_naver">0</span>건</label>
+    <label><input type="checkbox" id="chk_dabang" checked> <span class="badge badge-dabang">다방</span> <span id="cnt_dabang">-</span>건</label>
+    <label><input type="checkbox" id="chk_daangn" checked> <span class="badge badge-daangn">당근</span> <span id="cnt_daangn">-</span>건</label>
+    <label><input type="checkbox" id="chk_zigbang" checked> <span class="badge badge-zigbang">직방</span> <span id="cnt_zigbang">-</span>건</label>
+    <label><input type="checkbox" id="chk_naver" checked> <span class="badge badge-naver">네이버</span> <span id="cnt_naver">-</span>건</label>
     <div class="section">
       <div class="section-title">가격 필터</div>
       <div class="filter-field">
@@ -78,6 +78,7 @@ nav a.active-nav{background:#222;color:#fff}
     </div>
     <div class="section stats">
       <div class="stat-row"><span>표시 중</span><span class="total-count" id="totalCount">0</span>건</div>
+      <div class="load-status" id="loadStatus">로딩 중...</div>
     </div>
     <div class="section source-links">
       <a href="dabang.html"><span class="badge badge-dabang">다방</span> 목록 보기</a>
@@ -87,9 +88,8 @@ nav a.active-nav{background:#222;color:#fff}
     </div>
   </div>
 </div>
+<script src="listing-data-source.js"></script>
 <script>
-__ALL_JS__
-
 const COLORS = { dabang: '#FF5C38', daangn: '#FF6F00', zigbang: '#6366F1', naver: '#03C75A' };
 const NAMES  = { dabang: '다방', daangn: '당근', zigbang: '직방', naver: '네이버' };
 
@@ -103,32 +103,36 @@ function fmtRent(v) {
   return v + '만';
 }
 
+// Map setup
 const map = L.map('map').setView([37.2779, 127.0438], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
-
-// Ajou University marker
 L.marker([37.2785, 127.0434]).addTo(map).bindPopup('<b>아주대학교 정문</b>').openPopup();
 
 const allMarkers = [];
 
-Object.entries(ALL_DATA).forEach(([src, rows]) => {
+function addMarkersForSource(src, rows) {
+  const color = COLORS[src];
+  const name  = NAMES[src];
+  let visibleCount = 0;
+
   rows.forEach(r => {
     if (!r.lat || !r.lon) return;
+    visibleCount++;
     const m = L.circleMarker([r.lat, r.lon], {
-      radius: 6, fillColor: COLORS[src], color: '#fff', weight: 1.5, fillOpacity: 0.85
+      radius: 6, fillColor: color, color: '#fff', weight: 1.5, fillOpacity: 0.85
     }).addTo(map);
 
-    const imgHtml = r.img1
-      ? '<img class="popup-img" src="' + r.img1 + '" onerror="this.style.display=\'none\'">'
-      : '';
     const agencyDisp = (src === 'daangn')
       ? (r.agency === 'DIRECT' ? '직거래' : r.agency === 'BROKER' ? '중개사' : (r.agency || ''))
       : (r.agency || '');
+    const imgHtml = r.img1
+      ? '<img class="popup-img" src="' + r.img1 + '" onerror="this.style.display=\'none\'">'
+      : '';
 
     m.bindPopup(
-      '<div class="popup-title"><span class="badge badge-' + src + '">' + NAMES[src] + '</span> ' + (r.title || '') + '</div>' +
+      '<div class="popup-title"><span class="badge badge-' + src + '">' + name + '</span> ' + (r.title || '') + '</div>' +
       imgHtml +
       '<div class="popup-price">보증금 ' + fmtDeposit(r.deposit) + ' / 월세 ' + fmtRent(r.rent) + '</div>' +
       '<div class="popup-meta">관리비 ' + fmtRent(r.maint) + ' | 총 <b>' + fmtRent(r.total) + '</b></div>' +
@@ -136,12 +140,14 @@ Object.entries(ALL_DATA).forEach(([src, rows]) => {
       '<div class="popup-meta">' + (r.address || r.region || '') + '</div>' +
       '<div style="margin-top:6px">' +
         '<a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a> ' +
-        '<a href="' + src + '.html" class="link-btn">' + NAMES[src] + ' 목록</a>' +
+        '<a href="' + src + '.html" class="link-btn">' + name + ' 목록</a>' +
       '</div>'
     );
     allMarkers.push({ marker: m, src, data: r });
   });
-});
+
+  document.getElementById('cnt_' + src).textContent = visibleCount;
+}
 
 function applyFilter() {
   const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 9999;
@@ -149,9 +155,9 @@ function applyFilter() {
   const shown   = { dabang: 0, daangn: 0, zigbang: 0, naver: 0 };
 
   allMarkers.forEach(({ marker, src, data }) => {
-    const chk     = document.getElementById('chk_' + src).checked;
-    const depOk   = data.deposit === null || data.deposit <= maxDep;
-    const rentOk  = data.rent    === null || data.rent    <= maxRent;
+    const chk    = document.getElementById('chk_' + src).checked;
+    const depOk  = data.deposit === null || data.deposit <= maxDep;
+    const rentOk = data.rent    === null || data.rent    <= maxRent;
     if (chk && depOk && rentOk) {
       marker.setStyle({ fillOpacity: 0.85, opacity: 1 });
       shown[src]++;
@@ -166,13 +172,33 @@ function applyFilter() {
   document.getElementById('totalCount').textContent = Object.values(shown).reduce((a, b) => a + b, 0);
 }
 
+// Wire up filter controls
 ['chk_dabang', 'chk_daangn', 'chk_zigbang', 'chk_naver', 'maxDeposit', 'maxRent'].forEach(id => {
   const el = document.getElementById(id);
   el.addEventListener('change', applyFilter);
   el.addEventListener('input',  applyFilter);
 });
 
-applyFilter();
+// Load all platforms in parallel from CSV
+const SOURCES = ['dabang', 'daangn', 'zigbang', 'naver'];
+const loadStatus = document.getElementById('loadStatus');
+
+Promise.allSettled(
+  SOURCES.map(src =>
+    loadPlatformListings(src)
+      .then(rows => {
+        addMarkersForSource(src, rows);
+        applyFilter();
+      })
+      .catch(err => {
+        console.error('Failed to load', src, err);
+        document.getElementById('cnt_' + src).textContent = '!';
+      })
+  )
+).then(() => {
+  loadStatus.style.display = 'none';
+  applyFilter();
+});
 </script>
 </body>
 </html>
