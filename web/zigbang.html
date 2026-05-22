@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -206,6 +206,16 @@ function imageSrc(src) {
   if (SOURCE !== 'zigbang' || !src.startsWith('https://ic.zigbang.com/') || src.includes('?')) return src;
   return src + '?w=400&h=300&q=70';
 }
+function scheduleImageLoad(container) {
+  const load = () => {
+    container.querySelectorAll('img[data-src]').forEach(img => {
+      img.src = img.dataset.src;
+      img.removeAttribute('data-src');
+    });
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 800 });
+  else setTimeout(load, 0);
+}
 
 function sortData(data, col, asc) {
   return [...data].sort((a, b) => {
@@ -307,6 +317,7 @@ function render() {
     });
     tbody.appendChild(tr);
   });
+  scheduleImageLoad(tbody);
 }
 
 // Sort headers

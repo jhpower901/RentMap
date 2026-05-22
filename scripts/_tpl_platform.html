@@ -145,6 +145,21 @@ function fmtArea(v) {
     return isNaN(n) ? p : n.toFixed(1);
   }).join('/') + 'm²';
 }
+function imageSrc(src) {
+  if (!src) return '';
+  if (SOURCE !== 'zigbang' || !src.startsWith('https://ic.zigbang.com/') || src.includes('?')) return src;
+  return src + '?w=400&h=300&q=70';
+}
+function scheduleImageLoad(container) {
+  const load = () => {
+    container.querySelectorAll('img[data-src]').forEach(img => {
+      img.src = img.dataset.src;
+      img.removeAttribute('data-src');
+    });
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 800 });
+  else setTimeout(load, 0);
+}
 
 function sortData(data, col, asc) {
   return [...data].sort((a, b) => {
@@ -175,7 +190,7 @@ RAW.forEach(r => {
     radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
   }).addTo(map);
   const imgHtml = r.img1
-    ? '<img class="popup-img" src="' + r.img1 + '" onerror="this.style.display=\'none\'">'
+    ? '<img class="popup-img" src="' + imageSrc(r.img1) + '" onerror="this.style.display=\'none\'">'
     : '';
   m.bindPopup(
     '<div class="popup-title">' + (r.title || '') + '</div>' +
@@ -226,7 +241,7 @@ function render() {
   filtered.forEach(r => {
     const tr = document.createElement('tr');
     const imgCell = r.img1
-      ? '<img class="img-thumb" src="' + r.img1 + '" loading="lazy" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
+      ? '<img class="img-thumb" data-src="' + imageSrc(r.img1) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
       : '<div class="no-img">사진없음</div>';
     tr.innerHTML =
       '<td>' + imgCell + '</td>' +
@@ -246,6 +261,7 @@ function render() {
     });
     tbody.appendChild(tr);
   });
+  scheduleImageLoad(tbody);
 }
 
 // Sort headers

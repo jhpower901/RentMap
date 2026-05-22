@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -104,7 +104,7 @@ tr:hover td{background:#fafafa;cursor:pointer}
 <script>
 const SOURCE  = 'daangn';
 const ACCENT  = '#FF6F00';
-const RAW     = [\n{"id":3567539,"total":44,"lat":37.273937063995,"address":"경기도 수원시 영통구 매여울로67번길 21 (매탄동)","rent":35,"deposit":100,"area":19.00,"region":"수원시 영통구 매탄3동","floor":4.0,"title":"오픈형 원룸 100만원/39만원 - 경기도 수원시 영통구","type":"OPEN_ONE_ROOM","img2":"https://img.kr.gcp-karroter.net/realty/article/3567539/01KRQY0YYJM9N9B59H23MX9TWR.png?q=95&s=1440x1440&t=inside&service=realty","source":"daangn","lon":127.0438974331,"agency":"BROKER","maint":9,"phone":"","img1":"https://img.kr.gcp-karroter.net/realty/article/3567539/01KRQY0YMANCX6HC9C9ABVK7RY.png?q=95&s=1440x1440&t=inside&service=realty","url":"https://realty.daangn.com/articles/3567539"},
+const RAW     = [{"id":3567539,"total":44,"lat":37.273937063995,"address":"경기도 수원시 영통구 매여울로67번길 21 (매탄동)","rent":35,"deposit":100,"area":19.00,"region":"수원시 영통구 매탄3동","floor":4.0,"title":"오픈형 원룸 100만원/39만원 - 경기도 수원시 영통구","type":"OPEN_ONE_ROOM","img2":"https://img.kr.gcp-karroter.net/realty/article/3567539/01KRQY0YYJM9N9B59H23MX9TWR.png?q=95&s=1440x1440&t=inside&service=realty","source":"daangn","lon":127.0438974331,"agency":"BROKER","maint":9,"phone":"","img1":"https://img.kr.gcp-karroter.net/realty/article/3567539/01KRQY0YMANCX6HC9C9ABVK7RY.png?q=95&s=1440x1440&t=inside&service=realty","url":"https://realty.daangn.com/articles/3567539"},
 {"id":3362534,"total":48,"lat":37.273795431412,"address":"경기도 수원시 영통구 매여울로67번길 11 (매탄동)","rent":40,"deposit":1000,"area":25.00,"region":"수원시 영통구 매탄4동","floor":2.0,"title":"분리형 원룸 1,000만원/40만원 - 경기도 수원시 영통구","type":"SPLIT_ONE_ROOM","img2":"https://img.kr.gcp-karroter.net/realty/article/3362534/01KRQBCBMHF4T7ZB7DA6TC773K.png?q=95&s=1440x1440&t=inside&service=realty","source":"daangn","lon":127.04439624076,"agency":"BROKER","maint":8,"phone":"","img1":"https://img.kr.gcp-karroter.net/realty/article/3362534/01KRQBCAZXKTPM36FD4YS4K2G9.png?q=95&s=1440x1440&t=inside&service=realty","url":"https://realty.daangn.com/articles/3362534"},
 {"id":3604068,"total":29.5,"lat":37.278953478208,"address":"경기도 수원시 영통구 월드컵로193번길 8 (원천동)","rent":25,"deposit":80,"area":13.22,"region":"수원시 팔달구 우만1동","floor":4.0,"title":"오픈형 원룸 80만원/25만원 - 아주대학교 도보1분컷 / 유학생환","type":"OPEN_ONE_ROOM","img2":"https://img.kr.gcp-karroter.net/realty/article/3604068/01KS4R2FX4J3A7GKH2Y53X6G7N.png?q=95&s=1440x1440&t=inside&service=realty","source":"daangn","lon":127.04445937229,"agency":"BROKER","maint":4.5,"phone":"","img1":"https://img.kr.gcp-karroter.net/realty/article/3604068/01KS4R2FNVWA5J969VQTDEA29Y.png?q=95&s=1440x1440&t=inside&service=realty","url":"https://realty.daangn.com/articles/3604068"},
 {"id":3545028,"total":35,"lat":37.278953478208,"address":"경기도 수원시 영통구 월드컵로193번길 8 (원천동)","rent":30,"deposit":100,"area":9.90,"region":"수원시 팔달구 우만1동","floor":5.0,"title":"오픈형 원룸 100만원/30만원 - 경기도 수원시 영통구","type":"OPEN_ONE_ROOM","img2":"https://img.kr.gcp-karroter.net/realty/article/3545028/01KRGEK43RA53GYYBJ9C416XEB.png?q=95&s=1440x1440&t=inside&service=realty","source":"daangn","lon":127.04445937229,"agency":"DIRECT","maint":5,"phone":"","img1":"https://img.kr.gcp-karroter.net/realty/article/3545028/01KRGEK3XCNYEWBW425CDZXRTV.png?q=95&s=1440x1440&t=inside&service=realty","url":"https://realty.daangn.com/articles/3545028"},
@@ -156,6 +156,21 @@ function fmtArea(v) {
     return isNaN(n) ? p : n.toFixed(1);
   }).join('/') + 'm²';
 }
+function imageSrc(src) {
+  if (!src) return '';
+  if (SOURCE !== 'zigbang' || !src.startsWith('https://ic.zigbang.com/') || src.includes('?')) return src;
+  return src + '?w=400&h=300&q=70';
+}
+function scheduleImageLoad(container) {
+  const load = () => {
+    container.querySelectorAll('img[data-src]').forEach(img => {
+      img.src = img.dataset.src;
+      img.removeAttribute('data-src');
+    });
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 800 });
+  else setTimeout(load, 0);
+}
 
 function sortData(data, col, asc) {
   return [...data].sort((a, b) => {
@@ -186,7 +201,7 @@ RAW.forEach(r => {
     radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
   }).addTo(map);
   const imgHtml = r.img1
-    ? '<img class="popup-img" src="' + r.img1 + '" onerror="this.style.display=\'none\'">'
+    ? '<img class="popup-img" src="' + imageSrc(r.img1) + '" onerror="this.style.display=\'none\'">'
     : '';
   m.bindPopup(
     '<div class="popup-title">' + (r.title || '') + '</div>' +
@@ -237,7 +252,7 @@ function render() {
   filtered.forEach(r => {
     const tr = document.createElement('tr');
     const imgCell = r.img1
-      ? '<img class="img-thumb" src="' + r.img1 + '" loading="lazy" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
+      ? '<img class="img-thumb" data-src="' + imageSrc(r.img1) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
       : '<div class="no-img">사진없음</div>';
     tr.innerHTML =
       '<td>' + imgCell + '</td>' +
@@ -257,6 +272,7 @@ function render() {
     });
     tbody.appendChild(tr);
   });
+  scheduleImageLoad(tbody);
 }
 
 // Sort headers

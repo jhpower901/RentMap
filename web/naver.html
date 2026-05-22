@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -104,7 +104,7 @@ tr:hover td{background:#fafafa;cursor:pointer}
 <script>
 const SOURCE  = 'naver';
 const ACCENT  = '#03C75A';
-const RAW     = [\n{"id":2626530275,"total":40,"lat":37.264866,"address":"일반원룸","rent":40,"deposit":500,"area":"26/23","region":"","floor":"5/7","title":"무융자. 세스코방역. 깔끔. 광교인접","type":"원룸","img2":"","source":"naver","lon":127.064473,"agency":"365부동산공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260518_13/17791076479119YJil_JPEG/PM-1.P-eq/25e46b270422af16d4cc1ed78627f697.jpg","url":"https://new.land.naver.com/rooms?articleNo=2626530275"},
+const RAW     = [{"id":2626530275,"total":40,"lat":37.264866,"address":"일반원룸","rent":40,"deposit":500,"area":"26/23","region":"","floor":"5/7","title":"무융자. 세스코방역. 깔끔. 광교인접","type":"원룸","img2":"","source":"naver","lon":127.064473,"agency":"365부동산공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260518_13/17791076479119YJil_JPEG/PM-1.P-eq/25e46b270422af16d4cc1ed78627f697.jpg","url":"https://new.land.naver.com/rooms?articleNo=2626530275"},
 {"id":2625918712,"total":50,"lat":37.260845,"address":"일반원룸","rent":50,"deposit":500,"area":"29/26","region":"","floor":"6/7","title":"오피스텔급 깔끔. 샤워부스. 수납굿. 넓은방","type":"원룸","img2":"","source":"naver","lon":127.06107,"agency":"365부동산공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260513_133/1778674558116mbBnW_JPEG/PM-1.P-eq/db2ce5193d1f7b97cfd55a96dc91473d.jpg","url":"https://new.land.naver.com/rooms?articleNo=2625918712"},
 {"id":2626713493,"total":75,"lat":37.274539,"address":"다가구","rent":75,"deposit":2000,"area":"55/50","region":"","floor":"2/4","title":"광교원천마을, 투룸월세, 빠른입주","type":"단독/다가구","img2":"","source":"naver","lon":127.05168,"agency":"광교골드합동공인중개사사무소","maint":null,"phone":"","img1":"","url":"https://new.land.naver.com/rooms?articleNo=2626713493"},
 {"id":2627717542,"total":88,"lat":37.272348,"address":"더샵광교레이크시티","rent":88,"deposit":1000,"area":"51/21","region":"","floor":"고/41","title":"탁트인뷰.5월입주.1룸.전입o.풀옵션.특화된커뮤니티시설.","type":"오피스텔","img2":"","source":"naver","lon":127.060656,"agency":"광교더샵골드공인중개사사무소","maint":null,"phone":"","img1":"https://landthumb-phinf.pstatic.net/20260522_253/1779413875293khMJF_JPEG/2627717542_20260522103752742633.jpg","url":"https://new.land.naver.com/rooms?articleNo=2627717542"},
@@ -245,6 +245,21 @@ function fmtArea(v) {
     return isNaN(n) ? p : n.toFixed(1);
   }).join('/') + 'm²';
 }
+function imageSrc(src) {
+  if (!src) return '';
+  if (SOURCE !== 'zigbang' || !src.startsWith('https://ic.zigbang.com/') || src.includes('?')) return src;
+  return src + '?w=400&h=300&q=70';
+}
+function scheduleImageLoad(container) {
+  const load = () => {
+    container.querySelectorAll('img[data-src]').forEach(img => {
+      img.src = img.dataset.src;
+      img.removeAttribute('data-src');
+    });
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 800 });
+  else setTimeout(load, 0);
+}
 
 function sortData(data, col, asc) {
   return [...data].sort((a, b) => {
@@ -275,7 +290,7 @@ RAW.forEach(r => {
     radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
   }).addTo(map);
   const imgHtml = r.img1
-    ? '<img class="popup-img" src="' + r.img1 + '" onerror="this.style.display=\'none\'">'
+    ? '<img class="popup-img" src="' + imageSrc(r.img1) + '" onerror="this.style.display=\'none\'">'
     : '';
   m.bindPopup(
     '<div class="popup-title">' + (r.title || '') + '</div>' +
@@ -326,7 +341,7 @@ function render() {
   filtered.forEach(r => {
     const tr = document.createElement('tr');
     const imgCell = r.img1
-      ? '<img class="img-thumb" src="' + r.img1 + '" loading="lazy" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
+      ? '<img class="img-thumb" data-src="' + imageSrc(r.img1) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
       : '<div class="no-img">사진없음</div>';
     tr.innerHTML =
       '<td>' + imgCell + '</td>' +
@@ -346,6 +361,7 @@ function render() {
     });
     tbody.appendChild(tr);
   });
+  scheduleImageLoad(tbody);
 }
 
 // Sort headers
