@@ -7,53 +7,43 @@
   };
 
   function parseCsv(text) {
-    const rows = [];
-    let row = [];
-    let value = "";
-    let inQuotes = false;
+    if (!text) return [];
+    const lines = text.split(/\r?\n/).filter(line => line.trim());
+    if (lines.length === 0) return [];
 
-    for (let i = 0; i < text.length; i += 1) {
-      const ch = text[i];
-      const next = text[i + 1];
-
-      if (inQuotes) {
-        if (ch === '"' && next === '"') {
-          value += '"';
-          i += 1;
-        } else if (ch === '"') {
-          inQuotes = false;
+    const parseLine = (line) => {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
         } else {
-          value += ch;
+          current += char;
         }
-        continue;
       }
+      result.push(current.trim());
+      return result;
+    };
 
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ",") {
-        row.push(value);
-        value = "";
-      } else if (ch === "\n") {
-        row.push(value);
-        rows.push(row);
-        row = [];
-        value = "";
-      } else if (ch !== "\r") {
-        value += ch;
-      }
-    }
+    const rawHeaders = parseLine(lines[0]);
+    const headers = rawHeaders.map(h => h.replace(/^\uFEFF/, '').replace(/^["']|["']$/g, '').trim());
 
-    if (value !== "" || row.length) {
-      row.push(value);
-      rows.push(row);
-    }
-
-    if (!rows.length) return [];
-    const headers = rows[0].map((header) => header.replace(/^\uFEFF/, ""));
-    return rows.slice(1).filter((cells) => cells.some((cell) => cell !== "")).map((cells) => {
+    return lines.slice(1).map(line => {
+      const cells = parseLine(line);
       const record = {};
-      headers.forEach((header, index) => {
-        record[header] = cells[index] ?? "";
+      headers.forEach((h, i) => {
+        let val = cells[i] || '';
+        record[h] = val.replace(/^["']|["']$/g, '').trim();
       });
       return record;
     });
@@ -76,7 +66,6 @@
   function normalizeImageUrl(source, value) {
     if (!value) return "";
     if (source !== "zigbang") return value;
-
     try {
       const url = new URL(value);
       if (url.hostname !== "ic.zigbang.com") return value;
@@ -98,7 +87,9 @@
       : firstValue(record, ["region"]);
 
     const agency = source === "daangn"
-      ? (record.writer_type === "DIRECT_USER" || record.writer_type === "DIRECT" ? "DIRECT" : "BROKER")
+      ? (record.writer_type === "DIRECT_USER" || record.writer_type === "DIRECT"
+          ? "DIRECT"
+          : (firstValue(record, ["agency"]) || "BROKER"))
       : firstValue(record, ["agency", "realtor_name"]);
 
     return {
@@ -127,6 +118,9 @@
   async function loadPlatformListings(source) {
     const csvPaths = CSV_PATHS[source];
     if (!csvPaths) throw new Error(`Unknown listing source: ${source}`);
+
+    const globalKey = 'DATA_' + source.toUpperCase();
+    if (Array.isArray(window[globalKey])) return window[globalKey];
 
     let response = null;
     let loadedPath = "";

@@ -46,12 +46,16 @@ nav a.active-nav{background:#222;color:#fff}
 .popup-price{color:#c00;font-weight:700;font-size:14px}
 .popup-img{width:100%;max-height:120px;object-fit:cover;border-radius:6px;margin:4px 0}
 .popup-meta{color:#555;font-size:12px}
+.link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
+.link-btn:hover{background:#eee}
+.heart-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;vertical-align:middle}
 </style>
 </head>
 <body>
 <nav>
   <span class="brand">아주대 월세</span>
   <a href="index.html" class="active-nav">지도</a>
+  <a href="favorites.html">❤️ 좋아요</a>
   <a href="dabang.html"><span class="badge badge-dabang">다방</span></a>
   <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
   <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
@@ -88,7 +92,12 @@ nav a.active-nav{background:#222;color:#fff}
     </div>
   </div>
 </div>
+<script src="data_dabang.js"></script>
+<script src="data_daangn.js"></script>
+<script src="data_zigbang.js"></script>
+<script src="data_naver.js"></script>
 <script src="listing-data-source.js"></script>
+<script src="favorites.js"></script>
 <script>
 const COLORS = { dabang: '#FF5C38', daangn: '#FF6F00', zigbang: '#6366F1', naver: '#03C75A' };
 const NAMES  = { dabang: '다방', daangn: '당근', zigbang: '직방', naver: '네이버' };
@@ -108,7 +117,7 @@ const map = L.map('map').setView([37.2779, 127.0438], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
-L.marker([37.2785, 127.0434]).addTo(map).bindPopup('<b>아주대학교 정문</b>').openPopup();
+L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>').openPopup();
 
 const allMarkers = [];
 
@@ -138,9 +147,12 @@ function addMarkersForSource(src, rows) {
       '<div class="popup-meta">관리비 ' + fmtRent(r.maint) + ' | 총 <b>' + fmtRent(r.total) + '</b></div>' +
       '<div class="popup-meta">' + agencyDisp + (r.phone ? ' ' + r.phone : '') + '</div>' +
       '<div class="popup-meta">' + (r.address || r.region || '') + '</div>' +
-      '<div style="margin-top:6px">' +
+      '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
         '<a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a> ' +
-        '<a href="' + src + '.html" class="link-btn">' + name + ' 목록</a>' +
+        '<a href="' + src + '.html" class="link-btn">' + name + ' 목록</a> ' +
+        '<button class="heart-btn" onclick="toggleFavFromPopup(\'' + r.id + '\',\'' + src + '\',this)">' +
+          (window.Favorites && window.Favorites.isFav(r.id, src) ? '❤️' : '🤍') +
+        '</button>' +
       '</div>'
     );
     allMarkers.push({ marker: m, src, data: r });
@@ -172,6 +184,19 @@ function applyFilter() {
   document.getElementById('totalCount').textContent = Object.values(shown).reduce((a, b) => a + b, 0);
 }
 
+function toggleFavFromPopup(id, src, btn) {
+  if (!window.Favorites) return;
+  const entry = allMarkers.find(x => String(x.data.id) === String(id) && x.src === src);
+  if (!entry) return;
+  if (window.Favorites.isFav(id, src)) {
+    window.Favorites.remove(id, src);
+    btn.textContent = '🤍';
+  } else {
+    window.Favorites.add(entry.data);
+    btn.textContent = '❤️';
+  }
+}
+
 // Wire up filter controls
 ['chk_dabang', 'chk_daangn', 'chk_zigbang', 'chk_naver', 'maxDeposit', 'maxRent'].forEach(id => {
   const el = document.getElementById(id);
@@ -183,21 +208,26 @@ function applyFilter() {
 const SOURCES = ['dabang', 'daangn', 'zigbang', 'naver'];
 const loadStatus = document.getElementById('loadStatus');
 
-Promise.allSettled(
-  SOURCES.map(src =>
-    loadPlatformListings(src)
-      .then(rows => {
-        addMarkersForSource(src, rows);
+let loadedCount = 0;
+SOURCES.forEach(src => {
+  loadPlatformListings(src)
+    .then(rows => {
+      addMarkersForSource(src, rows);
+      loadedCount++;
+      if (loadedCount === SOURCES.length) {
+        loadStatus.style.display = 'none';
         applyFilter();
-      })
-      .catch(err => {
-        console.error('Failed to load', src, err);
-        document.getElementById('cnt_' + src).textContent = '!';
-      })
-  )
-).then(() => {
-  loadStatus.style.display = 'none';
-  applyFilter();
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load', src, err);
+      document.getElementById('cnt_' + src).textContent = '!';
+      loadedCount++;
+      if (loadedCount === SOURCES.length) {
+        loadStatus.style.display = 'none';
+        applyFilter();
+      }
+    });
 });
 </script>
 </body>

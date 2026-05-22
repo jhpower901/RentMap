@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "web-preview",
-      "runtimeExecutable": "C:/Users/ajh01/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
-      "runtimeArgs": ["C:/Users/ajh01/AppData/Local/Temp/static_server.js", "web"],
+      "runtimeExecutable": "C:/Users/Jaehyung Ahn/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
+      "runtimeArgs": ["C:/Users/Jaehyung Ahn/AppData/Local/Temp/static_server.js", "C:/Users/Jaehyung Ahn/Nextcloud/git/RentMap/web", "3000"],
       "port": 3000
     }
   ]

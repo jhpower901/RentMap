@@ -54,12 +54,14 @@ tr:hover td{background:#fafafa;cursor:pointer}
 .popup-price{color:#c00;font-weight:700;font-size:15px}
 .popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
 .popup-meta{color:#555;font-size:12px}
+.heart-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;vertical-align:middle}
 </style>
 </head>
 <body>
 <nav>
   <span class="brand">아주대 월세</span>
   <a href="index.html">지도</a>
+  <a href="favorites.html" id="nav-favorites">❤️ 좋아요</a>
   <a href="dabang.html" id="nav-dabang"><span class="badge badge-dabang">다방</span></a>
   <a href="daangn.html" id="nav-daangn"><span class="badge badge-daangn">당근</span></a>
   <a href="zigbang.html" id="nav-zigbang"><span class="badge badge-zigbang">직방</span></a>
@@ -80,6 +82,7 @@ tr:hover td{background:#fafafa;cursor:pointer}
       <table id="tbl">
         <thead>
           <tr>
+            <th style="width:6px;padding:0"></th>
             <th>사진</th>
             <th data-col="deposit" data-num="1">보증금</th>
             <th data-col="rent" data-num="1">월세</th>
@@ -91,6 +94,7 @@ tr:hover td{background:#fafafa;cursor:pointer}
             <th data-col="address">주소</th>
             <th data-col="agency">중개</th>
             <th>링크</th>
+            <th style="width:38px;text-align:center">❤️</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
@@ -101,6 +105,7 @@ tr:hover td{background:#fafafa;cursor:pointer}
     </div>
   </div>
 </div>
+<script src="favorites.js"></script>
 <script>
 const SOURCE  = 'dabang';
 const ACCENT  = '#FF5C38';
@@ -222,6 +227,19 @@ const RAW     = [
 {"id":57161205,"total":58,"lat":37.2762024203,"address":"경기도 수원시 팔달구 우만동","rent":50,"deposit":1000,"area":23.14,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"+포돌이 추천+ 1층인데 2층 느낌 풀옵션 넓은 원룸","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/H9vgCdkn5TxJRpBHSFzr3","source":"dabang","lon":127.0422150847,"agency":"포돌이부동산공인중개사사무소","maint":8,"phone":"010-3091-0527","img1":"https://d1774jszgerdmk.cloudfront.net/1024/bcLR4YNLL6eahoHtencOj","url":"https://www.dabangapp.com/room/6a0e74e8b1c8380858ebc792"}
 ];
 
+const PALETTE = [
+  '#e6194B','#3cb44b','#4363d8','#f58231','#911eb4',
+  '#42d4f4','#f032e6','#469990','#9a6324','#800000',
+  '#808000','#000075','#6F4E37','#C71585','#556B2F',
+];
+const agencyColors = (() => {
+  const keys = [...new Set(RAW.map(r => r.agency).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b),'ko'));
+  const out = {};
+  keys.forEach((k, i) => { out[k] = PALETTE[i % PALETTE.length]; });
+  return out;
+})();
+function agencyColor(agency) { return agencyColors[agency] || ACCENT; }
+
 const PLATFORM_NAMES = {
   dabang: '다방', daangn: '당근부동산', zigbang: '직방', naver: '네이버부동산'
 };
@@ -297,7 +315,7 @@ const map = L.map('map').setView([37.2779, 127.0438], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
-L.marker([37.2785, 127.0434]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
+L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
 // Re-measure on orientation change / window resize so tiles fill the container
 window.addEventListener('resize', () => map.invalidateSize());
 
@@ -305,7 +323,7 @@ const markerMap = new Map();
 RAW.forEach(r => {
   if (!r.lat || !r.lon) return;
   const m = L.circleMarker([r.lat, r.lon], {
-    radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
+    radius: 7, fillColor: agencyColor(r.agency), color: '#fff', weight: 2, fillOpacity: 0.85
   }).addTo(map);
   const imgHtml = r.img1
     ? '<img class="popup-img" src="' + imageSrc(r.img1) + '" onerror="this.style.display=\'none\'">'
@@ -315,7 +333,7 @@ RAW.forEach(r => {
     imgHtml +
     '<div class="popup-price">보증금 ' + fmtDeposit(r.deposit) + ' / 월세 ' + fmtRent(r.rent) + '</div>' +
     '<div class="popup-meta">관리비 ' + fmtRent(r.maint) + ' | 총 ' + fmtRent(r.total) + '</div>' +
-    '<div class="popup-meta">' + agencyLabel(r.agency) + (r.phone ? ' ' + r.phone : '') + '</div>' +
+    '<div class="popup-meta"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + agencyColor(r.agency) + ';vertical-align:middle;margin-right:4px"></span>' + agencyLabel(r.agency) + (r.phone ? ' ' + r.phone : '') + '</div>' +
     '<div class="popup-meta">' + (r.address || r.region || '') + '</div>' +
     '<div style="margin-top:6px"><a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a></div>'
   );
@@ -362,6 +380,7 @@ function render() {
       ? '<img class="img-thumb" data-src="' + imageSrc(r.img1) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
       : '<div class="no-img">사진없음</div>';
     tr.innerHTML =
+      '<td style="padding:0;width:6px;background:' + agencyColor(r.agency) + '"></td>' +
       '<td>' + imgCell + '</td>' +
       '<td class="price">' + fmtDeposit(r.deposit) + '</td>' +
       '<td class="price">' + fmtRent(r.rent) + '</td>' +
@@ -372,7 +391,10 @@ function render() {
       '<td>' + (r.floor || '-') + '</td>' +
       '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (r.address || r.region || '-') + '</td>' +
       '<td class="agency-cell">' + agencyLabel(r.agency) + (r.phone ? '<br><span class="phone-small">' + r.phone + '</span>' : '') + '</td>' +
-      '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>';
+      '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
+      '<td style="text-align:center"><button class="heart-btn" onclick="toggleFav(\'' + r.id + '\',\'' + r.source + '\',this)">' +
+        (window.Favorites && window.Favorites.isFav(r.id, r.source) ? '❤️' : '🤍') +
+      '</button></td>';
     tr.addEventListener('click', () => {
       const entry = markerMap.get(r.id);
       if (entry && r.lat && r.lon) { map.flyTo([r.lat, r.lon], 17, { duration: 0.5 }); entry.marker.openPopup(); }
@@ -398,6 +420,20 @@ document.querySelectorAll('th[data-col]').forEach(th => {
 ['maxDeposit', 'maxRent', 'typeFilter', 'search'].forEach(id => {
   document.getElementById(id).addEventListener('input', render);
 });
+
+function toggleFav(id, source, btn) {
+  if (!window.Favorites) return;
+  const r = RAW.find(x => String(x.id) === String(id));
+  if (!r) return;
+  event.stopPropagation();
+  if (window.Favorites.isFav(id, source)) {
+    window.Favorites.remove(id, source);
+    btn.textContent = '🤍';
+  } else {
+    window.Favorites.add(r);
+    btn.textContent = '❤️';
+  }
+}
 
 render();
 </script>

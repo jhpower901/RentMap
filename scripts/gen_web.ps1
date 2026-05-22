@@ -75,8 +75,9 @@ function NormalDabang($r) {
 }
 
 function NormalDaangn($r) {
-    # Use ASCII codes DIRECT/BROKER; JS template translates to Korean display labels
-    $agency = if ($r.writer_type -eq "DIRECT_USER") { "DIRECT" } else { "BROKER" }
+    $agency = if ($r.writer_type -eq "DIRECT_USER") { "DIRECT" }
+              elseif ($r.agency -ne "" -and $null -ne $r.agency) { $r.agency }
+              else { "BROKER" }
     $region = @($r.region_depth2, $r.region_depth3) | Where-Object { $_ -ne "" } | Select-Object -First 2
     return ToJsObj @{
         source  = "daangn"
@@ -194,9 +195,17 @@ Write-Platform "zigbang.html" "zigbang" "#6366F1" $jsZigbang ""
 Write-Platform "naver.html"   "naver"   "#03C75A" $jsNaver   ""
 
 # ---------------------------------------------------------------------------
+# Inline data JS files for file:// compatibility
+# ---------------------------------------------------------------------------
+[System.IO.File]::WriteAllText("$OutDir\data_dabang.js",  "window.DATA_DABANG = $jsDabang;",   $enc)
+[System.IO.File]::WriteAllText("$OutDir\data_daangn.js",  "window.DATA_DAANGN = $jsDaangn;",   $enc)
+[System.IO.File]::WriteAllText("$OutDir\data_zigbang.js", "window.DATA_ZIGBANG = $jsZigbang;", $enc)
+[System.IO.File]::WriteAllText("$OutDir\data_naver.js",   "window.DATA_NAVER = $jsNaver;",     $enc)
+Write-Host "Wrote inline data JS files."
+
+# ---------------------------------------------------------------------------
 # Combined map page (index.html)
-# Async CSV loading via listing-data-source.js; no inline data needed.
 # ---------------------------------------------------------------------------
 [System.IO.File]::WriteAllText("$OutDir\index.html", $tplIndex, $enc)
 Write-Host "Wrote $OutDir\index.html"
-Write-Host "Done. Open web\index.html in a browser (port 3000 via static server)."
+Write-Host "Done."

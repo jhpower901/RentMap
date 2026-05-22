@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>좋아요 목록 - 아주대 월세</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f0f0f0}
+nav a.active-nav{background:#222;color:#fff}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.badge-dabang{background:#FF5C38}.badge-daangn{background:#FF6F00}.badge-zigbang{background:#6366F1}.badge-naver{background:#03C75A}.badge-manual{background:#607D8B}
+.page{max-width:860px;margin:0 auto;padding:16px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
+.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;flex:1;min-width:140px}
+.count{font-size:13px;color:#666;font-weight:600;margin-left:auto}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;font-family:inherit}
+.btn:hover{background:#f0f0f0}
+.btn-danger{border-color:#ffcccc;color:#c00}
+.btn-danger:hover{background:#fff0f0}
+.btn-primary{background:#222;color:#fff;border-color:#222}
+.btn-primary:hover{background:#333}
+
+/* Card */
+.fav-card{background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 4px #0002;overflow:hidden}
+.fav-header{padding:11px 14px;display:flex;align-items:flex-start;gap:8px;cursor:pointer;flex-wrap:wrap}
+.fav-header:hover{background:#fafafa}
+.fav-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
+.fav-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+.fav-price{font-size:13px;color:#c00;font-weight:700;white-space:nowrap}
+.fav-sub{font-size:12px;color:#888;flex-basis:100%;margin-top:2px}
+.status-badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap}
+.s-ok{background:#e8f5e9;color:#2e7d32}
+.s-gone{background:#ffebee;color:#c62828}
+.s-manual{background:#eceff1;color:#37474f}
+.s-unknown{background:#f5f5f5;color:#888}
+.score-chip{font-size:12px;background:#fff8e1;color:#e65100;padding:2px 7px;border-radius:10px;font-weight:700;white-space:nowrap}
+.score-chip.none{background:#f5f5f5;color:#bbb}
+.fav-actions{display:flex;gap:5px;align-items:center;flex-shrink:0}
+.expand-arrow{font-size:12px;color:#bbb;margin-left:2px;transition:transform .2s;align-self:center}
+.fav-card.open .expand-arrow{transform:rotate(180deg)}
+
+/* Detail */
+.fav-detail{display:none;border-top:1px solid #f0f0f0;padding:14px 16px}
+.fav-card.open .fav-detail{display:block}
+.sec{margin-top:14px;padding-top:12px;border-top:1px solid #f0f0f0}
+.sec:first-child{margin-top:0;padding-top:0;border-top:none}
+.sec-title{font-size:13px;font-weight:700;color:#555;margin-bottom:8px}
+
+/* Photos */
+.photo-grid{display:flex;flex-wrap:wrap;gap:8px}
+.photo-item{position:relative;width:90px;height:68px;flex-shrink:0}
+.photo-item img{width:100%;height:100%;object-fit:cover;border-radius:6px;display:block}
+.photo-del{position:absolute;top:2px;right:2px;background:#0009;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
+.photo-add{width:90px;height:68px;border:2px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#bbb;cursor:pointer;background:#fafafa;flex-shrink:0}
+.photo-add:hover{border-color:#888;color:#666}
+
+/* Evaluation table */
+.eval-table{width:100%;border-collapse:collapse}
+.eval-table td{padding:5px 6px;vertical-align:middle}
+.eval-table tr:not(:last-child) td{border-bottom:1px solid #f5f5f5}
+.crit-label{width:88px;font-size:13px;font-weight:600;white-space:nowrap}
+.crit-desc{font-size:11px;color:#999;width:150px;line-height:1.3}
+.star-row{display:flex;gap:3px}
+.star{background:none;border:none;font-size:20px;cursor:pointer;color:#ddd;padding:0;line-height:1;transition:color .1s}
+.star.on{color:#f5a000}
+.star:hover,.star:hover~.star{color:#f5a000}
+.crit-score{font-size:12px;color:#999;width:32px;text-align:right;white-space:nowrap}
+.total-row{margin-top:8px;font-size:14px;font-weight:700}
+
+/* Notes */
+.notes-area{width:100%;min-height:64px;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit;resize:vertical}
+
+/* Modal */
+.overlay{position:fixed;inset:0;background:#0006;z-index:1000;display:flex;align-items:center;justify-content:center}
+.overlay.hidden{display:none}
+.modal{background:#fff;border-radius:12px;padding:20px;width:92%;max-width:460px;max-height:90vh;overflow-y:auto;box-shadow:0 4px 24px #0004}
+.modal h2{font-size:15px;font-weight:700;margin-bottom:14px}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:12px;font-weight:700;color:#555;margin-bottom:3px}
+.field input,.field select,.field textarea{width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;font-family:inherit}
+.field-row{display:flex;gap:8px}
+.field-row .field{flex:1}
+.modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">아주대 월세</span>
+  <a href="index.html">지도</a>
+  <a href="favorites.html" class="active-nav">❤️ 좋아요</a>
+  <a href="dabang.html"><span class="badge badge-dabang">다방</span></a>
+  <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
+  <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
+  <a href="naver.html"><span class="badge badge-naver">네이버</span></a>
+</nav>
+
+<div class="page">
+  <div class="controls">
+    <input type="text" id="search" placeholder="검색 (제목, 주소, 중개사...)">
+    <label style="font-size:13px;display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer">
+      <input type="checkbox" id="hideGone"> 매물없음 숨기기
+    </label>
+    <button class="btn btn-primary" id="addBtn">+ 매물 추가</button>
+    <span class="count" id="countLabel">0건</span>
+  </div>
+  <div id="favList"></div>
+  <p id="emptyMsg" style="text-align:center;padding:48px;color:#aaa;display:none">
+    좋아요한 매물이 없습니다.<br>각 플랫폼 페이지에서 ❤️ 버튼으로 추가하세요.
+  </p>
+</div>
+
+<!-- Add Manual Modal -->
+<div class="overlay hidden" id="manualOverlay">
+  <div class="modal">
+    <h2>매물 직접 추가</h2>
+    <div class="field"><label>제목 *</label><input type="text" id="m_title" placeholder="예: 원천동 원룸 직거래"></div>
+    <div class="field"><label>주소</label><input type="text" id="m_address"></div>
+    <div class="field-row">
+      <div class="field"><label>보증금 (만원)</label><input type="number" id="m_deposit" min="0" placeholder="500"></div>
+      <div class="field"><label>월세 (만원)</label><input type="number" id="m_rent" min="0" placeholder="40"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>관리비 (만원)</label><input type="number" id="m_maint" min="0" placeholder="5"></div>
+      <div class="field"><label>면적 (m²)</label><input type="text" id="m_area" placeholder="20.5"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>방유형</label>
+        <select id="m_type">
+          <option value="">선택</option>
+          <option>원룸</option><option>투룸</option><option>오피스텔</option>
+          <option>빌라/연립</option><option>아파트</option>
+        </select>
+      </div>
+      <div class="field"><label>층</label><input type="text" id="m_floor" placeholder="3층"></div>
+    </div>
+    <div class="field"><label>중개사 / 직거래</label><input type="text" id="m_agency" placeholder="직거래 또는 중개사명"></div>
+    <div class="field"><label>URL</label><input type="url" id="m_url" placeholder="https://..."></div>
+    <div class="field"><label>메모 (초기 메모)</label><textarea id="m_notes" rows="2"></textarea></div>
+    <div class="modal-foot">
+      <button class="btn" id="manualCancel">취소</button>
+      <button class="btn btn-primary" id="manualSave">저장</button>
+    </div>
+  </div>
+</div>
+
+<script src="data_dabang.js"></script>
+<script src="data_daangn.js"></script>
+<script src="data_zigbang.js"></script>
+<script src="data_naver.js"></script>
+<script src="favorites.js"></script>
+<script>
+const CRITERIA = [
+  { key: 'daylight',    label: '☀️ 채광',     desc: '자연채광·햇빛' },
+  { key: 'ventilation', label: '💨 환기',     desc: '창문·통풍' },
+  { key: 'water',       label: '🚿 수압',     desc: '수압·온수' },
+  { key: 'noise',       label: '🔇 소음',     desc: '외부·층간 소음 없음' },
+  { key: 'cleanliness', label: '🧹 청결',     desc: '건물·복도·화장실' },
+  { key: 'mold',        label: '🦠 곰팡이',   desc: '벽지·욕실 곰팡이 없음' },
+  { key: 'interior',    label: '🛋️ 인테리어', desc: '마감·가구·창호' },
+  { key: 'pests',       label: '🐛 해충',     desc: '바퀴·쥐 흔적 없음' },
+  { key: 'security',    label: '🔒 보안',     desc: '현관 도어락·CCTV' },
+  { key: 'storage',     label: '📦 수납',     desc: '옷장·수납공간' },
+];
+
+const SRC_COLOR = { dabang:'#FF5C38', daangn:'#FF6F00', zigbang:'#6366F1', naver:'#03C75A', manual:'#607D8B' };
+const SRC_NAME  = { dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버', manual:'직접추가' };
+const DATA_KEY  = { dabang:'DATA_DABANG', daangn:'DATA_DAANGN', zigbang:'DATA_ZIGBANG', naver:'DATA_NAVER' };
+
+function availability(fav) {
+  if (fav.source === 'manual') return 'manual';
+  const k = DATA_KEY[fav.source];
+  if (!k || !window[k]) return 'unknown';
+  return window[k].some(r => String(r.id) === String(fav.id)) ? 'ok' : 'gone';
+}
+
+function calcScore(rating) {
+  if (!rating) return null;
+  const vals = CRITERIA.map(c => rating[c.key]).filter(v => v > 0);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+function fmtDep(v) {
+  if (v == null) return '-';
+  return v >= 10000 ? (v/10000).toFixed(1).replace(/\.0$/,'') + '억' : v + '만';
+}
+function fmtRent(v) { return v == null ? '-' : v + '만'; }
+
+function safeId(fav) {
+  return (fav.source + '_' + String(fav.id)).replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function renderList() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const hideGone = document.getElementById('hideGone').checked;
+  const favs = Favorites.getAll();
+  const filtered = favs.filter(fav => {
+    if (hideGone && availability(fav) === 'gone') return false;
+    if (q) {
+      const hay = [fav.data.title, fav.data.address, fav.data.agency, fav.data.region].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  document.getElementById('countLabel').textContent = filtered.length + '건';
+  const listEl = document.getElementById('favList');
+  const emptyEl = document.getElementById('emptyMsg');
+  listEl.innerHTML = '';
+
+  if (!favs.length) { emptyEl.style.display = ''; return; }
+  emptyEl.style.display = 'none';
+
+  filtered.forEach(fav => {
+    const avail = availability(fav);
+    const score = calcScore(fav.rating);
+    const d = fav.data;
+    const sid = safeId(fav);
+    const srcColor = SRC_COLOR[fav.source] || '#888';
+    const srcName = SRC_NAME[fav.source] || fav.source;
+
+    const statusHtml = {
+      ok:      '<span class="status-badge s-ok">✅ 계약가능</span>',
+      gone:    '<span class="status-badge s-gone">❌ 매물없음</span>',
+      manual:  '<span class="status-badge s-manual">📝 직접추가</span>',
+      unknown: '<span class="status-badge s-unknown">⚪ 확인불가</span>',
+    }[avail] || '';
+
+    const scoreHtml = score != null
+      ? `<span class="score-chip">★ ${score.toFixed(1)}/5</span>`
+      : `<span class="score-chip none">미평가</span>`;
+
+    const card = document.createElement('div');
+    card.className = 'fav-card';
+    card.innerHTML = `
+      <div class="fav-header">
+        <div class="fav-main">
+          <span class="badge" style="background:${srcColor}">${srcName}</span>
+          <span class="fav-title">${d.title || d.address || '제목없음'}</span>
+          ${statusHtml}
+          ${scoreHtml}
+          <span class="fav-price">보${fmtDep(d.deposit)} / 월${fmtRent(d.rent)}</span>
+          <span class="fav-sub">${d.address || d.region || ''}</span>
+        </div>
+        <div class="fav-actions">
+          ${d.url ? `<a href="${d.url}" target="_blank" class="btn" onclick="event.stopPropagation()" style="padding:4px 8px">🔗</a>` : ''}
+          <button class="btn btn-danger" style="padding:4px 8px" onclick="doRemove(event,'${fav.id}','${fav.source}')">제거</button>
+        </div>
+        <span class="expand-arrow">▼</span>
+      </div>
+      <div class="fav-detail" id="det_${sid}"></div>
+    `;
+
+    card.querySelector('.fav-header').addEventListener('click', () => {
+      const isOpen = card.classList.toggle('open');
+      if (isOpen) renderDetail(card, fav, sid);
+    });
+    listEl.appendChild(card);
+  });
+}
+
+function renderDetail(card, fav, sid) {
+  const el = document.getElementById('det_' + sid);
+  if (el.dataset.rendered) return;
+  el.dataset.rendered = '1';
+
+  // Criteria HTML
+  const rows = CRITERIA.map(c => {
+    const val = (fav.rating && fav.rating[c.key]) || 0;
+    const stars = [1,2,3,4,5].map(n =>
+      `<button class="star${n <= val ? ' on' : ''}" data-n="${n}">●</button>`
+    ).join('');
+    return `<tr data-crit="${c.key}">
+      <td class="crit-label">${c.label}</td>
+      <td class="crit-desc">${c.desc}</td>
+      <td><div class="star-row">${stars}</div></td>
+      <td class="crit-score">${val > 0 ? val + '/5' : '-'}</td>
+    </tr>`;
+  }).join('');
+
+  const score = calcScore(fav.rating);
+  const savedAt = new Date(fav.savedAt).toLocaleDateString('ko-KR');
+
+  el.innerHTML = `
+    <div class="sec">
+      <div class="sec-title">📷 사진</div>
+      <div class="photo-grid" id="pg_${sid}">
+        <div class="photo-add" id="padd_${sid}" title="사진 업로드">＋</div>
+      </div>
+      <input type="file" id="pfile_${sid}" accept="image/*" multiple style="display:none">
+    </div>
+    <div class="sec">
+      <div class="sec-title">📋 방문 평가표</div>
+      <table class="eval-table"><tbody id="ev_${sid}">${rows}</tbody></table>
+      <div class="total-row" id="ts_${sid}">${score != null ? '총점: ★ ' + score.toFixed(1) + ' / 5.0' : '총점: 미평가'}</div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">📝 메모</div>
+      <textarea class="notes-area" id="nt_${sid}" placeholder="방문 후 느낀 점, 특이사항...">${fav.notes || ''}</textarea>
+    </div>
+    <div style="font-size:11px;color:#ccc;margin-top:8px">저장일: ${savedAt}</div>
+  `;
+
+  // Load photos
+  Favorites.getPhotos(fav.id, fav.source).then(photos => {
+    const grid = document.getElementById('pg_' + sid);
+    if (grid) photos.forEach(p => insertPhotoThumb(grid, p.photoKey, p.blob, sid));
+  });
+
+  // Upload
+  document.getElementById('padd_' + sid).addEventListener('click', () =>
+    document.getElementById('pfile_' + sid).click()
+  );
+  document.getElementById('pfile_' + sid).addEventListener('change', e => {
+    Array.from(e.target.files).forEach(file => {
+      Favorites.addPhoto(fav.id, fav.source, file).then(key => {
+        const grid = document.getElementById('pg_' + sid);
+        if (grid) insertPhotoThumb(grid, key, file, sid);
+      });
+    });
+    e.target.value = '';
+  });
+
+  // Stars
+  document.getElementById('ev_' + sid).querySelectorAll('tr').forEach(tr => {
+    const critKey = tr.dataset.crit;
+    tr.querySelectorAll('.star').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const n = parseInt(btn.dataset.n);
+        const rating = fav.rating ? { ...fav.rating } : {};
+        rating[critKey] = n;
+        fav.rating = rating;
+        Favorites.updateRating(fav.id, fav.source, rating);
+        tr.querySelectorAll('.star').forEach((b, i) => b.classList.toggle('on', i < n));
+        tr.querySelector('.crit-score').textContent = n + '/5';
+        const newScore = calcScore(fav.rating);
+        const tsEl = document.getElementById('ts_' + sid);
+        if (tsEl) tsEl.textContent = newScore != null ? '총점: ★ ' + newScore.toFixed(1) + ' / 5.0' : '총점: 미평가';
+        // Update chip on card header
+        const chip = card.querySelector('.score-chip');
+        if (chip) {
+          chip.textContent = newScore != null ? '★ ' + newScore.toFixed(1) + '/5' : '미평가';
+          chip.classList.toggle('none', newScore == null);
+        }
+      });
+    });
+  });
+
+  // Notes auto-save
+  let notesTimer;
+  document.getElementById('nt_' + sid).addEventListener('input', e => {
+    clearTimeout(notesTimer);
+    notesTimer = setTimeout(() => {
+      fav.notes = e.target.value;
+      Favorites.updateNotes(fav.id, fav.source, e.target.value);
+    }, 600);
+  });
+}
+
+function insertPhotoThumb(grid, photoKey, blob, sid) {
+  const url = URL.createObjectURL(blob);
+  const wrap = document.createElement('div');
+  wrap.className = 'photo-item';
+  wrap.innerHTML = `<img src="${url}" loading="lazy"><button class="photo-del" title="삭제">×</button>`;
+  wrap.querySelector('.photo-del').addEventListener('click', () => {
+    Favorites.deletePhoto(photoKey).then(() => { URL.revokeObjectURL(url); wrap.remove(); });
+  });
+  grid.insertBefore(wrap, document.getElementById('padd_' + sid));
+}
+
+function doRemove(e, id, source) {
+  e.stopPropagation();
+  if (!confirm('좋아요를 취소하시겠습니까?')) return;
+  Favorites.remove(id, source);
+  renderList();
+}
+
+// Manual add modal
+document.getElementById('addBtn').addEventListener('click', () =>
+  document.getElementById('manualOverlay').classList.remove('hidden')
+);
+document.getElementById('manualCancel').addEventListener('click', () =>
+  document.getElementById('manualOverlay').classList.add('hidden')
+);
+document.getElementById('manualOverlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('manualOverlay'))
+    document.getElementById('manualOverlay').classList.add('hidden');
+});
+document.getElementById('manualSave').addEventListener('click', () => {
+  const title = document.getElementById('m_title').value.trim();
+  if (!title) { alert('제목을 입력해주세요.'); return; }
+  const num = id => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? null : v; };
+  Favorites.addManual({
+    title,
+    address: document.getElementById('m_address').value.trim(),
+    deposit: num('m_deposit'), rent: num('m_rent'), maint: num('m_maint'),
+    area: document.getElementById('m_area').value.trim(),
+    type: document.getElementById('m_type').value,
+    floor: document.getElementById('m_floor').value.trim(),
+    agency: document.getElementById('m_agency').value.trim(),
+    url: document.getElementById('m_url').value.trim(),
+    notes: document.getElementById('m_notes').value.trim(),
+  });
+  document.getElementById('manualOverlay').classList.add('hidden');
+  ['m_title','m_address','m_deposit','m_rent','m_maint','m_area','m_floor','m_agency','m_url','m_notes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('m_type').value = '';
+  renderList();
+});
+
+document.getElementById('search').addEventListener('input', renderList);
+document.getElementById('hideGone').addEventListener('change', renderList);
+renderList();
+</script>
+</body>
+</html>

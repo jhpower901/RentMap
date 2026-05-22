@@ -2,42 +2,46 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require("playwright");
 
-const DEFAULT_URL =
-  "https://new.land.naver.com/rooms?ms=2AzWj5,3zkqG6,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT";
+const DEFAULT_URLS = [
+  "https://new.land.naver.com/rooms?cortarNo=4111710200&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
+  "https://new.land.naver.com/rooms?cortarNo=4111514000&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
+  "https://new.land.naver.com/rooms?cortarNo=4111710100&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
+];
 
 function parseArgs(argv) {
   const args = {
-    url: DEFAULT_URL,
+    urls: [],
     outputCsv: path.join("data", "naver_land_ajou_2026-05-22.csv"),
     rawJson: "",
     maxPages: 5,
     chromePath: "",
     headed: false,
-    cortarNo: "",   // force-override the cortarNo in the captured API URL
-    skipHome: false, // skip initial home page visit
-    minLat: 37.273187,
-    maxLat: 37.282688,
-    minLng: 127.038562,
-    maxLng: 127.049312,
+    cortarNo: "",
+    skipHome: false,
+    minLat: 37.265,
+    maxLat: 37.285,
+    minLng: 127.030,
+    maxLng: 127.055,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
-    if (arg === "--url" && next) args.url = next, i += 1;
-    else if (arg === "--output-csv" && next) args.outputCsv = next, i += 1;
-    else if (arg === "--raw-json" && next) args.rawJson = next, i += 1;
-    else if (arg === "--max-pages" && next) args.maxPages = Number(next), i += 1;
-    else if (arg === "--chrome-path" && next) args.chromePath = next, i += 1;
+    if (arg === "--url" && next) { args.urls.push(next); i += 1; }
+    else if (arg === "--output-csv" && next) { args.outputCsv = next; i += 1; }
+    else if (arg === "--raw-json" && next) { args.rawJson = next; i += 1; }
+    else if (arg === "--max-pages" && next) { args.maxPages = Number(next); i += 1; }
+    else if (arg === "--chrome-path" && next) { args.chromePath = next; i += 1; }
     else if (arg === "--headed") args.headed = true;
-    else if (arg === "--cortar-no" && next) args.cortarNo = next, i += 1;
+    else if (arg === "--cortar-no" && next) { args.cortarNo = next; i += 1; }
     else if (arg === "--skip-home") args.skipHome = true;
-    else if (arg === "--min-lat" && next) args.minLat = Number(next), i += 1;
-    else if (arg === "--max-lat" && next) args.maxLat = Number(next), i += 1;
-    else if (arg === "--min-lng" && next) args.minLng = Number(next), i += 1;
-    else if (arg === "--max-lng" && next) args.maxLng = Number(next), i += 1;
+    else if (arg === "--min-lat" && next) { args.minLat = Number(next); i += 1; }
+    else if (arg === "--max-lat" && next) { args.maxLat = Number(next); i += 1; }
+    else if (arg === "--min-lng" && next) { args.minLng = Number(next); i += 1; }
+    else if (arg === "--max-lng" && next) { args.maxLng = Number(next); i += 1; }
   }
 
+  if (args.urls.length === 0) args.urls.push(...DEFAULT_URLS);
   return args;
 }
 
@@ -85,11 +89,11 @@ function getMapCenter(url) {
   const parsed = new URL(url);
   const ms = parsed.searchParams.get("ms") || "";
   const parts = ms.split(",");
-  if (parts.length < 2) return { latitude: "", longitude: "", zoom: "" };
+  if (parts.length < 2) return { latitude: 37.280, longitude: 127.043, zoom: "16" };
   return {
-    latitude: decodeCoord(parts[0]) ?? "",
-    longitude: decodeCoord(parts[1]) ?? "",
-    zoom: parts[2] || "",
+    latitude: decodeCoord(parts[0]) ?? 37.280,
+    longitude: decodeCoord(parts[1]) ?? 127.043,
+    zoom: parts[2] || "16",
   };
 }
 
@@ -254,10 +258,66 @@ function normalizeArticle(article, sourceUrl, center) {
   };
 }
 
+async function crawlOneUrl(page, context, targetUrl, getHeaders, args) {
+  const center = getMapCenter(targetUrl);
+
+  const firstResponsePromise = page.waitForResponse(
+    (response) => response.url().includes("/api/articles?") && response.status() === 200,
+    { timeout: 45000 },
+  );
+  await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+  const firstResponse = await firstResponsePromise;
+  let firstUrl = firstResponse.url();
+
+  const capturedParams = new URL(firstUrl).searchParams;
+  console.log(`  cortarNo: ${capturedParams.get("cortarNo")}, zoom: ${capturedParams.get("zoom")}`);
+
+  let firstJson;
+  if (args.cortarNo) {
+    const u = new URL(firstUrl);
+    console.log(`  Overriding cortarNo: ${u.searchParams.get("cortarNo")} -> ${args.cortarNo}`);
+    u.searchParams.set("cortarNo", args.cortarNo);
+    firstUrl = u.toString();
+    const corrResp = await context.request.get(firstUrl, {
+      headers: cleanRequestHeaders(getHeaders()),
+      timeout: 30000,
+    });
+    firstJson = corrResp.ok() ? await readNaverJson(corrResp) : await readNaverJson(firstResponse);
+  } else {
+    firstJson = await readNaverJson(firstResponse);
+  }
+
+  const payloads = [firstJson];
+  let isMoreData = Boolean(firstJson.isMoreData);
+
+  for (let pageNo = 2; pageNo <= args.maxPages && isMoreData; pageNo += 1) {
+    const nextUrl = new URL(firstUrl);
+    nextUrl.searchParams.set("page", String(pageNo));
+    const response = await context.request.get(nextUrl.toString(), {
+      headers: cleanRequestHeaders(getHeaders()),
+      timeout: 30000,
+    });
+    if (!response.ok()) break;
+    const json = await readNaverJson(response);
+    payloads.push(json);
+    isMoreData = Boolean(json.isMoreData);
+    await page.waitForTimeout(250);
+  }
+
+  const records = [];
+  for (const payload of payloads) {
+    for (const article of payload.articleList || []) {
+      const record = normalizeArticle(article, targetUrl, center);
+      if (isInBbox(record, args)) records.push(record);
+    }
+  }
+
+  return { records, payloads };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const chromePath = findChrome(args.chromePath);
-  const center = getMapCenter(args.url);
 
   const browser = await chromium.launch({
     headless: !args.headed,
@@ -288,76 +348,41 @@ async function main() {
       await page.waitForTimeout(1200);
     }
 
-    const firstResponsePromise = page.waitForResponse(
-      (response) => response.url().includes("/api/articles?") && response.status() === 200,
-      { timeout: 45000 },
-    );
-    await page.goto(args.url, { waitUntil: "domcontentloaded", timeout: 45000 });
-    const firstResponse = await firstResponsePromise;
-    let firstUrl = firstResponse.url();
-
-    // Log captured API URL for debugging
-    const capturedParams = new URL(firstUrl).searchParams;
-    console.log(`Captured API cortarNo: ${capturedParams.get("cortarNo")}, zoom: ${capturedParams.get("zoom")}`);
-
-    // Override cortarNo if requested — re-fetch page 1 with corrected URL
-    let firstJson;
-    if (args.cortarNo) {
-      const u = new URL(firstUrl);
-      console.log(`Overriding cortarNo: ${u.searchParams.get("cortarNo")} -> ${args.cortarNo}`);
-      u.searchParams.set("cortarNo", args.cortarNo);
-      firstUrl = u.toString();
-      const corrResp = await context.request.get(firstUrl, {
-        headers: cleanRequestHeaders(articleHeaders),
-        timeout: 30000,
-      });
-      firstJson = corrResp.ok() ? await readNaverJson(corrResp) : await readNaverJson(firstResponse);
-    } else {
-      firstJson = await readNaverJson(firstResponse);
-    }
-
-    const payloads = [firstJson];
-    let isMoreData = Boolean(firstJson.isMoreData);
-
-    for (let pageNo = 2; pageNo <= args.maxPages && isMoreData; pageNo += 1) {
-      const nextUrl = new URL(firstUrl);
-      nextUrl.searchParams.set("page", String(pageNo));
-      const response = await context.request.get(nextUrl.toString(), {
-        headers: cleanRequestHeaders(articleHeaders),
-        timeout: 30000,
-      });
-      if (!response.ok()) break;
-      const json = await readNaverJson(response);
-      payloads.push(json);
-      isMoreData = Boolean(json.isMoreData);
-      await page.waitForTimeout(250);
-    }
-
     const seen = new Set();
-    const records = [];
-    for (const payload of payloads) {
-      for (const article of payload.articleList || []) {
-        const articleNo = getFirst(article, ["articleNo"]);
+    const allRecords = [];
+    const allPayloads = [];
+
+    for (let urlIdx = 0; urlIdx < args.urls.length; urlIdx += 1) {
+      const targetUrl = args.urls[urlIdx];
+      console.log(`\nCrawling URL ${urlIdx + 1}/${args.urls.length}: ${targetUrl}`);
+
+      const { records, payloads } = await crawlOneUrl(page, context, targetUrl, () => articleHeaders, args);
+      allPayloads.push(...payloads);
+
+      let newCount = 0;
+      for (const record of records) {
+        const articleNo = record.listing_no;
         if (articleNo && seen.has(articleNo)) continue;
         if (articleNo) seen.add(articleNo);
-        const record = normalizeArticle(article, args.url, center);
-        if (isInBbox(record, args)) records.push(record);
+        allRecords.push(record);
+        newCount += 1;
       }
+      console.log(`  Found ${records.length} in bbox, ${newCount} new after dedup`);
     }
 
-    records.sort((a, b) =>
+    allRecords.sort((a, b) =>
       String(a.agency).localeCompare(String(b.agency), "ko") ||
       Number(a.total_monthly_manwon || 999999) - Number(b.total_monthly_manwon || 999999),
     );
 
-    writeCsv(records, args.outputCsv);
+    writeCsv(allRecords, args.outputCsv);
 
     if (args.rawJson) {
       fs.mkdirSync(path.dirname(args.rawJson), { recursive: true });
-      fs.writeFileSync(args.rawJson, JSON.stringify(payloads, null, 2), "utf8");
+      fs.writeFileSync(args.rawJson, JSON.stringify(allPayloads, null, 2), "utf8");
     }
 
-    console.log(`Wrote ${records.length} rows to ${args.outputCsv}`);
+    console.log(`\nWrote ${allRecords.length} rows to ${args.outputCsv}`);
     if (args.rawJson) console.log(`Wrote raw payloads to ${args.rawJson}`);
   } finally {
     await browser.close();

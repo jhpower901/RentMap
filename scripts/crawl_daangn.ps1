@@ -147,6 +147,7 @@ function Get-ArticleDetailFast {
         roomCnt      = ""
         approvalDate = ""
         writerType   = ""
+        agencyName   = ""
     }
 
     $coordRefMatch = [regex]::Match($html, 'originalId\\":\\"' + [regex]::Escape($ArticleId) + '\\".*?publicCoordinate\\":\{\\"__ref\\":\\"([^\\"]+)')
@@ -169,6 +170,33 @@ function Get-ArticleDetailFast {
         $match = [regex]::Match($html, $fieldMap[$key])
         if ($match.Success) {
             $detail[$key] = $match.Groups[1].Value
+        }
+    }
+
+    # Extract agency name: meta description has "{location} — {content}" format.
+    # Content sometimes starts with the agency name for broker listings.
+    $metaDesc = ""
+    $md1 = [regex]::Match($html, 'name="description"\s+content="([^"]+)"')
+    $md2 = [regex]::Match($html, 'content="([^"]+)"\s+name="description"')
+    if ($md1.Success) { $metaDesc = $md1.Groups[1].Value }
+    elseif ($md2.Success) { $metaDesc = $md2.Groups[1].Value }
+    $emDash = [string][char]0x2014
+    $dashParts = $metaDesc.Split($emDash, 2)
+    if ($dashParts.Count -ge 2) {
+        $afterDash = $dashParts[1].Trim()
+        # Stop at phone number pattern (031-xxx or 010-xxx)
+        $phoneIdx = [regex]::Match($afterDash, '\s[0-9]{2,3}-[0-9]')
+        if ($phoneIdx.Success) {
+            $candidate = $afterDash.Substring(0, $phoneIdx.Index)
+        } else {
+            $candidate = $afterDash.Substring(0, [Math]::Min(35, $afterDash.Length))
+        }
+        # Strip leading/trailing non-word chars (emoji, symbols)
+        $candidate = [regex]::Replace($candidate.Trim(), '^[\W]+|[\W]+$', '').Trim()
+        # Accept only if it looks like a real-estate office name
+        if ($candidate.Length -ge 2 -and $candidate.Length -le 30 -and
+            ($candidate -match '부동산|공인중개|중개사|사무소')) {
+            $detail.agencyName = $candidate
         }
     }
 
@@ -236,6 +264,7 @@ foreach ($l in $allRaw) {
     $roomCnt = ""
     $approvalDate = ""
     $writerType = ""
+    $agencyName = ""
     $detailManageCost = $null
 
     if (-not $SkipDetail) {
@@ -247,6 +276,7 @@ foreach ($l in $allRaw) {
             $roomCnt = "$($detail.roomCnt)"
             $approvalDate = "$($detail.approvalDate)"
             $writerType = "$($detail.writerType)"
+            $agencyName = "$($detail.agencyName)"
         }
     }
 
@@ -272,6 +302,7 @@ foreach ($l in $allRaw) {
         listing_no           = $articleId
         url                  = "https://realty.daangn.com/articles/$articleId"
         writer_type          = $writerType
+        agency               = $agencyName
         region_depth1        = if ($null -ne $regionInfo) { "$($regionInfo.depth1RegionName)" } else { "" }
         region_depth2        = if ($null -ne $regionInfo) { "$($regionInfo.depth2RegionName)" } else { "" }
         region_depth3        = if ($null -ne $regionInfo) { "$($regionInfo.depth3RegionName)" } else { "" }
