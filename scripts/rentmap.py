@@ -23,6 +23,13 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATE = "2026-05-22"
+DEFAULT_MIN_LAT = 37.260
+DEFAULT_MAX_LAT = 37.290
+DEFAULT_MIN_LNG = 127.025
+DEFAULT_MAX_LNG = 127.095
+NO_PRICE_LIMIT_MANWON = 999999
+DEFAULT_ZIGBANG_GEOHASHES = ["wyd7f", "wyd7g", "wyd7u", "wydk4", "wydk5", "wydkh"]
+DEFAULT_DAANGN_REGION_IDS = [1289, 1290, 1298, 1294, 1295, 1296, 1297, 1291, 1302, 1303]
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
 
 DABANG_COLUMNS = [
@@ -611,6 +618,8 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
 
 
 def bbox_ok(lat: Any, lon: Any, args: argparse.Namespace) -> bool:
+    if not any([args.min_lat, args.max_lat, args.min_lng, args.max_lng]):
+        return True
     if lat in (None, "") or lon in (None, ""):
         return True
     try:
@@ -623,6 +632,8 @@ NAVER_DEFAULT_URLS = [
     "https://new.land.naver.com/rooms?cortarNo=4111710200&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
     "https://new.land.naver.com/rooms?cortarNo=4111514000&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
     "https://new.land.naver.com/rooms?cortarNo=4111710100&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
+    "https://new.land.naver.com/rooms?cortarNo=4111710300&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
+    "https://new.land.naver.com/rooms?cortarNo=4111710400&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
 ]
 
 
@@ -653,7 +664,10 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
         async def on_request(request: Any) -> None:
             nonlocal article_headers
             if "/api/articles?" in request.url:
-                article_headers = await request.all_headers()
+                try:
+                    article_headers = await request.all_headers()
+                except Exception:
+                    pass
 
         page.on("request", on_request)
         try:
@@ -706,17 +720,24 @@ def find_chrome(explicit: str = "") -> str | None:
 
 async def crawl_naver_one(page: Any, context: Any, target_url: str, article_headers: dict[str, str] | None, args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[Any]]:
     center = get_map_center(target_url)
-    response_task = page.wait_for_response(lambda r: "/api/articles?" in r.url and r.status == 200, timeout=45000)
-    await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
-    first_response = await response_task
+    async with page.expect_response(lambda r: "/api/articles?" in r.url and r.status == 200, timeout=45000) as response_info:
+        await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
+    first_response = await response_info.value
     first_url = first_response.url
+    request_headers = await first_response.request.all_headers()
     print(f"  captured: {first_url}")
-    first_json = await first_response.json()
+    try:
+        first_json = await first_response.json()
+    except Exception:
+        response = await context.request.get(first_url, headers=clean_headers(request_headers or article_headers), timeout=30000)
+        if not response.ok:
+            raise RuntimeError(f"Naver article API request failed: {response.status}")
+        first_json = await response.json()
     payloads = [first_json]
     page_no = 2
     while page_no <= args.max_pages and first_json.get("isMoreData"):
         next_url = set_query_param(first_url, "page", str(page_no))
-        response = await context.request.get(next_url, headers=clean_headers(article_headers), timeout=30000)
+        response = await context.request.get(next_url, headers=clean_headers(request_headers or article_headers), timeout=30000)
         if not response.ok:
             break
         payload = await response.json()
@@ -954,10 +975,10 @@ def write_platform(path: Path, template: str, source: str, accent: str, data: st
 
 
 def add_common_bbox(parser: argparse.ArgumentParser, *, naver: bool = False) -> None:
-    parser.add_argument("--min-lat", type=float, default=37.265 if naver else 37.2736)
-    parser.add_argument("--max-lat", type=float, default=37.285 if naver else 37.2809)
-    parser.add_argument("--min-lng", type=float, default=127.030 if naver else 127.0408)
-    parser.add_argument("--max-lng", type=float, default=127.055 if naver else 127.0494)
+    parser.add_argument("--min-lat", type=float, default=0 if naver else DEFAULT_MIN_LAT)
+    parser.add_argument("--max-lat", type=float, default=0 if naver else DEFAULT_MAX_LAT)
+    parser.add_argument("--min-lng", type=float, default=0 if naver else DEFAULT_MIN_LNG)
+    parser.add_argument("--max-lng", type=float, default=0 if naver else DEFAULT_MAX_LNG)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -967,8 +988,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("crawl-dabang")
     add_common_bbox(p)
     p.add_argument("--zoom", type=int, default=18)
-    p.add_argument("--max-deposit", type=int, default=3000)
-    p.add_argument("--max-rent", type=int, default=60)
+    p.add_argument("--max-deposit", type=int, default=NO_PRICE_LIMIT_MANWON)
+    p.add_argument("--max-rent", type=int, default=NO_PRICE_LIMIT_MANWON)
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"dabang_ajou_{DEFAULT_DATE}.csv"))
     p.add_argument("--raw-json", default="")
     p.add_argument("--delay-ms", type=int, default=120)
@@ -976,16 +997,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("crawl-zigbang")
     add_common_bbox(p)
-    p.add_argument("--geohashes", nargs="+", default=["wydk4", "wydk5"])
-    p.add_argument("--max-deposit-manwon", type=int, default=3000)
-    p.add_argument("--max-rent-manwon", type=int, default=60)
+    p.add_argument("--geohashes", nargs="+", default=DEFAULT_ZIGBANG_GEOHASHES)
+    p.add_argument("--max-deposit-manwon", type=int, default=NO_PRICE_LIMIT_MANWON)
+    p.add_argument("--max-rent-manwon", type=int, default=NO_PRICE_LIMIT_MANWON)
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"zigbang_ajou_{DEFAULT_DATE}.csv"))
     p.set_defaults(func=crawl_zigbang)
 
     p = sub.add_parser("crawl-daangn")
-    p.add_argument("--region-ids", nargs="+", type=int, default=[1289, 1290, 1298, 1294, 1295, 1296, 1297, 1291])
-    p.add_argument("--max-deposit", type=int, default=3000)
-    p.add_argument("--max-rent", type=int, default=60)
+    p.add_argument("--region-ids", nargs="+", type=int, default=DEFAULT_DAANGN_REGION_IDS)
+    p.add_argument("--max-deposit", type=int, default=NO_PRICE_LIMIT_MANWON)
+    p.add_argument("--max-rent", type=int, default=NO_PRICE_LIMIT_MANWON)
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"daangn_ajou_{DEFAULT_DATE}.csv"))
     p.add_argument("--skip-detail", action="store_true")
     p.add_argument("--min-lat", type=float, default=0)
@@ -1020,11 +1041,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def crawl_all(args: argparse.Namespace) -> None:
-    crawl_dabang(argparse.Namespace(min_lat=37.2736, min_lng=127.0408, max_lat=37.2809, max_lng=127.0494, zoom=18, max_deposit=3000, max_rent=60, output_csv=str(ROOT / "data" / f"dabang_ajou_{args.date}.csv"), raw_json="", delay_ms=120))
-    crawl_zigbang(argparse.Namespace(min_lat=37.2736, min_lng=127.0408, max_lat=37.2809, max_lng=127.0494, geohashes=["wydk4", "wydk5"], max_deposit_manwon=3000, max_rent_manwon=60, output_csv=str(ROOT / "data" / f"zigbang_ajou_{args.date}.csv")))
-    crawl_daangn(argparse.Namespace(region_ids=[1289, 1290, 1298, 1294, 1295, 1296, 1297, 1291], max_deposit=3000, max_rent=60, output_csv=str(ROOT / "data" / f"daangn_ajou_{args.date}.csv"), skip_detail=False, min_lat=0, max_lat=0, min_lng=0, max_lng=0))
+    crawl_dabang(argparse.Namespace(min_lat=DEFAULT_MIN_LAT, min_lng=DEFAULT_MIN_LNG, max_lat=DEFAULT_MAX_LAT, max_lng=DEFAULT_MAX_LNG, zoom=18, max_deposit=NO_PRICE_LIMIT_MANWON, max_rent=NO_PRICE_LIMIT_MANWON, output_csv=str(ROOT / "data" / f"dabang_ajou_{args.date}.csv"), raw_json="", delay_ms=120))
+    crawl_zigbang(argparse.Namespace(min_lat=DEFAULT_MIN_LAT, min_lng=DEFAULT_MIN_LNG, max_lat=DEFAULT_MAX_LAT, max_lng=DEFAULT_MAX_LNG, geohashes=DEFAULT_ZIGBANG_GEOHASHES, max_deposit_manwon=NO_PRICE_LIMIT_MANWON, max_rent_manwon=NO_PRICE_LIMIT_MANWON, output_csv=str(ROOT / "data" / f"zigbang_ajou_{args.date}.csv")))
+    crawl_daangn(argparse.Namespace(region_ids=DEFAULT_DAANGN_REGION_IDS, max_deposit=NO_PRICE_LIMIT_MANWON, max_rent=NO_PRICE_LIMIT_MANWON, output_csv=str(ROOT / "data" / f"daangn_ajou_{args.date}.csv"), skip_detail=False, min_lat=0, max_lat=0, min_lng=0, max_lng=0))
     if not args.skip_naver:
-        crawl_naver(argparse.Namespace(urls=[], output_csv=str(ROOT / "data" / f"naver_land_ajou_{args.date}.csv"), raw_json=str(ROOT / "data" / f"naver_land_ajou_{args.date}.raw.json"), max_pages=5, chrome_path="", headed=False, skip_home=True, min_lat=37.265, max_lat=37.285, min_lng=127.030, max_lng=127.055))
+        crawl_naver(argparse.Namespace(urls=[], output_csv=str(ROOT / "data" / f"naver_land_ajou_{args.date}.csv"), raw_json=str(ROOT / "data" / f"naver_land_ajou_{args.date}.raw.json"), max_pages=5, chrome_path="", headed=False, skip_home=True, min_lat=0, max_lat=0, min_lng=0, max_lng=0))
     if args.gen_web:
         gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=args.date))
 
