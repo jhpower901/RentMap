@@ -25,6 +25,8 @@ $ValidSalesTypes = @('SPLIT_ONE_ROOM', 'OPEN_ONE_ROOM', 'TWO_ROOM', 'OFFICETEL')
 function Invoke-GetUtf8 {
     param([string]$Url, [int]$DelayMs = 0)
     $req = [System.Net.HttpWebRequest]::Create($Url)
+    $req.Timeout = 15000
+    $req.ReadWriteTimeout = 15000
     $req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
     $req.Accept = "text/html,application/xhtml+xml"
     $req.Headers["Accept-Language"] = "ko-KR,ko;q=0.9"
@@ -127,6 +129,52 @@ function Get-ArticleRelayStore {
     }
 }
 
+function Get-ArticleDetailFast {
+    param([string]$ArticleId)
+
+    $url = "https://realty.daangn.com/articles/$ArticleId"
+    try {
+        $html = Invoke-GetUtf8 -Url $url -DelayMs 80
+    } catch {
+        Write-Warning "Article $ArticleId fetch failed: $($_.Exception.Message)"
+        return $null
+    }
+
+    $detail = [ordered]@{
+        lat          = ""
+        lon          = ""
+        publicAddress = ""
+        roomCnt      = ""
+        approvalDate = ""
+        writerType   = ""
+    }
+
+    $coordRefMatch = [regex]::Match($html, 'originalId\\":\\"' + [regex]::Escape($ArticleId) + '\\".*?publicCoordinate\\":\{\\"__ref\\":\\"([^\\"]+)')
+    if ($coordRefMatch.Success) {
+        $coordRef = [regex]::Escape($coordRefMatch.Groups[1].Value)
+        $coordMatch = [regex]::Match($html, $coordRef + '\\":\{\\"__id\\":\\"[^\\"]+\\",\\"__typename\\":\\"Coordinate\\",\\"lat\\":\\"([^\\"]+)\\",\\"lon\\":\\"([^\\"]+)')
+        if ($coordMatch.Success) {
+            $detail.lat = $coordMatch.Groups[1].Value
+            $detail.lon = $coordMatch.Groups[2].Value
+        }
+    }
+
+    $fieldMap = @{
+        publicAddress = 'publicAddress\\":\\"([^\\"]*)'
+        roomCnt       = 'roomCnt\\":\\"?([^\\",}]*)'
+        approvalDate  = 'buildingApprovalDate\\":\\"([^\\"]*)'
+        writerType    = 'writerTypeV2\\":\\"([^\\"]*)'
+    }
+    foreach ($key in $fieldMap.Keys) {
+        $match = [regex]::Match($html, $fieldMap[$key])
+        if ($match.Success) {
+            $detail[$key] = $match.Groups[1].Value
+        }
+    }
+
+    return [pscustomobject]$detail
+}
+
 function Resolve-RelayRef {
     param([object]$Store, [object]$Value)
     if ($null -eq $Value) { return $null }
@@ -191,34 +239,14 @@ foreach ($l in $allRaw) {
     $detailManageCost = $null
 
     if (-not $SkipDetail) {
-        $rs = Get-ArticleRelayStore -ArticleId $articleId
-        if ($null -ne $rs) {
-            # Find article node in relay store
-            $articleNode = $null
-            foreach ($prop in $rs.PSObject.Properties) {
-                $obj = $prop.Value
-                if ($obj -is [pscustomobject] -and
-                    $obj.PSObject.Properties.Name -contains 'originalId' -and
-                    $obj.originalId -eq $articleId) {
-                    $articleNode = $obj
-                    break
-                }
-            }
-
-            if ($null -ne $articleNode) {
-                # Resolve publicCoordinate (may be a __ref)
-                $coordVal = $articleNode.publicCoordinate
-                $coord = Resolve-RelayRef -Store $rs -Value $coordVal
-                if ($null -ne $coord) {
-                    $lat = "$($coord.lat)"
-                    $lon = "$($coord.lon)"
-                }
-
-                if ($null -ne $articleNode.publicAddress) { $publicAddr = "$($articleNode.publicAddress)" }
-                if ($null -ne $articleNode.roomCnt)        { $roomCnt = "$($articleNode.roomCnt)" }
-                if ($null -ne $articleNode.buildingApprovalDate) { $approvalDate = "$($articleNode.buildingApprovalDate)" }
-                if ($null -ne $articleNode.writerTypeV2)   { $writerType = "$($articleNode.writerTypeV2)" }
-            }
+        $detail = Get-ArticleDetailFast -ArticleId $articleId
+        if ($null -ne $detail) {
+            $lat = "$($detail.lat)"
+            $lon = "$($detail.lon)"
+            $publicAddr = "$($detail.publicAddress)"
+            $roomCnt = "$($detail.roomCnt)"
+            $approvalDate = "$($detail.approvalDate)"
+            $writerType = "$($detail.writerType)"
         }
     }
 

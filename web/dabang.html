@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -30,7 +30,7 @@ h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:ce
 .controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
 .count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
 .layout{display:grid;grid-template-columns:1fr minmax(360px,400px);gap:14px;align-items:start}.layout>div:last-child{position:sticky;top:60px;align-self:start}
-@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow:auto}.count{margin-left:0}}
+@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;align-self:stretch;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow:auto}.count{margin-left:0}}
 .map-box{height:min(620px,calc(100vh - 80px));min-height:420px;border-radius:10px;overflow:hidden;border:1px solid #ddd}
 @media(max-width:960px){.map-box{height:34dvh;min-height:180px;max-height:320px;border-radius:8px;position:relative;top:auto}}
 .table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
@@ -104,7 +104,8 @@ tr:hover td{background:#fafafa;cursor:pointer}
 <script>
 const SOURCE  = 'dabang';
 const ACCENT  = '#FF5C38';
-const RAW     = [{"id":57143314,"total":35,"lat":37.2758489563,"address":"경기도 수원시 팔달구 우만동","rent":28,"deposit":200,"area":19.83,"region":"경기도 수원시 팔달구 우만동","floor":"반지층/3층","title":"LINEㅣ유학생 모여라ㅣ보증금 월세 최저가ㅣ빠른입주 가능ㅣ분리형ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/J2dBwBwpaN_2LZ8a6v30D","source":"dabang","lon":127.042927489,"agency":"라인공인중개사사무소","maint":7,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/zCkETYzf2rbX-dBDgyvxB","url":"https://www.dabangapp.com/room/6a0d15daefff5a5dc390c58d"},
+const RAW     = [
+{"id":57143314,"total":35,"lat":37.2758489563,"address":"경기도 수원시 팔달구 우만동","rent":28,"deposit":200,"area":19.83,"region":"경기도 수원시 팔달구 우만동","floor":"반지층/3층","title":"LINEㅣ유학생 모여라ㅣ보증금 월세 최저가ㅣ빠른입주 가능ㅣ분리형ㅣ","type":"원룸(분리형)","img2":"https://d1774jszgerdmk.cloudfront.net/1024/J2dBwBwpaN_2LZ8a6v30D","source":"dabang","lon":127.042927489,"agency":"라인공인중개사사무소","maint":7,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/zCkETYzf2rbX-dBDgyvxB","url":"https://www.dabangapp.com/room/6a0d15daefff5a5dc390c58d"},
 {"id":57027161,"total":36,"lat":37.2758881104856,"address":"경기도 수원시 영통구 원천동","rent":30,"deposit":300,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/3층","title":"LINEㅣ아주대 최저가 풀옵션 원룸ㅣ갓성비 1등ㅣ선착순ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/YV2Dw8KKOjiGs2T7670iE","source":"dabang","lon":127.044262512598,"agency":"라인공인중개사사무소","maint":6,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/EJ734cy5tsDArJik-hKwv","url":"https://www.dabangapp.com/room/6a03d64c182b9749cdaf5cc7"},
 {"id":57006799,"total":44,"lat":37.2762529348,"address":"경기도 수원시 팔달구 우만동","rent":39,"deposit":500,"area":19.83,"region":"경기도 수원시 팔달구 우만동","floor":"1층/3층","title":"LINEㅣ최저가 원룸ㅣ아주대 8분컷ㅣ조용한 주택가ㅣ초인기매물 선착순ㅣ","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/ElxDBgACOYX1C9_0Wet91","source":"dabang","lon":127.0420572573,"agency":"라인공인중개사사무소","maint":5,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/9sctEejMuHVTFKeP4lk7H","url":"https://www.dabangapp.com/room/6a0282b29451e22c3cbf7537"},
 {"id":57143386,"total":45,"lat":37.2773727917,"address":"경기도 수원시 영통구 원천동","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2층/4층","title":"LINE l 깔끔한 원룸 l 가성비 + 위치","type":"원룸","img2":"https://d1774jszgerdmk.cloudfront.net/1024/W8bgTXQeiaNxO3uPikU-5","source":"dabang","lon":127.0448812832,"agency":"라인공인중개사사무소","maint":10,"phone":"031-8067-7499","img1":"https://d1774jszgerdmk.cloudfront.net/1024/ICuPm0JPwOFjUzzCn5nd6","url":"https://www.dabangapp.com/room/6a0d16595befe96aa776e76b"},
@@ -297,6 +298,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
 L.marker([37.2785, 127.0434]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
+// Re-measure on orientation change / window resize so tiles fill the container
+window.addEventListener('resize', () => map.invalidateSize());
 
 const markerMap = new Map();
 RAW.forEach(r => {

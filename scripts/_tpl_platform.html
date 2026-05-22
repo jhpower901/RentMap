@@ -30,7 +30,7 @@ h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:ce
 .controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
 .count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
 .layout{display:grid;grid-template-columns:1fr minmax(360px,400px);gap:14px;align-items:start}.layout>div:last-child{position:sticky;top:60px;align-self:start}
-@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow:auto}.count{margin-left:0}}
+@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;align-self:stretch;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow:auto}.count{margin-left:0}}
 .map-box{height:min(620px,calc(100vh - 80px));min-height:420px;border-radius:10px;overflow:hidden;border:1px solid #ddd}
 @media(max-width:960px){.map-box{height:34dvh;min-height:180px;max-height:320px;border-radius:8px;position:relative;top:auto}}
 .table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
@@ -182,6 +182,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
 L.marker([37.2785, 127.0434]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
+// Re-measure on orientation change / window resize so tiles fill the container
+window.addEventListener('resize', () => map.invalidateSize());
 
 const markerMap = new Map();
 RAW.forEach(r => {
