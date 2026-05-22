@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="listing-data-source.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
@@ -29,9 +30,11 @@ h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:ce
 .controls input[type=number]{width:74px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
 .controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
 .count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
-.layout{display:grid;grid-template-columns:1fr 400px;gap:14px;align-items:start}
-@media(max-width:960px){.layout{grid-template-columns:1fr}}
-.map-box{height:520px;border-radius:10px;overflow:hidden;border:1px solid #ddd;position:sticky;top:60px}
+.layout{display:grid;grid-template-columns:1fr minmax(360px,400px);gap:14px;align-items:stretch}
+.layout>div:last-child{align-self:stretch;min-height:100%}
+@media(max-width:960px){body{overflow:hidden}nav{position:relative;flex-wrap:nowrap;overflow-x:auto}nav .brand,nav a{flex:0 0 auto}.page{height:calc(100dvh - 45px);padding:10px;display:flex;flex-direction:column;overflow:hidden}h1{display:none}.controls{margin-bottom:10px;flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;min-height:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow:auto}.count{margin-left:0}}
+.map-box{height:min(620px,calc(100vh - 76px));min-height:420px;border-radius:10px;overflow:hidden;border:1px solid #ddd;position:sticky;top:60px;z-index:10}
+@media(max-width:960px){.map-box{position:relative;top:auto;height:34dvh;min-height:220px;max-height:360px;flex:0 0 auto}}
 .table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
 table{width:100%;border-collapse:collapse;background:#fff;min-width:780px}
 th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid #e0e0e0}
@@ -111,11 +114,12 @@ tr:hover td{background:#fafafa;cursor:pointer}
   </div>
 </div>
 <script>
-// __INLINE_DATA__
 const SOURCE = "__SOURCE__";
 const ACCENT = "__ACCENT__";
 
-(function() {
+(async function() {
+  const DATA = await window.loadPlatformListings(SOURCE);
+
   // Mark active nav
   document.querySelectorAll('nav a[data-src]').forEach(a => {
     if (a.dataset.src === SOURCE) a.classList.add('active-nav');
@@ -290,7 +294,13 @@ ${imgHtml}
   });
 
   render();
-})();
+})().catch(error => {
+  console.error(error);
+  document.getElementById('countLabel').textContent = 'CSV 로드 실패';
+});
 </script>
 </body>
 </html>
+
+
+

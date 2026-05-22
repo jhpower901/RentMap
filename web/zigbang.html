@@ -104,7 +104,7 @@ tr:hover td{background:#fafafa;cursor:pointer}
 <script>
 const SOURCE  = 'zigbang';
 const ACCENT  = '#6366F1';
-const RAW     = [\n{"id":48970154,"total":29,"lat":37.2789819404129,"address":"수원시 영통구 원천동 17","rent":25,"deposit":80,"area":13.22,"region":"경기도 수원시 영통구 원천동","floor":"4/5","title":"H 아주대 초근접, 유학생 가능 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48970154/2.jpg","source":"zigbang","lon":127.044452742954,"agency":"런공인중개사사무소","maint":4.5,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48970154/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48970154?itemDetailType=ZIGBANG"},
+const RAW     = [{"id":48970154,"total":29,"lat":37.2789819404129,"address":"수원시 영통구 원천동 17","rent":25,"deposit":80,"area":13.22,"region":"경기도 수원시 영통구 원천동","floor":"4/5","title":"H 아주대 초근접, 유학생 가능 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48970154/2.jpg","source":"zigbang","lon":127.044452742954,"agency":"런공인중개사사무소","maint":4.5,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48970154/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48970154?itemDetailType=ZIGBANG"},
 {"id":48993831,"total":45,"lat":37.2774272314727,"address":"수원시 영통구 원천동 29-45","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2/4","title":"oO 아주대2분컷ㅣ위치최강ㅣ가격최고ㅣ풀옵션 강추  Oo","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48993831/2.jpg","source":"zigbang","lon":127.044836551441,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48993831/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48993831?itemDetailType=ZIGBANG"},
 {"id":48981361,"total":45,"lat":37.2774272314727,"address":"수원시 영통구 원천동 29-45","rent":35,"deposit":500,"area":19.83,"region":"경기도 수원시 영통구 원천동","floor":"2/4","title":"C 아주대 도보 3분컷. 저렴. 깨끗. 입주협의가능","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48981361/2.jpg","source":"zigbang","lon":127.044836551441,"agency":"런공인중개사사무소","maint":10,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48981361/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48981361?itemDetailType=ZIGBANG"},
 {"id":48980270,"total":47,"lat":37.279403834521,"address":"수원시 팔달구 우만동 47-1","rent":40,"deposit":500,"area":19.8,"region":"경기도 수원시 팔달구 우만동","floor":"3/3","title":"H 아주대 도보 3분, 최고 가성비 매물, 즉시 입주 H","type":"오픈형원룸","img2":"https://ic.zigbang.com/ic/items/48980270/2.jpg","source":"zigbang","lon":127.040615247508,"agency":"런공인중개사사무소","maint":7,"phone":"031-213-5888","img1":"https://ic.zigbang.com/ic/items/48980270/1.jpg","url":"https://www.zigbang.com/home/oneroom/items/48980270?itemDetailType=ZIGBANG"},
@@ -201,6 +201,11 @@ function fmtArea(v) {
     return isNaN(n) ? p : n.toFixed(1);
   }).join('/') + 'm²';
 }
+function imageSrc(src) {
+  if (!src) return '';
+  if (SOURCE !== 'zigbang' || !src.startsWith('https://ic.zigbang.com/') || src.includes('?')) return src;
+  return src + '?w=400&h=300&q=70';
+}
 
 function sortData(data, col, asc) {
   return [...data].sort((a, b) => {
@@ -231,7 +236,7 @@ RAW.forEach(r => {
     radius: 7, fillColor: ACCENT, color: '#fff', weight: 2, fillOpacity: 0.85
   }).addTo(map);
   const imgHtml = r.img1
-    ? '<img class="popup-img" src="' + r.img1 + '" onerror="this.style.display=\'none\'">'
+    ? '<img class="popup-img" src="' + imageSrc(r.img1) + '" onerror="this.style.display=\'none\'">'
     : '';
   m.bindPopup(
     '<div class="popup-title">' + (r.title || '') + '</div>' +
@@ -282,7 +287,7 @@ function render() {
   filtered.forEach(r => {
     const tr = document.createElement('tr');
     const imgCell = r.img1
-      ? '<img class="img-thumb" src="' + r.img1 + '" loading="lazy" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
+      ? '<img class="img-thumb" src="' + imageSrc(r.img1) + '" loading="lazy" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
       : '<div class="no-img">사진없음</div>';
     tr.innerHTML =
       '<td>' + imgCell + '</td>' +
