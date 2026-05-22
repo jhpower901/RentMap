@@ -34,29 +34,35 @@ The app supplies dynamic query parameters such as `cortarNo`, map bounds, zoom, 
 Run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_naver_land.ps1
+python .\scripts\crawl_naver_land.py
 ```
 
 Useful variants:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_naver_land.ps1 `
-  -Url "https://new.land.naver.com/rooms?ms=2AzVQ9,3zkrDJ,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT" `
-  -MaxPages 5 `
-  -OutputCsv .\data\naver_land_ajou_2026-05-22.csv
+python .\scripts\crawl_naver_land.py `
+  --url "https://new.land.naver.com/rooms?ms=2AzVQ9,3zkrDJ,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT" `
+  --max-pages 5 `
+  --output-csv .\data\naver_land_ajou_2026-05-22.csv
 ```
 
 If headless Chrome is blocked or you want to watch the crawl:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_naver_land.ps1 -Headed
+python .\scripts\crawl_naver_land.py --headed
 ```
 
 If you need the raw article-list JSON:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_naver_land.ps1 `
-  -RawJson .\data\naver_land_ajou_2026-05-22.raw.json
+python .\scripts\crawl_naver_land.py `
+  --raw-json .\data\naver_land_ajou_2026-05-22.raw.json
+```
+
+Docker:
+
+```powershell
+.\scripts\docker-naver.ps1 crawl-naver
 ```
 
 ## CSV columns

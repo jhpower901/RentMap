@@ -638,7 +638,13 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
     urls = args.urls or NAVER_DEFAULT_URLS
     chrome = find_chrome(args.chrome_path)
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=not args.headed, executable_path=chrome, args=["--disable-blink-features=AutomationControlled"])
+        launch_options: dict[str, Any] = {
+            "headless": not args.headed,
+            "args": ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        }
+        if chrome:
+            launch_options["executable_path"] = chrome
+        browser = await p.chromium.launch(**launch_options)
         context = await browser.new_context(locale="ko-KR", user_agent=UA)
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
@@ -681,7 +687,7 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
             await browser.close()
 
 
-def find_chrome(explicit: str = "") -> str:
+def find_chrome(explicit: str = "") -> str | None:
     candidates = [
         explicit,
         "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -695,7 +701,7 @@ def find_chrome(explicit: str = "") -> str:
     found = shutil.which("chrome") or shutil.which("msedge")
     if found:
         return found
-    raise RuntimeError("Chrome or Edge executable was not found. Pass --chrome-path.")
+    return None
 
 
 async def crawl_naver_one(page: Any, context: Any, target_url: str, article_headers: dict[str, str] | None, args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[Any]]:

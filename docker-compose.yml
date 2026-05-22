@@ -1,0 +1,26 @@
+services:
+  rentmap:
+    build:
+      context: .
+    image: rentmap:local
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      TZ: Asia/Seoul
+    shm_size: "1gb"
+    command: ["--help"]
+
+  rentmap-naver:
+    profiles: ["naver"]
+    build:
+      context: .
+      dockerfile: Dockerfile.naver
+    image: rentmap-naver:local
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      TZ: Asia/Seoul
+    shm_size: "1gb"
+    command: ["--help"]

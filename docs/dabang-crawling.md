@@ -104,19 +104,25 @@ lng 127.0451149
 Run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_dabang.ps1
+python .\scripts\crawl_dabang.py
 ```
 
 Useful variants:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_dabang.ps1 `
-  -MinLat 37.2736 -MinLng 127.0408 -MaxLat 37.2809 -MaxLng 127.0494 `
-  -MaxDeposit 3000 -MaxRent 60 `
-  -OutputCsv .\data\dabang_ajou_2026-05-22.csv
+python .\scripts\crawl_dabang.py `
+  --min-lat 37.2736 --min-lng 127.0408 --max-lat 37.2809 --max-lng 127.0494 `
+  --max-deposit 3000 --max-rent 60 `
+  --output-csv .\data\dabang_ajou_2026-05-22.csv
 ```
 
-The script exports CSV by default. If you need the raw detail payload for debugging, pass `-RawJson .\data\some-file.raw.json`. Avoid sharing raw JSON because it can include contact-related fields that are not needed for room comparison.
+Docker:
+
+```powershell
+.\scripts\docker.ps1 crawl-dabang
+```
+
+The script exports CSV by default. If you need the raw detail payload for debugging, pass `--raw-json .\data\some-file.raw.json`. Avoid sharing raw JSON because it can include contact-related fields that are not needed for room comparison.
 
 ## CSV columns
 

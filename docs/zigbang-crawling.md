@@ -104,14 +104,20 @@ Unlike the Dabang API observed in this project, this Zigbang detail API returned
 From the workspace root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_zigbang.ps1
+python .\scripts\crawl_zigbang.py
 ```
 
 Custom output:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_zigbang.ps1 `
-  -OutputCsv .\data\zigbang_ajou_2026-05-22.csv
+python .\scripts\crawl_zigbang.py `
+  --output-csv .\data\zigbang_ajou_2026-05-22.csv
+```
+
+Docker:
+
+```powershell
+.\scripts\docker.ps1 crawl-zigbang
 ```
 
 ## Output CSV

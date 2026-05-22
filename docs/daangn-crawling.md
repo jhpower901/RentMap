@@ -67,22 +67,28 @@ Karrot uses different salesType codes than Dabang:
 Run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_daangn.ps1
+python .\scripts\crawl_daangn.py
 ```
 
 Useful variants:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_daangn.ps1 `
-  -MaxDeposit 3000 -MaxRent 60 `
-  -OutputCsv .\data\daangn_ajou_2026-05-22.csv
+python .\scripts\crawl_daangn.py `
+  --max-deposit 3000 --max-rent 60 `
+  --output-csv .\data\daangn_ajou_2026-05-22.csv
 
 # Skip detail page fetches (faster, no coordinates):
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_daangn.ps1 -SkipDetail
+python .\scripts\crawl_daangn.py --skip-detail
 
 # Custom region list:
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl_daangn.ps1 `
-  -RegionIds @(1289, 1290, 1298)
+python .\scripts\crawl_daangn.py `
+  --region-ids 1289 1290 1298
+```
+
+Docker:
+
+```powershell
+.\scripts\docker.ps1 crawl-daangn
 ```
 
 ## CSV columns
