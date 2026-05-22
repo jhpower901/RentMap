@@ -2,25 +2,17 @@ services:
   rentmap:
     build:
       context: .
-    image: rentmap:local
-    working_dir: /app
+      dockerfile: Dockerfile
+    container_name: rentmap-server
+    ports:
+      - "8000:8000"
     volumes:
-      - .:/app
+      - ./data:/app/data
+      - ./web:/app/web
+      - ./scripts:/app/scripts
     environment:
-      TZ: Asia/Seoul
-    shm_size: "1gb"
-    command: ["--help"]
+      - TZ=Asia/Seoul
+    restart: unless-stopped
 
-  rentmap-naver:
-    profiles: ["naver"]
-    build:
-      context: .
-      dockerfile: Dockerfile.naver
-    image: rentmap-naver:local
-    working_dir: /app
-    volumes:
-      - .:/app
-    environment:
-      TZ: Asia/Seoul
-    shm_size: "1gb"
-    command: ["--help"]
+# 기존 크롤링 기능이 필요할 때를 위해 별도 프로파일로 유지 가능하지만, 
+# 웹 서버 실행을 기본 서비스로 설정했습니다.

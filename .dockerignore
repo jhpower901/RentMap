@@ -1,9 +1,7 @@
-.git
-.claude
-tmp
-**/__pycache__
-**/*.pyc
-**/.pytest_cache
-**/.mypy_cache
-**/.ruff_cache
-node_modules
+__pycache__/
+*.pyc
+.git/
+.vscode/
+.claude/
+tmp/
+node_modules/

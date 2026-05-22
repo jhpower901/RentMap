@@ -311,7 +311,7 @@ function renderDetail(card, fav, sid) {
   // Load photos
   Favorites.getPhotos(fav.id, fav.source).then(photos => {
     const grid = document.getElementById('pg_' + sid);
-    if (grid) photos.forEach(p => insertPhotoThumb(grid, p.photoKey, p.blob, sid));
+    if (grid) photos.forEach(p => insertPhotoThumb(grid, p.photoKey, p.url, fav.id, fav.source, sid));
   });
 
   // Upload
@@ -320,9 +320,9 @@ function renderDetail(card, fav, sid) {
   );
   document.getElementById('pfile_' + sid).addEventListener('change', e => {
     Array.from(e.target.files).forEach(file => {
-      Favorites.addPhoto(fav.id, fav.source, file).then(key => {
+      Favorites.addPhoto(fav.id, fav.source, file).then(res => {
         const grid = document.getElementById('pg_' + sid);
-        if (grid) insertPhotoThumb(grid, key, file, sid);
+        if (grid) insertPhotoThumb(grid, res.photoKey, res.url, fav.id, fav.source, sid);
       });
     });
     e.target.value = '';
@@ -364,13 +364,12 @@ function renderDetail(card, fav, sid) {
   });
 }
 
-function insertPhotoThumb(grid, photoKey, blob, sid) {
-  const url = URL.createObjectURL(blob);
+function insertPhotoThumb(grid, photoKey, url, favId, favSource, sid) {
   const wrap = document.createElement('div');
   wrap.className = 'photo-item';
   wrap.innerHTML = `<img src="${url}" loading="lazy"><button class="photo-del" title="삭제">×</button>`;
   wrap.querySelector('.photo-del').addEventListener('click', () => {
-    Favorites.deletePhoto(photoKey).then(() => { URL.revokeObjectURL(url); wrap.remove(); });
+    Favorites.deletePhoto(favId, favSource, photoKey).then(() => { wrap.remove(); });
   });
   grid.insertBefore(wrap, document.getElementById('padd_' + sid));
 }
@@ -418,6 +417,9 @@ document.getElementById('manualSave').addEventListener('click', () => {
 
 document.getElementById('search').addEventListener('input', renderList);
 document.getElementById('hideGone').addEventListener('change', renderList);
+
+window.addEventListener('favoritesSynced', renderList);
+
 renderList();
 </script>
 </body>

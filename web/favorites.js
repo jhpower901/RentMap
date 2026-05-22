@@ -5,7 +5,32 @@
 
   function fk(id, source) { return String(source) + '::' + String(id); }
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { return []; } }
-  function save(favs) { localStorage.setItem(KEY, JSON.stringify(favs)); }
+  
+  function save(favs) { 
+    localStorage.setItem(KEY, JSON.stringify(favs)); 
+    // Background sync to server
+    fetch('/api/favorites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(favs)
+    }).catch(err => console.error('Failed to sync favorites to server:', err));
+  }
+
+  // Initial sync from server on script load
+  fetch('/api/favorites')
+    .then(r => r.ok ? r.json() : [])
+    .then(serverFavs => {
+      if (serverFavs && serverFavs.length > 0) {
+        const localFavs = load();
+        // Simple merge: if server has data, use it. 
+        // In a real app we might compare timestamps, but for now server is source of truth.
+        localStorage.setItem(KEY, JSON.stringify(serverFavs));
+        console.log('Favorites synced from server:', serverFavs.length, 'items');
+        // Notify UI to refresh if necessary
+        window.dispatchEvent(new CustomEvent('favoritesSynced'));
+      }
+    })
+    .catch(err => console.warn('Server sync failed, using local storage only:', err));
 
   function getAll() { return load(); }
   function isFav(id, source) { const k = fk(id, source); return load().some(f => f.key === k); }
@@ -56,47 +81,24 @@
     return id;
   }
 
-  // IndexedDB for photos
-  let _db = null;
-  function openDB() {
-    if (_db) return Promise.resolve(_db);
-    return new Promise((res, rej) => {
-      const req = indexedDB.open('rentmap_photos', 1);
-      req.onupgradeneeded = e => {
-        const s = e.target.result.createObjectStore('photos', { keyPath: 'photoKey' });
-        s.createIndex('favKey', 'favKey', { unique: false });
-      };
-      req.onsuccess = e => { _db = e.target.result; res(_db); };
-      req.onerror = e => rej(e.target.error);
-    });
-  }
-
-  function addPhoto(id, source, blob) {
-    return openDB().then(db => new Promise((res, rej) => {
-      const photoKey = fk(id, source) + '::' + Date.now();
-      const tx = db.transaction('photos', 'readwrite');
-      tx.objectStore('photos').put({ photoKey, favKey: fk(id, source), blob, addedAt: Date.now() });
-      tx.oncomplete = () => res(photoKey);
-      tx.onerror = e => rej(e.target.error);
-    }));
+  function addPhoto(id, source, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetch(`/api/photos?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}`, {
+      method: 'POST',
+      body: formData
+    }).then(r => r.json());
   }
 
   function getPhotos(id, source) {
-    return openDB().then(db => new Promise((res, rej) => {
-      const tx = db.transaction('photos', 'readonly');
-      const req = tx.objectStore('photos').index('favKey').getAll(fk(id, source));
-      req.onsuccess = e => res(e.target.result.sort((a, b) => a.addedAt - b.addedAt));
-      req.onerror = e => rej(e.target.error);
-    }));
+    return fetch(`/api/photos?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}`)
+      .then(r => r.ok ? r.json() : []);
   }
 
-  function deletePhoto(photoKey) {
-    return openDB().then(db => new Promise((res, rej) => {
-      const tx = db.transaction('photos', 'readwrite');
-      tx.objectStore('photos').delete(photoKey);
-      tx.oncomplete = res;
-      tx.onerror = e => rej(e.target.error);
-    }));
+  function deletePhoto(id, source, photoKey) {
+    return fetch(`/api/photos?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}&photoKey=${encodeURIComponent(photoKey)}`, {
+      method: 'DELETE'
+    }).then(r => r.json());
   }
 
   window.Favorites = { getAll, isFav, add, remove, updateRating, updateNotes, addManual, addPhoto, getPhotos, deletePhoto };
