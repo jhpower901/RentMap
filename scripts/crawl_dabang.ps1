@@ -137,6 +137,59 @@ function Convert-ToManwonNumber {
     return [double]$text
 }
 
+function Test-HasAddressDetail {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $false
+    }
+
+    return "$Value" -match "\s\d+(?:-\d+)?(?:\s|$)"
+}
+
+function Get-BestAddress {
+    param(
+        [object]$Object,
+        [string[]]$Names
+    )
+
+    $fallback = $null
+    foreach ($name in $Names) {
+        if ($Object.PSObject.Properties.Name -contains $name) {
+            $value = $Object.$name
+            if ($null -eq $value -or "$value" -eq "") {
+                continue
+            }
+
+            if ($null -eq $fallback) {
+                $fallback = $value
+            }
+            if (Test-HasAddressDetail $value) {
+                return $value
+            }
+        }
+    }
+
+    return $fallback
+}
+
+function Invoke-RestMethodUtf8 {
+    param(
+        [string]$Uri,
+        [hashtable]$Headers
+    )
+
+    $response = Invoke-WebRequest -Method Get -Uri $Uri -Headers $Headers -UseBasicParsing
+    $stream = $response.RawContentStream
+    if ($stream.CanSeek) {
+        $stream.Position = 0
+    }
+
+    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+    $content = $reader.ReadToEnd()
+    return $content | ConvertFrom-Json
+}
+
 $filters = @{
     sellingTypeList = @("MONTHLY_RENT")
     depositRange = @{ min = 0; max = $MaxDeposit }
@@ -278,8 +331,52 @@ foreach ($room in $rooms) {
             $lat = "$($locationArray[1])"
         }
     }
+    $address = Get-BestAddress $roomData @(
+        "full_jibun_address2_str",
+        "fullJibunAddress2Str",
+        "full_road_address2_str",
+        "fullRoadAddress2Str",
+        "full_jibun_address_str",
+        "fullJibunAddressStr",
+        "full_road_address_str",
+        "fullRoadAddressStr",
+        "address"
+    )
+    if (-not (Test-HasAddressDetail $address)) {
+        $nearUrl = "https://www.dabangapp.com/api/v5/room/$([System.Uri]::EscapeDataString($publicRoomId))/near"
+        try {
+            $nearResponse = Invoke-RestMethodUtf8 -Uri $nearUrl -Headers $headers
+            $nearResult = if ($nearResponse.PSObject.Properties.Name -contains "result") { $nearResponse.result } else { $nearResponse }
+            $nearAddress = Get-FirstValue $nearResult @("address")
+            if ($null -ne $nearAddress -and "$nearAddress" -ne "") {
+                $address = $nearAddress
+            }
+
+            $nearLocation = Get-FirstValue $nearResult @("location")
+            if ($null -ne $nearLocation) {
+                $nearLat = Get-FirstValue $nearLocation @("lat")
+                $nearLng = Get-FirstValue $nearLocation @("lng")
+                if ($null -ne $nearLat -and $null -ne $nearLng) {
+                    $lat = "$nearLat"
+                    $lng = "$nearLng"
+                }
+            }
+        }
+        catch {
+            Write-Warning "Near fetch failed for room_id=${publicRoomId}: $($_.Exception.Message)"
+        }
+    }
     $isShowDetailAddress = Get-FirstValue $roomData @("is_show_detail_address", "isShowDetailAddress")
-    $addressPublicLevel = if ($isShowDetailAddress -eq $true) { "exact_address_visible" } else { "dong_only_ask_agency_for_exact_jibun" }
+    $isToggleDetailAddress = Get-FirstValue $roomData @("is_toggle_detail_address", "isToggleDetailAddress")
+    $addressPublicLevel = if (Test-HasAddressDetail $address) {
+        "exact_address_visible"
+    }
+    elseif ($isShowDetailAddress -eq $true -or $isToggleDetailAddress -eq $true) {
+        "detail_address_field_visible_but_no_jibun_number"
+    }
+    else {
+        "dong_only_ask_agency_for_exact_jibun"
+    }
 
     $records += [pscustomobject]@{
         source = "dabang"
@@ -290,7 +387,7 @@ foreach ($room in $rooms) {
         agent_name = "$(Get-FirstValue $agent @("facename", "representative_name", "representativeName", "owner_name", "ownerName"))"
         agent_phone = "$(Get-FirstValue $agent @("agent_tel", "phone", "tel", "telephone", "cell_phone", "cellPhone"))"
         region = "$(Get-FirstValue $region @("full_name", "name"))"
-        address = "$(Get-FirstValue $roomData @("full_jibun_address_str", "full_road_address_str", "address"))"
+        address = "$address"
         latitude = $lat
         longitude = $lng
         address_public_level = $addressPublicLevel
