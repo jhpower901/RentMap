@@ -25,7 +25,8 @@ $args = @(
     $scriptPath,
     "--url", $Url,
     "--output-csv", $OutputCsv,
-    "--max-pages", "$MaxPages"
+    "--max-pages", "$MaxPages",
+    "--skip-home"   # avoids Naver home page setting wrong cortarNo via IP geolocation
 )
 
 if ($RawJson -ne "") {

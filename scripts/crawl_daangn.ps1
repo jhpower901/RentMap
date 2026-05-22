@@ -3,7 +3,13 @@ param(
     [int]$MaxDeposit = 3000,
     [int]$MaxRent = 60,
     [string]$OutputCsv = ".\data\daangn_ajou_2026-05-22.csv",
-    [switch]$SkipDetail
+    [switch]$SkipDetail,
+    # Optional bounding box filter (applied after detail fetch using publicCoordinate).
+    # Set both Min* and Max* to activate; 0/0 means no filter.
+    [double]$MinLat = 0,
+    [double]$MaxLat = 0,
+    [double]$MinLng = 0,
+    [double]$MaxLng = 0
 )
 
 # RegionIds default covers Ajou University area dongs:
@@ -265,10 +271,22 @@ if ($outDir -and -not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 }
 
-$records |
+# Apply bounding box filter if all four bounds are provided
+$useBbox = ($MinLat -ne 0 -and $MaxLat -ne 0 -and $MinLng -ne 0 -and $MaxLng -ne 0)
+$filtered = if ($useBbox) {
+    $records | Where-Object {
+        $latOk = $_.latitude -eq "" -or ($_.latitude -ne "" -and [double]$_.latitude -ge $MinLat -and [double]$_.latitude -le $MaxLat)
+        $lonOk = $_.longitude -eq "" -or ($_.longitude -ne "" -and [double]$_.longitude -ge $MinLng -and [double]$_.longitude -le $MaxLng)
+        $latOk -and $lonOk
+    }
+} else { $records }
+
+Write-Host "Bbox filter: $($records.Count) -> $(@($filtered).Count) records"
+
+@($filtered) |
     Sort-Object @{ Expression = "region_depth3"; Ascending = $true },
                 @{ Expression = "total_monthly_manwon"; Ascending = $true },
                 @{ Expression = "rent_manwon"; Ascending = $true } |
     Export-Csv -Path $OutputCsv -NoTypeInformation -Encoding UTF8
 
-Write-Host "Wrote $($records.Count) rows to $OutputCsv"
+Write-Host "Wrote $(@($filtered).Count) rows to $OutputCsv"

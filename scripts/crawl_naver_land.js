@@ -13,6 +13,8 @@ function parseArgs(argv) {
     maxPages: 5,
     chromePath: "",
     headed: false,
+    cortarNo: "",   // force-override the cortarNo in the captured API URL
+    skipHome: false, // skip initial home page visit
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -24,6 +26,8 @@ function parseArgs(argv) {
     else if (arg === "--max-pages" && next) args.maxPages = Number(next), i += 1;
     else if (arg === "--chrome-path" && next) args.chromePath = next, i += 1;
     else if (arg === "--headed") args.headed = true;
+    else if (arg === "--cortar-no" && next) args.cortarNo = next, i += 1;
+    else if (arg === "--skip-home") args.skipHome = true;
   }
 
   return args;
@@ -264,8 +268,10 @@ async function main() {
   });
 
   try {
-    await page.goto("https://new.land.naver.com/", { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForTimeout(1200);
+    if (!args.skipHome) {
+      await page.goto("https://new.land.naver.com/", { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForTimeout(1200);
+    }
 
     const firstResponsePromise = page.waitForResponse(
       (response) => response.url().includes("/api/articles?") && response.status() === 200,
@@ -273,8 +279,27 @@ async function main() {
     );
     await page.goto(args.url, { waitUntil: "domcontentloaded", timeout: 45000 });
     const firstResponse = await firstResponsePromise;
-    const firstUrl = firstResponse.url();
-    const firstJson = await readNaverJson(firstResponse);
+    let firstUrl = firstResponse.url();
+
+    // Log captured API URL for debugging
+    const capturedParams = new URL(firstUrl).searchParams;
+    console.log(`Captured API cortarNo: ${capturedParams.get("cortarNo")}, zoom: ${capturedParams.get("zoom")}`);
+
+    // Override cortarNo if requested — re-fetch page 1 with corrected URL
+    let firstJson;
+    if (args.cortarNo) {
+      const u = new URL(firstUrl);
+      console.log(`Overriding cortarNo: ${u.searchParams.get("cortarNo")} -> ${args.cortarNo}`);
+      u.searchParams.set("cortarNo", args.cortarNo);
+      firstUrl = u.toString();
+      const corrResp = await context.request.get(firstUrl, {
+        headers: cleanRequestHeaders(articleHeaders),
+        timeout: 30000,
+      });
+      firstJson = corrResp.ok() ? await readNaverJson(corrResp) : await readNaverJson(firstResponse);
+    } else {
+      firstJson = await readNaverJson(firstResponse);
+    }
 
     const payloads = [firstJson];
     let isMoreData = Boolean(firstJson.isMoreData);
