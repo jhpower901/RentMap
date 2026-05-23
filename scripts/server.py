@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import shutil
 import sqlite3
@@ -259,12 +260,32 @@ def load_favorites_state_from_db() -> dict[str, Any]:
     finally:
         conn.close()
 
+_SAFE_FOLDER_RE = re.compile(r"[^A-Za-z0-9_-]")
+_SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _sanitize_folder_segment(value: str) -> str:
+    return _SAFE_FOLDER_RE.sub("_", value or "")
+
+
+def _sanitize_filename(value: str) -> str:
+    base = os.path.basename(value or "")
+    cleaned = _SAFE_FILE_RE.sub("_", base)
+    # Block "." / ".." / leading-dot names — whitelist allows dots for extensions.
+    if not cleaned or cleaned.startswith("."):
+        cleaned = "_" + cleaned
+    return cleaned
+
+
 def get_fav_dir(source: str, id: str):
-    # Sanitize path
-    folder_name = f"{source}_{id}".replace(":", "_").replace("/", "_")
+    folder_name = f"{_sanitize_folder_segment(source)}_{_sanitize_folder_segment(id)}"
     path = os.path.join(PHOTOS_DIR, folder_name)
-    os.makedirs(path, exist_ok=True)
-    return path
+    resolved = os.path.realpath(path)
+    photos_root = os.path.realpath(PHOTOS_DIR)
+    if not resolved.startswith(photos_root + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    os.makedirs(resolved, exist_ok=True)
+    return resolved
 
 def load_favorites_state() -> dict[str, Any]:
     return load_favorites_state_from_db()
@@ -320,9 +341,8 @@ async def list_photos(id: str, source: str):
 @app.post("/api/photos")
 async def upload_photo(id: str, source: str, file: UploadFile = File(...)):
     fav_dir = get_fav_dir(source, id)
-    # Create a unique filename
     timestamp = int(time.time() * 1000)
-    filename = f"{timestamp}_{file.filename}"
+    filename = f"{timestamp}_{_sanitize_filename(file.filename or '')}"
     file_path = os.path.join(fav_dir, filename)
     
     with open(file_path, "wb") as buffer:
@@ -334,7 +354,7 @@ async def upload_photo(id: str, source: str, file: UploadFile = File(...)):
 @app.delete("/api/photos")
 async def delete_photo(id: str, source: str, photoKey: str):
     fav_dir = get_fav_dir(source, id)
-    file_path = os.path.join(fav_dir, photoKey)
+    file_path = os.path.join(fav_dir, _sanitize_filename(photoKey))
     if os.path.exists(file_path):
         os.remove(file_path)
         return {"status": "deleted"}
