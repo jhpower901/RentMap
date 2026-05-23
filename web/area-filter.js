@@ -165,7 +165,15 @@
       draft = { points: [], group: L.layerGroup().addTo(map) };
       if (layer) { map.removeLayer(layer); layer = null; }
       map.getContainer().classList.add('area-drawing');
-      onClick = e => { draft.points.push([e.latlng.lat, e.latlng.lng]); renderDraft(); };
+      onClick = e => {
+        // Don't swallow clicks that landed on a marker or popup — let
+        // Leaflet's own handler open the popup. Only count clicks on the
+        // empty map as polygon vertices.
+        const t = e.originalEvent && e.originalEvent.target;
+        if (t && t.closest && t.closest('.leaflet-interactive, .leaflet-popup, .leaflet-marker-icon')) return;
+        draft.points.push([e.latlng.lat, e.latlng.lng]);
+        renderDraft();
+      };
       map.on('click', onClick);
       renderDraft();
     }
