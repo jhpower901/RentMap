@@ -739,8 +739,34 @@ def crawl_naver(args: argparse.Namespace) -> None:
     asyncio.run(crawl_naver_async(args, async_playwright))
 
 
+async def _paginate_naver_cortarno(context: Any, template_url: str, cortarno: str, headers: dict[str, str] | None, args: argparse.Namespace) -> list[Any]:
+    """Walk pages 1..max_pages for an explicit cortarNo via direct list-API calls.
+
+    Used when the env-driven cortarNo list (RENTMAP_NAVER_CORTARNOS) contains a
+    dong the auto-grid never resolved to. Builds the URL by swapping the
+    cortarNo on a captured template, so all other query params (filters,
+    pageSize, tag, etc.) match what the browser would have sent.
+    """
+    payloads: list[Any] = []
+    cleaned = clean_headers(headers)
+    url_with_cn = set_query_param(template_url, "cortarNo", cortarno)
+    for pg in range(1, args.max_pages + 1):
+        next_url = set_query_param(url_with_cn, "page", str(pg))
+        response = await context.request.get(next_url, headers=cleaned, timeout=30000)
+        if not response.ok:
+            print(f"  [direct cortarNo={cortarno}] page {pg}: HTTP {response.status}", file=sys.stderr)
+            break
+        payload = await response.json()
+        payloads.append(payload)
+        if not payload.get("isMoreData"):
+            break
+        await asyncio.sleep(NAVER_PAGE_DELAY_MS / 1000)
+    return payloads
+
+
 async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> None:
     urls = args.urls or default_naver_urls()
+    explicit_cortarnos = default_naver_cortarnos()
     chrome = find_chrome(args.chrome_path)
     async with async_playwright() as p:
         launch_options: dict[str, Any] = {
@@ -754,12 +780,17 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
         article_headers: dict[str, str] | None = None
+        # Captured list-API URL from the first successful navigation — used as
+        # a template for direct cortarNo paginate calls (we only swap cortarNo).
+        first_list_url: str | None = None
 
         async def on_request(request: Any) -> None:
-            nonlocal article_headers
+            nonlocal article_headers, first_list_url
             if "/api/articles?" in request.url:
                 try:
                     article_headers = await request.all_headers()
+                    if first_list_url is None:
+                        first_list_url = request.url
                 except Exception:
                     pass
 
@@ -791,7 +822,40 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                     records.append(record)
                     new_count += 1
                 print(f"  Found {len(one_records)} in bbox, {new_count} new after dedup (cortarNo={cortarno or '?'})")
-            print(f"\nList API summary: {len(records)} unique articles across {len(seen_cortarnos)} cortarNos, {len(raw_payloads)} payload pages")
+            print(f"\nList API (grid pass): {len(records)} unique articles across {len(seen_cortarnos)} cortarNos, {len(raw_payloads)} payload pages")
+
+            # Coverage backstop: paginate every cortarNo from RENTMAP_NAVER_CORTARNOS
+            # that the grid didn't already cover. Defends against Naver's
+            # non-deterministic ms= → cortarNo mapping (the same tile can flip
+            # between dongs across requests, so grid-only coverage can silently
+            # drop entire dongs of listings).
+            template = first_list_url
+            missing_cortarnos = [cn for cn in explicit_cortarnos if cn not in seen_cortarnos]
+            if missing_cortarnos and template and article_headers:
+                center = get_map_center(urls[0]) if urls else {"latitude": 0, "longitude": 0, "zoom": "16"}
+                print(f"\nDirect-pagination pass: {len(missing_cortarnos)} cortarNos missed by grid: {missing_cortarnos}")
+                for cn in missing_cortarnos:
+                    payloads = await _paginate_naver_cortarno(context, template, cn, article_headers, args)
+                    raw_payloads.extend(payloads)
+                    seen_cortarnos.add(cn)
+                    new_count = 0
+                    for payload in payloads:
+                        for article in payload.get("articleList") or []:
+                            record = normalize_naver_article(article, template, center)
+                            if not bbox_ok(record.get("latitude"), record.get("longitude"), args):
+                                continue
+                            key = to_text(record.get("listing_no"))
+                            if key and key in seen:
+                                continue
+                            if key:
+                                seen.add(key)
+                            records.append(record)
+                            new_count += 1
+                    print(f"  [direct cortarNo={cn}] {len(payloads)} pages, {new_count} new in-bbox articles")
+            elif missing_cortarnos and not template:
+                print(f"[naver] {len(missing_cortarnos)} explicit cortarNos requested but no list URL captured; skipping direct pass", file=sys.stderr)
+
+            print(f"\nList API total: {len(records)} unique articles across {len(seen_cortarnos)} cortarNos, {len(raw_payloads)} payload pages")
 
             # Detail-API enrichment: list API never returns the exact address or
             # room/parking/move-in/description fields. We call /api/articles/{no}
@@ -993,6 +1057,32 @@ def default_naver_urls() -> list[str]:
     urls = gen_naver_grid_urls(center_lat, center_lng, radius_km)
     print(f"[naver] generated {len(urls)} grid URLs (center={center_lat},{center_lng} r={radius_km}km)", file=sys.stderr)
     return urls
+
+
+def default_naver_cortarnos() -> list[str]:
+    """Explicit cortarNos (dong-level admin codes) the crawler must paginate.
+
+    Naver's ``ms=`` → ``cortarNo`` resolution is non-deterministic: the same
+    viewport URL can resolve to different dong codes across requests (we've
+    observed a single tile flipping between 4111710200 원천동 and 4113510300
+    분당). The auto-generated coordinate grid alone therefore can't guarantee
+    coverage of any particular dong — listings in skipped dongs vanish from
+    the CSV silently.
+
+    The mitigation is to feed the crawler the cortarNos we KNOW we want
+    covered (find them by visiting new.land.naver.com, navigating the map,
+    and reading the ``cortarNo=`` digits in the Network tab's request URL).
+    The crawler paginates every cortarNo in this list using the headers it
+    captured from the first grid tile. Returns an empty list when the env
+    var is unset — grid is then the sole coverage source (legacy behaviour).
+    """
+    raw = os.environ.get("RENTMAP_NAVER_CORTARNOS", "").strip()
+    if not raw:
+        return []
+    cns = [x.strip() for x in raw.split(",") if x.strip()]
+    if cns:
+        print(f"[naver] forcing pagination of {len(cns)} explicit cortarNos from RENTMAP_NAVER_CORTARNOS", file=sys.stderr)
+    return cns
 
 
 def default_daangn_region_ids() -> list[int]:
@@ -1362,7 +1452,7 @@ def gen_web(args: argparse.Namespace) -> None:
 
 
 def normal_common(r: dict[str, str], source: str) -> dict[str, Any]:
-    return {
+    out = {
         "source": source,
         "id": r.get("listing_no", ""),
         "url": r.get("url", ""),
@@ -1383,6 +1473,27 @@ def normal_common(r: dict[str, str], source: str) -> dict[str, Any]:
         "img1": r.get("image_1", ""),
         "img2": r.get("image_2", ""),
     }
+    # Optional detail fields (favorites page renders them when present).
+    # Zigbang uses ``residence_type`` for the same concept Naver/Dabang call
+    # ``building_use``; expose it under the same key.
+    optional_fields = {
+        "direction": r.get("direction", ""),
+        "room_count": r.get("room_count", ""),
+        "bathroom_count": r.get("bathroom_count", ""),
+        "room_structure": r.get("room_structure", ""),
+        "duplex": r.get("duplex", ""),
+        "parking": r.get("parking", ""),
+        "move_in": r.get("move_in", ""),
+        "approval_date": r.get("approval_date", ""),
+        "building_use": r.get("building_use", "") or r.get("residence_type", ""),
+        "description": r.get("description", ""),
+        "options": r.get("options", ""),
+        "security_options": r.get("security_options", ""),
+    }
+    for key, value in optional_fields.items():
+        if value not in (None, ""):
+            out[key] = value
+    return out
 
 
 def normal_daangn(r: dict[str, str]) -> dict[str, Any]:

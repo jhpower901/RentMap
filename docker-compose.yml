@@ -27,6 +27,13 @@ services:
       # grid from CENTER_LAT/LNG + RADIUS_KM. Set only to override with specific URLs.
       # NOTE: comma cannot be used as separator — ms= params contain commas.
       - RENTMAP_NAVER_URLS=${RENTMAP_NAVER_URLS:-}
+      # Explicit Naver cortarNos (dong-level admin codes) to force-paginate, on
+      # top of whatever the grid resolves to. Necessary because Naver's
+      # ms= → cortarNo resolution is non-deterministic — a tile near 원천동 can
+      # land on 분당 instead, silently dropping that dong's listings. The list
+      # below is the union of every cortarNo we've observed our 3km Ajou grid
+      # land on across multiple runs (영통/매탄/원천/우만/이의/하동 ...).
+      - RENTMAP_NAVER_CORTARNOS=${RENTMAP_NAVER_CORTARNOS:-4111710100,4111710200,4111710300,4111710400,4111710500,4111710600,4111514000,4111514100,4111513300,4111513500,4111513800,4111513900,4111512000,4111313700,4111312600,4111113000,4111113400,4111113600,4111113900}
     restart: unless-stopped
 
   # Naver crawler runs in its own playwright-based container, in lock-step
@@ -51,6 +58,9 @@ services:
       - RENTMAP_MAX_RENT=${RENTMAP_MAX_RENT:-999999}
       # Same Naver URL override — naver container uses env vars to generate its grid.
       - RENTMAP_NAVER_URLS=${RENTMAP_NAVER_URLS:-}
+      # Same cortarNo backstop as above — the rentmap-naver container is where
+      # actual paginating happens, so the env var matters here.
+      - RENTMAP_NAVER_CORTARNOS=${RENTMAP_NAVER_CORTARNOS:-4111710100,4111710200,4111710300,4111710400,4111710500,4111710600,4111514000,4111514100,4111513300,4111513500,4111513800,4111513900,4111512000,4111313700,4111312600,4111113000,4111113400,4111113600,4111113900}
     restart: unless-stopped
 
 networks:

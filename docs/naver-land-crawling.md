@@ -43,6 +43,15 @@ Naver's list API is **`cortarNo`-scoped** (dong-level administrative area), not
 viewport-scoped. A `ms=` URL only steers which `cortarNo` the front-end picks; the
 returned articles cover the entire dong, paginated 100 at a time.
 
+> ⚠ **Naver's `ms=` → `cortarNo` resolution is non-deterministic.** The same
+> viewport URL can resolve to different dong codes across requests — e.g. a
+> tile centred on 원천동 (37.27, 127.04) sometimes lands on `4111710200`
+> 원천동 and sometimes on `4113510300` 분당. Even encoding the *exact*
+> coordinates of a target listing into the `ms=` does not guarantee the
+> expected cortarNo. This means grid-only coverage can silently drop entire
+> dongs of listings depending on Naver's mood. The `RENTMAP_NAVER_CORTARNOS`
+> env var below exists exactly to make coverage deterministic.
+
 To cover an arbitrary radius around a centre point:
 
 1. `gen_naver_grid_urls(center_lat, center_lng, radius_km)` builds a grid of
@@ -52,12 +61,17 @@ To cover an arbitrary radius around a centre point:
 2. Each tile navigation captures the resolved `cortarNo` from the API URL.
 3. A `seen_cortarnos` set in `crawl_naver_async` dedups tiles that resolve to
    the same dong, so pages 2..N are paginated **only once per cortarNo**.
-4. After the list pass, every record whose lat/lng falls inside the bbox is
+4. **Coverage backstop** (`_paginate_naver_cortarno`): after the grid pass,
+   any cortarNo listed in `RENTMAP_NAVER_CORTARNOS` that wasn't resolved by
+   any tile is paginated directly — the captured first-tile URL is reused as
+   a template and only the `cortarNo` query parameter is swapped. This is
+   what guarantees coverage of the dongs you care about regardless of
+   Naver's randomised mapping.
+5. After the list pass, every record whose lat/lng falls inside the bbox is
    enriched via `/api/articles/{articleNo}`.
 
 You can also pin a fixed URL list via the `RENTMAP_NAVER_URLS` env var (see
-below) — useful when a particular cortarNo is known to be missing from the
-auto-generated grid.
+below) — useful for narrowing the grid to a single area when debugging.
 
 ## Reusable script
 
@@ -104,6 +118,7 @@ docker compose exec rentmap-naver python /app/scripts/rentmap.py crawl-naver `
 | `RENTMAP_CENTER_LNG`          | Longitude for the auto-generated grid (default `127.043688`).                                            |
 | `RENTMAP_RADIUS_KM`           | Radius the grid + bbox filter cover (default `3.0`).                                                     |
 | `RENTMAP_NAVER_URLS`          | **Pipe-separated** (`\|`) list of full `ms=` URLs to override the auto-grid. Comma cannot be used because `ms=` itself contains commas. |
+| `RENTMAP_NAVER_CORTARNOS`     | Comma-separated explicit dong-level `cortarNo` codes to **force-paginate** on top of whatever the grid resolves to. Critical: Naver's `ms=` → `cortarNo` mapping is non-deterministic (the same tile can flip dongs across runs), so without this backstop entire dongs can be silently dropped. Find codes by opening the area in `new.land.naver.com`, watching the Network tab, and reading `cortarNo=…` from the request URL. |
 | `RENTMAP_MAX_DEPOSIT`         | Hard cap on deposit (만원). Applied to list API.                                                         |
 | `RENTMAP_MAX_RENT`            | Hard cap on monthly rent (만원). Applied to list API.                                                    |
 
