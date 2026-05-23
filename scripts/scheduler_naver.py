@@ -1,10 +1,11 @@
 """Standalone scheduler for the naver crawler.
 
-Runs inside the playwright-based image (Dockerfile.naver). The main FastAPI
-container performs the hourly dabang/zigbang/daangn crawl + gen-web; naver
-runs here at a slower cadence because Playwright is heavy. Both containers
-share the ./data volume, so gen-web in the main container picks up the
-freshly-written naver CSV on its next tick.
+Runs inside the playwright-based image (Dockerfile.naver). Every hour at :00
+KST, in lock-step with the main `rentmap-server` container which crawls the
+other three sources at the same time. Both containers share `./data`, so
+the `rentmap-server`'s gen-web cron (at :00 and :30) picks up whichever
+naver CSV is currently on disk — and gen-web falls back to the most recent
+naver CSV if the current run hasn't finished yet.
 """
 
 from __future__ import annotations
@@ -51,10 +52,10 @@ def run_naver_crawl() -> None:
 
 def main() -> None:
     scheduler = BlockingScheduler(timezone=TZ)
-    # Every 3 hours at :30 — offset from the main hourly run (which runs at :05)
+    # Every hour at :00, in lock-step with rentmap-server's crawl cron.
     scheduler.add_job(
         run_naver_crawl,
-        trigger=CronTrigger(hour="*/3", minute=30, timezone=TZ),
+        trigger=CronTrigger(minute=0, timezone=TZ),
         id="naver_crawl",
         max_instances=1,
         coalesce=True,
@@ -69,7 +70,7 @@ def main() -> None:
         max_instances=1,
         coalesce=True,
     )
-    print("[naver-scheduler] started (every 3h at :30 KST, plus startup kick)", flush=True)
+    print("[naver-scheduler] started — hourly at :00 KST, plus startup kick", flush=True)
     scheduler.start()
 
 

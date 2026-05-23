@@ -877,6 +877,27 @@ def float_or_empty(value: Any) -> Any:
         return ""
 
 
+def _latest_csv(data_dir: Path, prefix: str, target_date: str) -> Path | None:
+    """Return the dated CSV for target_date, or the most recent prior file
+    matching `<prefix>_<YYYY-MM-DD>.csv` as fallback. Returns None if no
+    candidate exists at all."""
+    target = data_dir / f"{prefix}_{target_date}.csv"
+    if target.exists():
+        return target
+    candidates = sorted(data_dir.glob(f"{prefix}_*.csv"))
+    return candidates[-1] if candidates else None
+
+
+def _read_csv_lenient(data_dir: Path, prefix: str, target_date: str, label: str) -> list[dict[str, str]]:
+    path = _latest_csv(data_dir, prefix, target_date)
+    if path is None:
+        print(f"  [gen-web] {label}: no CSV found (using empty)")
+        return []
+    if path.name != f"{prefix}_{target_date}.csv":
+        print(f"  [gen-web] {label}: today's CSV missing, falling back to {path.name}")
+    return read_csv(path)
+
+
 def gen_web(args: argparse.Namespace) -> None:
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
@@ -885,10 +906,10 @@ def gen_web(args: argparse.Namespace) -> None:
     tpl_platform = (tpl_dir / "_tpl_platform.html").read_text(encoding="utf-8")
     tpl_index = (tpl_dir / "_tpl_index.html").read_text(encoding="utf-8")
 
-    dabang = read_csv(data_dir / f"dabang_ajou_{args.date}.csv")
-    daangn = read_csv(data_dir / f"daangn_ajou_{args.date}.csv")
-    zigbang = read_csv(data_dir / f"zigbang_ajou_{args.date}.csv")
-    naver = read_csv(data_dir / f"naver_land_ajou_{args.date}.csv")
+    dabang = _read_csv_lenient(data_dir, "dabang_ajou", args.date, "dabang")
+    daangn = _read_csv_lenient(data_dir, "daangn_ajou", args.date, "daangn")
+    zigbang = _read_csv_lenient(data_dir, "zigbang_ajou", args.date, "zigbang")
+    naver = _read_csv_lenient(data_dir, "naver_land_ajou", args.date, "naver")
     print(f"Loaded: dabang={len(dabang)} daangn={len(daangn)} zigbang={len(zigbang)} naver={len(naver)}")
 
     js_dabang = js_array([normal_dabang(r) for r in dabang])

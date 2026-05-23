@@ -22,19 +22,29 @@ RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 
 
-def run_hourly_crawl_and_gen() -> None:
-    today = datetime.now(TZ).strftime("%Y-%m-%d")
-    print(f"[scheduler] crawl-all --skip-naver --gen-web --date {today}", flush=True)
+def _run_rentmap(args: list[str], label: str, timeout_s: int) -> None:
+    print(f"[scheduler] {label}: rentmap {' '.join(args)}", flush=True)
     try:
         subprocess.run(
-            [sys.executable, str(RENTMAP_CLI), "crawl-all", "--skip-naver", "--gen-web", "--date", today],
+            [sys.executable, str(RENTMAP_CLI), *args],
             cwd=str(ROOT),
             check=False,
-            timeout=50 * 60,
+            timeout=timeout_s,
         )
-        print(f"[scheduler] crawl-all done", flush=True)
+        print(f"[scheduler] {label}: done", flush=True)
     except Exception as exc:
-        print(f"[scheduler] crawl-all failed: {exc}", flush=True)
+        print(f"[scheduler] {label}: failed — {exc}", flush=True)
+
+
+def run_hourly_crawl() -> None:
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    _run_rentmap(["crawl-all", "--skip-naver", "--date", today], label="hourly-crawl", timeout_s=50 * 60)
+
+
+def run_gen_web() -> None:
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    # gen_web is fault-tolerant: missing today's CSV falls back to most recent.
+    _run_rentmap(["gen-web", "--date", today], label="gen-web", timeout_s=5 * 60)
 
 
 scheduler = BackgroundScheduler(timezone=TZ)
@@ -42,25 +52,41 @@ scheduler = BackgroundScheduler(timezone=TZ)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Every hour at :00 — crawl dabang/zigbang/daangn. Naver crawls in its own
+    # container on the same :00 cron.
     scheduler.add_job(
-        run_hourly_crawl_and_gen,
-        trigger=CronTrigger(minute=5, timezone=TZ),
+        run_hourly_crawl,
+        trigger=CronTrigger(minute=0, timezone=TZ),
         id="hourly_crawl",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=30 * 60,
     )
-    # Kick off once a few seconds after startup so a fresh container has data immediately
+    # Every 30 minutes (:00 and :30) — regenerate web pages from whatever CSVs
+    # are present (gen-web falls back to most-recent files for missing sources).
     scheduler.add_job(
-        run_hourly_crawl_and_gen,
-        trigger="date",
-        run_date=datetime.now(TZ) + timedelta(seconds=15),
-        id="startup_crawl",
+        run_gen_web,
+        trigger=CronTrigger(minute="0,30", timezone=TZ),
+        id="gen_web_30m",
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=10 * 60,
+    )
+    # Startup kicks — crawl shortly after boot, then gen-web a bit later so a
+    # fresh container ends up with rendered pages without waiting for the cron.
+    now = datetime.now(TZ)
+    scheduler.add_job(
+        run_hourly_crawl, trigger="date",
+        run_date=now + timedelta(seconds=15),
+        id="startup_crawl", max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        run_gen_web, trigger="date",
+        run_date=now + timedelta(seconds=30),
+        id="startup_gen_web", max_instances=1, coalesce=True,
     )
     scheduler.start()
-    print("[scheduler] started (hourly at :05 KST, plus startup kick)", flush=True)
+    print("[scheduler] started — crawl at :00 hourly, gen-web at :00/:30 (KST), plus startup kicks", flush=True)
     try:
         yield
     finally:
