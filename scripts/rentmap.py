@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1588,6 +1589,34 @@ def _naver_args(date: str, bbox: tuple[float, float, float, float]) -> argparse.
     )
 
 
+def _run_parallel_crawlers(jobs: list[tuple[str, Any, argparse.Namespace]]) -> dict[str, BaseException | None]:
+    """Run each (label, fn, ns) job on its own thread and return per-job result.
+
+    - Each crawler creates its own ``requests.Session()`` inside its body, so
+      no shared mutable state crosses threads.
+    - Exceptions are captured per-job; one crawler's failure must not stop the
+      others (we'd rather have 2/3 fresh CSVs than 0/3).
+    - stdout from each thread interleaves naturally — every line is line-buffered
+      by Python and the embedded source name in messages keeps it readable.
+    """
+    errors: dict[str, BaseException | None] = {label: None for label, _, _ in jobs}
+    start = time.time()
+    print(f"[crawl-all] launching {len(jobs)} crawlers in parallel: {', '.join(l for l, _, _ in jobs)}", flush=True)
+    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        future_to_label = {ex.submit(fn, ns): label for label, fn, ns in jobs}
+        for fut in as_completed(future_to_label):
+            label = future_to_label[fut]
+            elapsed = time.time() - start
+            try:
+                fut.result()
+                print(f"[crawl-all] [{label}] done at +{elapsed:.1f}s", flush=True)
+            except BaseException as exc:
+                errors[label] = exc
+                print(f"[crawl-all] [{label}] FAILED at +{elapsed:.1f}s: {exc}", file=sys.stderr, flush=True)
+    print(f"[crawl-all] parallel crawlers finished in {time.time()-start:.1f}s", flush=True)
+    return errors
+
+
 def crawl_all(args: argparse.Namespace) -> None:
     bbox = default_bbox_from_env()
     cr = _resolve_center_radius(args)
@@ -1595,10 +1624,21 @@ def crawl_all(args: argparse.Namespace) -> None:
         bbox = bbox_from_center_radius(*cr)
     max_deposit = default_max_deposit()
     max_rent = default_max_rent()
-    crawl_dabang(_dabang_args(args.date, bbox, max_deposit, max_rent))
-    crawl_zigbang(_zigbang_args(args.date, bbox, max_deposit, max_rent))
-    # Pass actual bbox so out-of-radius listings fetched by Daangn region-ID are excluded.
-    crawl_daangn(_daangn_args(args.date, bbox, max_deposit, max_rent))
+
+    # Dabang/Zigbang/Daangn are I/O-bound (external HTTP), no shared state, and
+    # each writes to its own CSV — perfect candidates for thread-parallel.
+    # Naver stays out: it owns a Playwright browser instance, runs in its own
+    # container (see scheduler_naver.py), and the inline path (--no-skip-naver)
+    # is rare so the extra concurrency wouldn't help most callers.
+    jobs: list[tuple[str, Any, argparse.Namespace]] = [
+        ("dabang",  crawl_dabang,  _dabang_args(args.date, bbox, max_deposit, max_rent)),
+        ("zigbang", crawl_zigbang, _zigbang_args(args.date, bbox, max_deposit, max_rent)),
+        # _daangn_args passes the actual bbox so out-of-radius listings fetched
+        # by Daangn region-ID are excluded post-fetch.
+        ("daangn",  crawl_daangn,  _daangn_args(args.date, bbox, max_deposit, max_rent)),
+    ]
+    _run_parallel_crawlers(jobs)
+
     if not args.skip_naver:
         crawl_naver(_naver_args(args.date, bbox))
     if args.gen_web:

@@ -52,6 +52,10 @@ Implemented:
 - `docker-compose.yml` includes default location/radius env vars for both containers.
 - `docker-compose.yml` includes max deposit/rent env vars for both containers.
 - `crawl-dabang`, `crawl-zigbang`, `crawl-daangn`, and `crawl-all` read max deposit/rent from env by default.
+- `crawl-all` runs Dabang/Zigbang/Daangn in **parallel** via `ThreadPoolExecutor`
+  (Naver stays out: it's the heavy Playwright path and lives in its own container).
+  Measured speedup on the 3km Ajou bbox: sequential ~19 min → parallel 10.5 min
+  (dominated by Dabang's per-listing detail fetch, the slowest of the three).
 
 Limitations after Step 1:
 
