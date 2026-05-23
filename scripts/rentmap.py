@@ -690,6 +690,37 @@ def article_id_from_url(url: str) -> str:
     return match.group(1) if match else ""
 
 
+def extract_daangn_relay_store(text: str) -> dict[str, Any]:
+    match = re.search(r'window\.RELAY_STORE\s*=\s*("(?:\\.|[^"\\])*")\s*;', text, re.S)
+    if not match:
+        return {}
+    try:
+        return json.loads(json.loads(match.group(1)))
+    except Exception:
+        return {}
+
+
+def daangn_ref_node(store: dict[str, Any], value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    ref = value.get("__ref")
+    node = store.get(ref) if ref else None
+    return node if isinstance(node, dict) else {}
+
+
+def find_daangn_article_node(store: dict[str, Any], article_id: str) -> dict[str, Any]:
+    root = store.get("client:root")
+    if isinstance(root, dict):
+        ref_key = f'articleByOriginalArticleIdForSeo(originalArticleId:"{article_id}")'
+        node = daangn_ref_node(store, root.get(ref_key))
+        if node:
+            return node
+    for value in store.values():
+        if isinstance(value, dict) and to_text(value.get("originalId")) == article_id:
+            return value
+    return {}
+
+
 def get_daangn_article_detail(session: requests.Session, article_id: str) -> dict[str, str]:
     try:
         text = get_utf8(session, f"https://realty.daangn.com/articles/{article_id}", delay_ms=80)
@@ -706,16 +737,22 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
         coord = re.search(re.escape(coord_ref.group(1)) + r'\\":\{\\"__id\\":\\"[^\\"]+\\",\\"__typename\\":\\"Coordinate\\",\\"lat\\":\\"([^\\"]+)\\",\\"lon\\":\\"([^\\"]+)', text)
         if coord:
             detail["lat"], detail["lon"] = coord.group(1), coord.group(2)
-    patterns = {
-        "publicAddress": r'publicAddress\\":\\"([^\\"]*)',
-        "roomCnt": r'roomCnt\\":\\"?([^\\",}]*)',
-        "approvalDate": r'buildingApprovalDate\\":\\"([^\\"]*)',
-        "writerType": r'writerTypeV2\\":\\"([^\\"]*)',
-    }
-    for key, pattern in patterns.items():
-        match = re.search(pattern, text)
-        if match:
-            detail[key] = match.group(1)
+    store = extract_daangn_relay_store(text)
+    article = find_daangn_article_node(store, article_id)
+    if article:
+        coord = daangn_ref_node(store, article.get("publicCoordinate"))
+        detail.update({
+            "lat": to_text(coord.get("lat", "")),
+            "lon": to_text(coord.get("lon", "")),
+            "publicAddress": to_text(article.get("publicAddress", "")),
+            "roomCnt": to_text(article.get("roomCnt", "")),
+            "approvalDate": to_text(article.get("buildingApprovalDate", "")),
+            "writerType": to_text(article.get("writerTypeV2", "")),
+            "description": to_text(article.get("content", "")).strip(),
+        })
+        facs = [fac for fac in DAANGN_FACILITY_KEYWORDS if fac in detail["description"]]
+        if facs:
+            detail["options"] = "; ".join(facs)
 
     # Description body: the page may inline multiple articles' content (related
     # listings, recommendations). Anchor to THIS article's originalId and grab
@@ -730,7 +767,7 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
     #   raw `\\n` → literal `\n`); a second targeted pass collapses any
     #   inner-layer escapes that remain. Doing both keeps the body readable
     #   regardless of which Daangn template emitted it.
-    oid_match = re.search(r'originalId\\":\\"' + re.escape(article_id) + r'\\"', text)
+    oid_match = None if detail["description"] else re.search(r'originalId\\":\\"' + re.escape(article_id) + r'\\"', text)
     if oid_match:
         window = text[oid_match.start(): oid_match.start() + 12000]
         cm = re.search(r'content\\":\\"((?:[^"\\]|\\.){10,5000}?)\\"', window)
