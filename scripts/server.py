@@ -144,6 +144,22 @@ def filter_deleted(favorites: list[Any], deleted: dict[str, str]) -> list[Any]:
         filtered.append(entry)
     return filtered
 
+def merge_favorites(*states: dict[str, Any], deleted: dict[str, str]) -> list[Any]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for state in states:
+        for entry in state.get("favorites", []):
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key")
+            if not isinstance(key, str) or not key:
+                continue
+            if iso_time(deleted.get(key)) >= iso_time(entry.get("savedAt")):
+                continue
+            prev = by_key.get(key)
+            if prev is None or iso_time(entry.get("savedAt")) >= iso_time(prev.get("savedAt")):
+                by_key[key] = entry
+    return sorted(by_key.values(), key=lambda entry: iso_time(entry.get("savedAt")), reverse=True)
+
 def get_fav_dir(source: str, id: str):
     # Sanitize path
     folder_name = f"{source}_{id}".replace(":", "_").replace("/", "_")
@@ -173,7 +189,7 @@ async def save_favorites(favorites: Any):
         incoming = normalize_favorites_payload(favorites)
         deleted = merge_deleted(existing, incoming)
         payload = {
-            "favorites": filter_deleted(incoming["favorites"], deleted),
+            "favorites": merge_favorites(existing, incoming, deleted=deleted),
             "deleted": deleted,
         }
         with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
