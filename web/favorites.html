@@ -99,6 +99,18 @@ nav a.active-nav{background:#222;color:#fff}
 .field-row{display:flex;gap:8px}
 .field-row .field{flex:1}
 .modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+@media(max-width:640px){
+  nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .page{padding:10px}
+  .controls{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .controls>*{flex:0 0 auto}
+  .controls input[type=text]{width:180px}
+  #favList{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding-bottom:4px}
+  .fav-card{min-width:520px}
+  .fav-title{max-width:190px}
+  .fav-detail{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .eval-table{min-width:430px}
+}
 </style>
 </head>
 <body>

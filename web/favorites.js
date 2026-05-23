@@ -5,32 +5,54 @@
 
   function fk(id, source) { return String(source) + '::' + String(id); }
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { return []; } }
+  function entryTime(entry) {
+    const t = Date.parse(entry && entry.savedAt);
+    return Number.isFinite(t) ? t : 0;
+  }
+  function mergeFavorites(a, b) {
+    const byKey = new Map();
+    [...(a || []), ...(b || [])].forEach(entry => {
+      if (!entry || !entry.key) return;
+      const prev = byKey.get(entry.key);
+      if (!prev || entryTime(entry) >= entryTime(prev)) byKey.set(entry.key, entry);
+    });
+    return [...byKey.values()].sort((x, y) => entryTime(y) - entryTime(x));
+  }
   
   function save(favs) { 
     localStorage.setItem(KEY, JSON.stringify(favs)); 
-    // Background sync to server
-    fetch('/api/favorites', {
+    syncToServer(favs);
+  }
+
+  function syncToServer(favs) {
+    return fetch('/api/favorites', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(favs)
     }).catch(err => console.error('Failed to sync favorites to server:', err));
   }
 
-  // Initial sync from server on script load
-  fetch('/api/favorites')
+  const ready = fetch('/api/favorites')
     .then(r => r.ok ? r.json() : [])
     .then(serverFavs => {
-      if (serverFavs && serverFavs.length > 0) {
-        const localFavs = load();
-        // Simple merge: if server has data, use it. 
-        // In a real app we might compare timestamps, but for now server is source of truth.
-        localStorage.setItem(KEY, JSON.stringify(serverFavs));
-        console.log('Favorites synced from server:', serverFavs.length, 'items');
-        // Notify UI to refresh if necessary
-        window.dispatchEvent(new CustomEvent('favoritesSynced'));
+      const localFavs = load();
+      const merged = mergeFavorites(localFavs, Array.isArray(serverFavs) ? serverFavs : []);
+      const serverJson = JSON.stringify(serverFavs || []);
+      const mergedJson = JSON.stringify(merged);
+      localStorage.setItem(KEY, JSON.stringify(merged));
+      console.log('Favorites synced:', merged.length, 'items');
+      window.dispatchEvent(new CustomEvent('favoritesSynced'));
+
+      if (mergedJson !== serverJson) {
+        syncToServer(merged);
       }
+      return merged;
     })
-    .catch(err => console.warn('Server sync failed, using local storage only:', err));
+    .catch(err => {
+      console.warn('Server sync failed, using local storage only:', err);
+      window.dispatchEvent(new CustomEvent('favoritesSynced'));
+      return load();
+    });
 
   function getAll() { return load(); }
   function isFav(id, source) { const k = fk(id, source); return load().some(f => f.key === k); }
@@ -101,5 +123,5 @@
     }).then(r => r.json());
   }
 
-  window.Favorites = { getAll, isFav, add, remove, updateRating, updateNotes, addManual, addPhoto, getPhotos, deletePhoto };
+  window.Favorites = { getAll, isFav, add, remove, updateRating, updateNotes, addManual, addPhoto, getPhotos, deletePhoto, ready };
 })();
