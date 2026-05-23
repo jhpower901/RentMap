@@ -153,6 +153,7 @@ The script exports CSV by default. If you need the raw detail payload for debugg
 - building_use
 - options
 - security_options
+- description          *(detail API `room.memo` — the free-text body the agent wrote)*
 - image_1
 - image_2
 - crawl_note

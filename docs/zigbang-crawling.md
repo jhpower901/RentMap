@@ -162,6 +162,7 @@ Columns:
 - residence_type
 - non_compliant_building
 - options
+- description          *(detail API `item.description` — the free-text body the agent wrote)*
 - image_1
 - image_2
 - crawl_note

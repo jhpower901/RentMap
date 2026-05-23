@@ -65,7 +65,8 @@ DABANG_COLUMNS = [
     "region", "address", "latitude", "longitude", "address_public_level", "title",
     "deposit_manwon", "rent_manwon", "maintenance_manwon", "total_monthly_manwon",
     "room_type", "area_m2", "floor", "direction", "parking", "move_in", "approval_date",
-    "building_use", "options", "security_options", "image_1", "image_2", "crawl_note",
+    "building_use", "options", "security_options", "description",
+    "image_1", "image_2", "crawl_note",
 ]
 
 ZIGBANG_COLUMNS = [
@@ -74,7 +75,8 @@ ZIGBANG_COLUMNS = [
     "latitude", "longitude", "address_public_level", "title", "deposit_manwon", "rent_manwon",
     "maintenance_manwon", "total_monthly_manwon", "room_type", "service_type", "area_m2",
     "floor", "direction", "parking", "move_in", "approval_date", "residence_type",
-    "non_compliant_building", "options", "image_1", "image_2", "crawl_note",
+    "non_compliant_building", "options", "description",
+    "image_1", "image_2", "crawl_note",
 ]
 
 DAANGN_COLUMNS = [
@@ -421,6 +423,7 @@ def crawl_dabang(args: argparse.Namespace) -> None:
             "building_use": join_text_list(first(room_data, ["building_use_types_str", "buildingUseTypesStr"])),
             "options": join_text_list(options),
             "security_options": join_text_list(security),
+            "description": to_text(first(room_data, ["memo", "description"])),
             "image_1": image_url(images, 0),
             "image_2": image_url(images, 1),
             "crawl_note": "",
@@ -543,6 +546,7 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
                 "residence_type": item.get("residenceType", ""),
                 "non_compliant_building": item.get("nonCompliantBuilding", ""),
                 "options": join_text_list(item.get("options")),
+                "description": to_text(item.get("description", "")),
                 "image_1": images[0] if len(images) > 0 else "",
                 "image_2": images[1] if len(images) > 1 else "",
                 "crawl_note": "",
