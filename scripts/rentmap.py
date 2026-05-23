@@ -64,7 +64,9 @@ DABANG_COLUMNS = [
     "source", "listing_no", "room_id", "url", "agency", "agent_name", "agent_phone",
     "region", "address", "latitude", "longitude", "address_public_level", "title",
     "deposit_manwon", "rent_manwon", "maintenance_manwon", "total_monthly_manwon",
-    "room_type", "area_m2", "floor", "direction", "parking", "move_in", "approval_date",
+    "room_type", "area_m2", "supply_area_m2", "exclusive_area_m2", "floor", "direction",
+    "parking", "move_in", "published_at", "confirmed_at", "listing_age_text", "approval_date",
+    "maintenance_detail", "maintenance_basis", "maintenance_items",
     "building_use", "options", "security_options", "description",
     "image_1", "image_2", "crawl_note",
 ]
@@ -73,8 +75,10 @@ ZIGBANG_COLUMNS = [
     "source", "listing_no", "item_id", "url", "agency", "agent_name", "agent_phone",
     "realtor_name", "realtor_phone", "agency_address", "agency_reg_no", "region", "address",
     "latitude", "longitude", "address_public_level", "title", "deposit_manwon", "rent_manwon",
-    "maintenance_manwon", "total_monthly_manwon", "room_type", "service_type", "area_m2",
-    "floor", "direction", "parking", "move_in", "approval_date", "residence_type",
+    "maintenance_manwon", "total_monthly_manwon", "room_type", "bathroom_count", "service_type", "area_m2",
+    "supply_area_m2", "exclusive_area_m2", "floor", "direction", "parking", "elevator",
+    "move_in", "published_at", "confirmed_at", "listing_age_text", "approval_date", "residence_type",
+    "maintenance_detail", "maintenance_basis", "maintenance_items",
     "non_compliant_building", "options", "description",
     "image_1", "image_2", "crawl_note",
 ]
@@ -83,7 +87,10 @@ DAANGN_COLUMNS = [
     "source", "listing_no", "url", "writer_type", "agency", "region_depth1",
     "region_depth2", "region_depth3", "address", "latitude", "longitude", "title",
     "deposit_manwon", "rent_manwon", "maintenance_manwon", "total_monthly_manwon",
-    "room_type", "room_count", "area_m2", "floor", "approval_date",
+    "room_type", "room_count", "bathroom_count", "area_m2", "supply_area_m2", "exclusive_area_m2",
+    "floor", "direction", "parking", "elevator", "pet_allowed", "loan_available", "move_in",
+    "published_at", "confirmed_at", "listing_age_text", "approval_date",
+    "maintenance_detail", "maintenance_basis", "maintenance_items", "building_use",
     "options", "description",
     "image_1", "image_2", "crawl_note",
 ]
@@ -106,8 +113,10 @@ NAVER_COLUMNS = [
     "source", "listing_no", "room_id", "url", "agency", "agent_name", "agent_phone",
     "region", "address", "latitude", "longitude", "address_public_level", "title",
     "deposit_manwon", "rent_manwon", "maintenance_manwon", "total_monthly_manwon",
-    "room_type", "room_count", "bathroom_count", "area_m2", "floor", "direction",
-    "room_structure", "duplex", "parking", "move_in", "approval_date",
+    "room_type", "room_count", "bathroom_count", "area_m2", "supply_area_m2", "exclusive_area_m2",
+    "floor", "direction", "room_structure", "duplex", "parking", "move_in", "approval_date",
+    "published_at", "confirmed_at", "listing_age_text",
+    "maintenance_detail", "maintenance_basis", "maintenance_items",
     "building_use", "description", "options", "security_options",
     "image_1", "image_2", "crawl_note",
 ]
@@ -231,6 +240,86 @@ def join_text_list(value: Any) -> str:
         if label and label not in items:
             items.append(label)
     return "; ".join(items)
+
+
+def join_nested_text(value: Any) -> str:
+    """Compact nested API values into a readable semicolon-separated string."""
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return to_text(value)
+    if isinstance(value, list):
+        return "; ".join([x for x in (join_nested_text(v) for v in value) if x])
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key, val in value.items():
+            if val in (None, "", [], {}):
+                continue
+            text = join_nested_text(val)
+            if text:
+                parts.append(f"{key}: {text}")
+        return "; ".join(parts)
+    return to_text(value)
+
+
+def first_deep(obj: Any, names: list[str]) -> Any:
+    """Find the first non-empty value for any key name in a nested payload."""
+    if isinstance(obj, dict):
+        for name in names:
+            if obj.get(name) not in (None, "", [], {}):
+                return obj.get(name)
+        for value in obj.values():
+            found = first_deep(value, names)
+            if found not in (None, "", [], {}):
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = first_deep(value, names)
+            if found not in (None, "", [], {}):
+                return found
+    return ""
+
+
+def parse_manwon_from_text(value: Any) -> float | None:
+    text = to_text(value).replace(",", "")
+    if not text:
+        return None
+    eok = re.search(r"([0-9.]+)\s*억", text)
+    man = re.search(r"([0-9.]+)\s*만", text)
+    if eok or man:
+        amount = (float(eok.group(1)) * 10000 if eok else 0) + (float(man.group(1)) if man else 0)
+        return round1(amount)
+    number = to_number(text)
+    return round1(number / 10000) if number and number >= 10000 else number
+
+
+def relative_days_text(value: Any, now: datetime | None = None) -> str:
+    text = to_text(value).strip()
+    if not text:
+        return ""
+    now = now or datetime.now()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%Y.%m.%d"):
+        try:
+            dt = datetime.strptime(text.rstrip("Z")[:26], fmt)
+            days = max(0, (now.date() - dt.date()).days)
+            return "오늘" if days == 0 else f"{days}일 전"
+        except ValueError:
+            continue
+    return ""
+
+
+def split_area_pair(value: Any) -> tuple[str, str]:
+    text = to_text(value).strip()
+    if not text:
+        return "", ""
+    parts = [p for p in re.split(r"\s*/\s*", text) if p]
+    return (parts[0], parts[1]) if len(parts) >= 2 else ("", text)
+
+
+def text_has_any(text: str, words: list[str]) -> bool:
+    return any(word in text for word in words)
 
 
 def image_url(images: Any, index: int) -> str:
@@ -358,6 +447,20 @@ def crawl_dabang(args: argparse.Namespace) -> None:
             maintenance = to_number(first(room_data, ["maintenance_cost_str", "maintenanceCostStr"]))
         if maintenance is None:
             maintenance = 0
+        maintenance_detail = join_nested_text(first(room_data, [
+            "maintenance_etc_fee_charge_detail", "maintenanceEtcFeeChargeDetail",
+            "maintenance_fixed_fee_charge_detail_list", "maintenanceFixedFeeChargeDetailList",
+            "maintenance_unable_check_detail", "maintenanceUnableCheckDetail",
+        ]))
+        maintenance_basis = join_nested_text(first(room_data, [
+            "maintenance_charge_type", "maintenanceChargeType",
+            "maintenance_standard_type", "maintenanceStandardType",
+            "maintenance_charge_detail_type", "maintenanceChargeDetailType",
+        ]))
+        maintenance_items = join_text_list(first(room_data, [
+            "maintenance_items_str", "maintenanceItemsStr",
+            "personal_maintenance_items_str", "personalMaintenanceItemsStr",
+        ]))
 
         location = first(room_data, ["location"], [])
         lng = lat = ""
@@ -395,6 +498,8 @@ def crawl_dabang(args: argparse.Namespace) -> None:
         images = first(detail, ["image_list", "imageList", "images", "photos", "room_images", "roomImages"])
         options = first(room_data, ["room_options", "roomOptions", "options", "option"])
         security = first(room_data, ["safeties", "safety_options", "safetyOptions", "security_options", "securityOptions"])
+        published_at = first(room_data, ["saved_time_str", "savedTimeStr", "created_at", "createdAt"])
+        confirmed_at = first(room_data, ["confirm_date_str", "confirmDateStr", "naver_verify_date_str", "naverVerifyDateStr"])
         records.append({
             "source": "dabang",
             "listing_no": listing_no,
@@ -415,11 +520,19 @@ def crawl_dabang(args: argparse.Namespace) -> None:
             "total_monthly_manwon": round1(rent + maintenance) if rent is not None else "",
             "room_type": first(room_data, ["room_type_str", "roomTypeStr", "room_type_main_str", "roomTypeMainStr"]),
             "area_m2": first(room_data, ["room_size", "roomSize", "provision_size", "provisionSize"]),
+            "supply_area_m2": first(room_data, ["provision_size", "provisionSize", "contract_size", "contractSize"]),
+            "exclusive_area_m2": first(room_data, ["room_size", "roomSize"]),
             "floor": f"{first(room_data, ['room_floor_str', 'roomFloorStr'])}/{first(room_data, ['building_floor_str', 'buildingFloorStr'])}",
             "direction": first(room_data, ["direction_str", "directionStr", "direction"]),
             "parking": first(room_data, ["parking_str", "parkingStr", "parking"]),
             "move_in": first(room_data, ["moving_date", "movingDate"]),
+            "published_at": published_at,
+            "confirmed_at": confirmed_at,
+            "listing_age_text": relative_days_text(published_at),
             "approval_date": first(room_data, ["building_approval_date_str", "buildingApprovalDateStr"]),
+            "maintenance_detail": maintenance_detail,
+            "maintenance_basis": maintenance_basis,
+            "maintenance_items": maintenance_items,
             "building_use": join_text_list(first(room_data, ["building_use_types_str", "buildingUseTypesStr"])),
             "options": join_text_list(options),
             "security_options": join_text_list(security),
@@ -512,7 +625,14 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
                 continue
             manage_cost = nested(item, ["manageCost", "amount"], "")
             total = int(rent) + int(manage_cost) if manage_cost != "" else ""
+            manage_payload = item.get("manageCost") or {}
+            maintenance_items = join_text_list(first(manage_payload, ["includes", "include"]))
+            excluded_maintenance_items = join_text_list(first(manage_payload, ["notIncludes", "exclude"]))
+            if excluded_maintenance_items:
+                maintenance_items = "; ".join([x for x in [maintenance_items, f"excluded: {excluded_maintenance_items}"] if x])
             images = item.get("images") or []
+            updated_at = item.get("updatedAt", "")
+            area_m2 = get_area_m2(item.get("area"))
             rows.append({
                 "source": "zigbang",
                 "listing_no": item.get("itemId"),
@@ -536,14 +656,24 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
                 "maintenance_manwon": manage_cost,
                 "total_monthly_manwon": total,
                 "room_type": item.get("roomType", ""),
+                "bathroom_count": item.get("bathroomCount", ""),
                 "service_type": item.get("serviceType", ""),
-                "area_m2": get_area_m2(item.get("area")),
+                "area_m2": area_m2,
+                "supply_area_m2": "",
+                "exclusive_area_m2": area_m2,
                 "floor": get_floor_text(item.get("floor")),
                 "direction": item.get("roomDirection", ""),
                 "parking": item.get("parkingAvailableText", ""),
+                "elevator": item.get("elevator", ""),
                 "move_in": item.get("moveinDate", ""),
+                "published_at": "",
+                "confirmed_at": updated_at,
+                "listing_age_text": relative_days_text(updated_at),
                 "approval_date": format_date_text(item.get("approveDate", "")),
                 "residence_type": item.get("residenceType", ""),
+                "maintenance_detail": join_nested_text(manage_payload),
+                "maintenance_basis": "",
+                "maintenance_items": maintenance_items,
                 "non_compliant_building": item.get("nonCompliantBuilding", ""),
                 "options": join_text_list(item.get("options")),
                 "description": to_text(item.get("description", "")),
@@ -615,6 +745,7 @@ def crawl_daangn(args: argparse.Namespace) -> None:
         maintenance = float(listing.get("manageCost") or 0)
         rent = float(trade.get("monthlyPay") or 0)
         title = re.sub(r"\s*\|\s*[^\|]+$", "", to_text(listing.get("title", "")))
+        published_at = detail.get("publishedAt", "")
         records.append({
             "source": "daangn",
             "listing_no": article_id,
@@ -634,9 +765,25 @@ def crawl_daangn(args: argparse.Namespace) -> None:
             "total_monthly_manwon": round1(rent + maintenance),
             "room_type": listing.get("salesType", ""),
             "room_count": detail.get("roomCnt", ""),
+            "bathroom_count": detail.get("bathroomCnt", ""),
             "area_m2": listing.get("area", ""),
+            "supply_area_m2": "",
+            "exclusive_area_m2": listing.get("area", ""),
             "floor": listing.get("floor", ""),
+            "direction": detail.get("direction", ""),
+            "parking": detail.get("parking", ""),
+            "elevator": detail.get("elevator", ""),
+            "pet_allowed": detail.get("petAllowed", ""),
+            "loan_available": detail.get("loanAvailable", ""),
+            "move_in": detail.get("moveIn", ""),
+            "published_at": published_at,
+            "confirmed_at": detail.get("updatedAt", ""),
+            "listing_age_text": relative_days_text(published_at),
             "approval_date": approval,
+            "maintenance_detail": detail.get("maintenanceDetail", ""),
+            "maintenance_basis": detail.get("maintenanceBasis", ""),
+            "maintenance_items": detail.get("maintenanceItems", ""),
+            "building_use": detail.get("buildingUse", ""),
             "options": detail.get("options", ""),
             "description": detail.get("description", ""),
             "image_1": image_url(listing.get("images"), 0),
@@ -729,8 +876,11 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
         return {}
     detail = {
         "lat": "", "lon": "", "publicAddress": "", "roomCnt": "",
-        "approvalDate": "", "writerType": "", "agencyName": "",
-        "description": "", "options": "",
+        "bathroomCnt": "", "approvalDate": "", "writerType": "", "agencyName": "",
+        "publishedAt": "", "updatedAt": "", "direction": "", "parking": "",
+        "elevator": "", "petAllowed": "", "loanAvailable": "", "moveIn": "",
+        "maintenanceDetail": "", "maintenanceBasis": "", "maintenanceItems": "",
+        "buildingUse": "", "description": "", "options": "",
     }
     coord_ref = re.search(r'originalId\\":\\"' + re.escape(article_id) + r'\\".*?publicCoordinate\\":\{\\"__ref\\":\\"([^\\"]+)', text)
     if coord_ref:
@@ -746,8 +896,11 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
             "lon": to_text(coord.get("lon", "")),
             "publicAddress": to_text(article.get("publicAddress", "")),
             "roomCnt": to_text(article.get("roomCnt", "")),
+            "bathroomCnt": to_text(article.get("bathroomCnt", "")),
             "approvalDate": to_text(article.get("buildingApprovalDate", "")),
             "writerType": to_text(article.get("writerTypeV2", "")),
+            "publishedAt": to_text(article.get("publishedAt", "")),
+            "updatedAt": to_text(article.get("updatedAt", "")),
             "description": to_text(article.get("content", "")).strip(),
         })
         facs = [fac for fac in DAANGN_FACILITY_KEYWORDS if fac in detail["description"]]
@@ -788,6 +941,35 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
             facs = [fac for fac in DAANGN_FACILITY_KEYWORDS if fac in desc]
             if facs:
                 detail["options"] = "; ".join(facs)
+    body = detail["description"]
+    if body:
+        if text_has_any(body, ["주차 가능", "주차가능", "주차 가능합니다", "주차공간"]):
+            detail["parking"] = "가능"
+        elif text_has_any(body, ["주차 불가", "주차불가", "주차 안"]):
+            detail["parking"] = "불가능"
+        if text_has_any(body, ["엘리베이터", "엘베"]):
+            detail["elevator"] = "있음"
+        if text_has_any(body, ["반려동물 불가", "반려동물 안", "애완동물 불가", "애완동물 안"]):
+            detail["petAllowed"] = "불가능"
+        elif text_has_any(body, ["반려동물 가능", "반려동물가능", "애완동물 가능"]):
+            detail["petAllowed"] = "가능"
+        if text_has_any(body, ["대출 가능", "대출가능"]):
+            detail["loanAvailable"] = "가능"
+        elif text_has_any(body, ["대출 불가", "대출불가"]):
+            detail["loanAvailable"] = "불가능"
+        for direction in ["남향", "남동향", "남서향", "동향", "서향", "북향", "북동향", "북서향"]:
+            if direction in body:
+                detail["direction"] = direction
+                break
+        if text_has_any(body, ["공동주택"]):
+            detail["buildingUse"] = "공동주택"
+        elif text_has_any(body, ["단독주택"]):
+            detail["buildingUse"] = "단독주택"
+        elif text_has_any(body, ["제2근생", "제2종근린생활시설"]):
+            detail["buildingUse"] = "제2종근린생활시설"
+        maint = re.search(r"관리비\s*[:：]?\s*([0-9.,]+\s*만?원)", body)
+        if maint:
+            detail["maintenanceDetail"] = maint.group(0)
     meta = ""
     m1 = re.search(r'name="description"\s+content="([^"]+)"', text)
     m2 = re.search(r'content="([^"]+)"\s+name="description"', text)
@@ -1254,6 +1436,8 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
     # (e.g. "경기도 수원시 영통구 원천동 90-15").
     region_parts = [to_text(first(article, [k])) for k in ("cityName", "divisionName", "sectionName")]
     region_addr = " ".join([p for p in region_parts if p])
+    supply_area, exclusive_area = split_area_pair("/".join([to_text(x) for x in [first(article, ["supplySpace", "area1"]), first(article, ["exclusiveSpace", "area2"])] if x]))
+    confirmed_at = format_date_text(first(article, ["articleConfirmYmd", "confirmYmd"]))
     return {
         "source": "naver_land",
         "listing_no": article_no,
@@ -1275,14 +1459,22 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
         "room_type": first(article, ["realEstateTypeName", "articleName"]),
         "room_count": "",
         "bathroom_count": "",
-        "area_m2": "/".join([to_text(x) for x in [first(article, ["supplySpace", "area1"]), first(article, ["exclusiveSpace", "area2"])] if x]),
+        "area_m2": "/".join([x for x in [supply_area, exclusive_area] if x]) or exclusive_area,
+        "supply_area_m2": supply_area,
+        "exclusive_area_m2": exclusive_area,
         "floor": " ".join([to_text(x) for x in [first(article, ["floorInfo"]), first(article, ["floorLayerName"])] if x]),
         "direction": first(article, ["direction"]),
         "room_structure": "",
         "duplex": "",
         "parking": "",
         "move_in": "",
-        "approval_date": format_date_text(first(article, ["articleConfirmYmd", "confirmYmd"])),
+        "approval_date": confirmed_at,
+        "published_at": "",
+        "confirmed_at": confirmed_at,
+        "listing_age_text": relative_days_text(confirmed_at),
+        "maintenance_detail": "",
+        "maintenance_basis": "",
+        "maintenance_items": "",
         "building_use": first(article, ["articleRealEstateTypeName"]),
         "description": "",
         "options": join_text_list([first(article, ["tagList"]), first(article, ["articleFeatureDesc"])]),
@@ -1381,6 +1573,11 @@ def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> 
     if phone:
         _set("agent_phone", phone)
 
+    confirm_ymd = to_text(first(ad, ["articleConfirmYmd", "confirmYmd"]))
+    if re.match(r"^\d{8}$", confirm_ymd):
+        _set("confirmed_at", format_date_text(confirm_ymd))
+        _set("listing_age_text", relative_days_text(format_date_text(confirm_ymd)))
+
     # Room / bathroom counts
     room_cnt = first(ad, ["roomCount"])
     if room_cnt not in (None, ""):
@@ -1427,6 +1624,42 @@ def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> 
     if re.match(r"^\d{8}$", aprvymd):
         _set("approval_date", format_date_text(aprvymd))
 
+    building_use = first_deep(detail, ["buildingUseName", "buildingUse", "principalUse", "principalUseName"])
+    if building_use:
+        _set("building_use", join_nested_text(building_use))
+
+    # Management fee: Naver's list API often omits this for one-room articles
+    # even when the detail table shows it. Detail payload field names have
+    # varied over time, so look across the full response before giving up.
+    maintenance_raw = first_deep(detail, [
+        "monthlyManagementCost", "managementCost", "maintenanceCost",
+        "monthlyManageCost", "manageCost", "managementFee",
+    ])
+    maintenance_value = parse_manwon_from_text(maintenance_raw)
+    if maintenance_value is not None:
+        _set("maintenance_manwon", maintenance_value)
+        rent_value = float_or_empty(record.get("rent_manwon"))
+        if rent_value != "":
+            _set("total_monthly_manwon", round1(float(rent_value) + float(maintenance_value)))
+    maintenance_detail = first_deep(detail, [
+        "managementCostInfo", "managementFeeInfo", "maintenanceCostInfo",
+        "monthlyManagementCostInfo", "managementCostDetail", "maintenanceCostDetail",
+    ])
+    if maintenance_detail:
+        _set("maintenance_detail", join_nested_text(maintenance_detail))
+    maintenance_basis = first_deep(detail, [
+        "managementCostBasis", "managementFeeBasis", "maintenanceCostBasis",
+        "managementCostType", "maintenanceCostType", "managementFeeType",
+    ])
+    if maintenance_basis:
+        _set("maintenance_basis", join_nested_text(maintenance_basis))
+    maintenance_items = first_deep(detail, [
+        "managementCostIncludeItemName", "maintenanceIncludeItemName",
+        "managementCostIncludes", "maintenanceIncludes", "includeItems",
+    ])
+    if maintenance_items:
+        _set("maintenance_items", join_nested_text(maintenance_items))
+
     # Description (full listing body)
     desc = first(ad, ["detailDescription"])
     if desc:
@@ -1466,6 +1699,10 @@ def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> 
     space_parts = [to_text(s) for s in (supp_space, excl_space) if _is_positive_float(s)]
     if space_parts:
         _set("area_m2", "/".join(space_parts))
+        if _is_positive_float(supp_space):
+            _set("supply_area_m2", to_text(supp_space))
+        if _is_positive_float(excl_space):
+            _set("exclusive_area_m2", to_text(excl_space))
 
     # Photos: prefix relative imageSrc with the static thumbnail host. Both
     # slots fall back to whatever the list API already gave us when the detail
@@ -1566,6 +1803,8 @@ def normal_common(r: dict[str, str], source: str) -> dict[str, Any]:
         "total": num_or_none(r.get("total_monthly_manwon")),
         "type": r.get("room_type", ""),
         "area": r.get("area_m2", ""),
+        "supply_area": r.get("supply_area_m2", ""),
+        "exclusive_area": r.get("exclusive_area_m2", ""),
         "floor": r.get("floor", ""),
         "img1": r.get("image_1", ""),
         "img2": r.get("image_2", ""),
@@ -1580,8 +1819,17 @@ def normal_common(r: dict[str, str], source: str) -> dict[str, Any]:
         "room_structure": r.get("room_structure", ""),
         "duplex": r.get("duplex", ""),
         "parking": r.get("parking", ""),
+        "elevator": r.get("elevator", ""),
+        "pet_allowed": r.get("pet_allowed", ""),
+        "loan_available": r.get("loan_available", ""),
         "move_in": r.get("move_in", ""),
+        "published_at": r.get("published_at", ""),
+        "confirmed_at": r.get("confirmed_at", ""),
+        "listing_age_text": r.get("listing_age_text", ""),
         "approval_date": r.get("approval_date", ""),
+        "maintenance_detail": r.get("maintenance_detail", ""),
+        "maintenance_basis": r.get("maintenance_basis", ""),
+        "maintenance_items": r.get("maintenance_items", ""),
         "building_use": r.get("building_use", "") or r.get("residence_type", ""),
         "description": r.get("description", ""),
         "options": r.get("options", ""),
