@@ -1,4 +1,8 @@
 requests>=2.31,<3
-playwright>=1.45,<2
+# Pin playwright to the version baked into the base image
+# (mcr.microsoft.com/playwright/python:v1.56.0-noble). If you bump the base
+# image tag in Dockerfile.naver, bump this in lock-step or the chromium
+# binary won't match.
+playwright==1.56.0
 apscheduler>=3.10,<4
 tzdata
