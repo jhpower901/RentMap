@@ -25,6 +25,7 @@ wheels/
 data/*.csv
 data/*.json
 data/*.raw.json
+data/*.db
 data/photos/
 !data/.gitkeep
 
