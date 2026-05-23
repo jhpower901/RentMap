@@ -131,8 +131,8 @@ nav a.active-nav{background:#222;color:#fff}
       <input type="checkbox" id="hideGone"> 매물없음 숨기기
     </label>
     <select id="groupBy" title="그룹 보기">
+      <option value="agency" selected>중개사별</option>
       <option value="">전체 보기</option>
-      <option value="agency">중개사별</option>
     </select>
     <span id="areaCtl"></span>
     <button class="btn btn-primary" id="addBtn">+ 매물 추가</button>
@@ -493,7 +493,7 @@ document.getElementById('hideGone').addEventListener('change', renderList);
 const GROUP_KEY = 'rentmap.favoritesGroupBy';
 const groupSel = document.getElementById('groupBy');
 const savedGroup = localStorage.getItem(GROUP_KEY);
-if (savedGroup) groupSel.value = savedGroup;
+groupSel.value = savedGroup !== null ? savedGroup : 'agency';
 groupSel.addEventListener('change', () => {
   localStorage.setItem(GROUP_KEY, groupSel.value);
   renderList();
