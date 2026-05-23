@@ -64,10 +64,19 @@ nav a.active-nav{background:#222;color:#fff}
 /* Photos */
 .photo-grid{display:flex;flex-wrap:wrap;gap:8px}
 .photo-item{position:relative;width:90px;height:68px;flex-shrink:0}
-.photo-item img{width:100%;height:100%;object-fit:cover;border-radius:6px;display:block}
+.photo-item img{width:100%;height:100%;object-fit:cover;border-radius:6px;display:block;cursor:pointer}
 .photo-del{position:absolute;top:2px;right:2px;background:#0009;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
 .photo-add{width:90px;height:68px;border:2px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#bbb;cursor:pointer;background:#fafafa;flex-shrink:0}
 .photo-add:hover{border-color:#888;color:#666}
+.gallery-overlay{position:fixed;inset:0;background:#000d;z-index:2000;display:flex;align-items:center;justify-content:center;padding:18px}
+.gallery-overlay.hidden{display:none}
+.gallery-img{max-width:100%;max-height:88vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 36px #0008}
+.gallery-btn{position:absolute;border:none;background:#fff2;color:#fff;cursor:pointer;font-size:28px;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;line-height:1}
+.gallery-btn:hover{background:#fff4}
+.gallery-close{top:16px;right:16px}
+.gallery-prev{left:16px;top:50%;transform:translateY(-50%)}
+.gallery-next{right:16px;top:50%;transform:translateY(-50%)}
+.gallery-count{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);color:#fff;background:#0008;border-radius:14px;padding:4px 10px;font-size:12px}
 
 /* Evaluation table */
 .eval-table{width:100%;border-collapse:collapse}
@@ -110,6 +119,9 @@ nav a.active-nav{background:#222;color:#fff}
   .fav-title{max-width:190px}
   .fav-detail{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .eval-table{min-width:430px}
+  .gallery-overlay{padding:8px}
+  .gallery-img{max-height:82vh}
+  .gallery-btn{width:38px;height:38px;font-size:24px}
 }
 </style>
 </head>
@@ -178,6 +190,14 @@ nav a.active-nav{background:#222;color:#fff}
   </div>
 </div>
 
+<div class="gallery-overlay hidden" id="galleryOverlay">
+  <button class="gallery-btn gallery-close" id="galleryClose" title="닫기">×</button>
+  <button class="gallery-btn gallery-prev" id="galleryPrev" title="이전">‹</button>
+  <img class="gallery-img" id="galleryImg" alt="">
+  <button class="gallery-btn gallery-next" id="galleryNext" title="다음">›</button>
+  <div class="gallery-count" id="galleryCount"></div>
+</div>
+
 <script src="data_dabang.js"></script>
 <script src="data_daangn.js"></script>
 <script src="data_zigbang.js"></script>
@@ -201,6 +221,7 @@ const CRITERIA = [
 const SRC_COLOR = { dabang:'#FF5C38', daangn:'#FF6F00', zigbang:'#6366F1', naver:'#03C75A', manual:'#607D8B' };
 const SRC_NAME  = { dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버', manual:'직접추가' };
 const DATA_KEY  = { dabang:'DATA_DABANG', daangn:'DATA_DAANGN', zigbang:'DATA_ZIGBANG', naver:'DATA_NAVER' };
+const openFavKeys = new Set();
 
 function availability(fav) {
   if (fav.source === 'manual') return 'manual';
@@ -256,6 +277,7 @@ function buildCard(fav) {
 
   const card = document.createElement('div');
   card.className = 'fav-card';
+  card.dataset.favKey = fav.key;
   card.innerHTML = `
     <div class="fav-header">
       <div class="fav-main">
@@ -277,12 +299,29 @@ function buildCard(fav) {
 
   card.querySelector('.fav-header').addEventListener('click', () => {
     const isOpen = card.classList.toggle('open');
-    if (isOpen) renderDetail(card, fav, sid);
+    if (isOpen) {
+      openFavKeys.add(fav.key);
+      renderDetail(card, fav, sid);
+    } else {
+      openFavKeys.delete(fav.key);
+    }
   });
   return card;
 }
 
+function appendFavCard(parent, fav) {
+  const card = buildCard(fav);
+  parent.appendChild(card);
+  if (openFavKeys.has(fav.key)) {
+    card.classList.add('open');
+    renderDetail(card, fav, safeId(fav));
+  }
+}
+
 function renderList() {
+  document.querySelectorAll('.fav-card.open').forEach(card => {
+    if (card.dataset.favKey) openFavKeys.add(card.dataset.favKey);
+  });
   const q = document.getElementById('search').value.toLowerCase();
   const hideGone = document.getElementById('hideGone').checked;
   const groupBy = document.getElementById('groupBy').value;
@@ -327,16 +366,16 @@ function renderList() {
         (phones.length ? `<span class="gphone">${phones.join(' · ')}</span>` : '') +
         `<span class="gcnt">${list.length}건</span>`;
       wrap.appendChild(header);
-      list.forEach(fav => wrap.appendChild(buildCard(fav)));
+      list.forEach(fav => appendFavCard(wrap, fav));
       listEl.appendChild(wrap);
     });
   } else {
-    filtered.forEach(fav => listEl.appendChild(buildCard(fav)));
+    filtered.forEach(fav => appendFavCard(listEl, fav));
   }
 }
 
 function renderDetail(card, fav, sid) {
-  const el = document.getElementById('det_' + sid);
+  const el = card.querySelector('#det_' + sid) || document.getElementById('det_' + sid);
   if (el.dataset.rendered) return;
   el.dataset.rendered = '1';
 
@@ -402,16 +441,19 @@ function renderDetail(card, fav, sid) {
     const critKey = tr.dataset.crit;
     tr.querySelectorAll('.star').forEach(btn => {
       btn.addEventListener('click', () => {
-        const n = parseInt(btn.dataset.n);
+        const clicked = parseInt(btn.dataset.n);
+        const current = (fav.rating && fav.rating[critKey]) || 0;
+        const n = current === clicked ? 0 : clicked;
         const rating = fav.rating ? { ...fav.rating } : {};
-        rating[critKey] = n;
+        if (n > 0) rating[critKey] = n;
+        else delete rating[critKey];
         fav.rating = rating;
         Favorites.updateRating(fav.id, fav.source, rating);
         tr.querySelectorAll('.star').forEach(b => {
           const starVal = parseInt(b.dataset.n);
           b.classList.toggle('on', starVal <= n);
         });
-        tr.querySelector('.crit-score').textContent = n + '/5';
+        tr.querySelector('.crit-score').textContent = n > 0 ? n + '/5' : '-';
         const newScore = calcScore(fav.rating);
         const tsEl = document.getElementById('ts_' + sid);
         if (tsEl) tsEl.textContent = newScore != null ? '총점: ★ ' + newScore.toFixed(1) + ' / 5.0' : '총점: 미평가';
@@ -440,10 +482,53 @@ function insertPhotoThumb(grid, photoKey, url, favId, favSource, sid) {
   const wrap = document.createElement('div');
   wrap.className = 'photo-item';
   wrap.innerHTML = `<img src="${url}" loading="lazy"><button class="photo-del" title="삭제">×</button>`;
-  wrap.querySelector('.photo-del').addEventListener('click', () => {
+  wrap.querySelector('img').addEventListener('click', () => openGallery(grid, url));
+  wrap.querySelector('.photo-del').addEventListener('click', e => {
+    e.stopPropagation();
     Favorites.deletePhoto(favId, favSource, photoKey).then(() => { wrap.remove(); });
   });
   grid.insertBefore(wrap, document.getElementById('padd_' + sid));
+}
+
+let galleryItems = [];
+let galleryIndex = 0;
+
+function galleryEls() {
+  return {
+    overlay: document.getElementById('galleryOverlay'),
+    img: document.getElementById('galleryImg'),
+    count: document.getElementById('galleryCount'),
+    prev: document.getElementById('galleryPrev'),
+    next: document.getElementById('galleryNext'),
+  };
+}
+
+function openGallery(grid, url) {
+  galleryItems = Array.from(grid.querySelectorAll('.photo-item img')).map(img => img.src);
+  galleryIndex = Math.max(0, galleryItems.indexOf(new URL(url, location.href).href));
+  renderGallery();
+  galleryEls().overlay.classList.remove('hidden');
+}
+
+function renderGallery() {
+  const { img, count, prev, next } = galleryEls();
+  if (!galleryItems.length) return;
+  img.src = galleryItems[galleryIndex];
+  count.textContent = `${galleryIndex + 1} / ${galleryItems.length}`;
+  prev.style.display = galleryItems.length > 1 ? '' : 'none';
+  next.style.display = galleryItems.length > 1 ? '' : 'none';
+}
+
+function closeGallery() {
+  const { overlay, img } = galleryEls();
+  overlay.classList.add('hidden');
+  img.removeAttribute('src');
+}
+
+function moveGallery(delta) {
+  if (!galleryItems.length) return;
+  galleryIndex = (galleryIndex + delta + galleryItems.length) % galleryItems.length;
+  renderGallery();
 }
 
 function doRemove(e, id, source) {
@@ -463,6 +548,18 @@ document.getElementById('manualCancel').addEventListener('click', () =>
 document.getElementById('manualOverlay').addEventListener('click', e => {
   if (e.target === document.getElementById('manualOverlay'))
     document.getElementById('manualOverlay').classList.add('hidden');
+});
+document.getElementById('galleryClose').addEventListener('click', closeGallery);
+document.getElementById('galleryPrev').addEventListener('click', e => { e.stopPropagation(); moveGallery(-1); });
+document.getElementById('galleryNext').addEventListener('click', e => { e.stopPropagation(); moveGallery(1); });
+document.getElementById('galleryOverlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('galleryOverlay')) closeGallery();
+});
+document.addEventListener('keydown', e => {
+  if (document.getElementById('galleryOverlay').classList.contains('hidden')) return;
+  if (e.key === 'Escape') closeGallery();
+  if (e.key === 'ArrowLeft') moveGallery(-1);
+  if (e.key === 'ArrowRight') moveGallery(1);
 });
 document.getElementById('manualSave').addEventListener('click', () => {
   const title = document.getElementById('m_title').value.trim();
@@ -499,7 +596,19 @@ groupSel.addEventListener('change', () => {
   renderList();
 });
 
-window.addEventListener('favoritesSynced', renderList);
+function isEditingFavoriteDetail() {
+  const active = document.activeElement;
+  return !!active && (
+    active.classList.contains('notes-area') ||
+    active.classList.contains('star') ||
+    active.closest('.eval-table')
+  );
+}
+
+window.addEventListener('favoritesSynced', () => {
+  if (isEditingFavoriteDetail()) return;
+  renderList();
+});
 
 if (window.AreaFilter) {
   AreaFilter.mountControl(document.getElementById('areaCtl'));
