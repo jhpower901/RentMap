@@ -49,6 +49,11 @@ nav a.active-nav{background:#222;color:#fff}
 .link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
 .link-btn:hover{background:#eee}
 .heart-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;vertical-align:middle}
+.area-btns{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+.area-btns button{flex:1;min-width:0;padding:5px 8px;border:1px solid #ccc;background:#fff;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit}
+.area-btns button:hover{background:#f0f0f0}
+.area-btns button.active{background:#6366F1;color:#fff;border-color:#6366F1}
+.area-status{font-size:12px;color:#666;margin-top:6px}
 </style>
 </head>
 <body>
@@ -80,6 +85,15 @@ nav a.active-nav{background:#222;color:#fff}
         <input type="number" id="maxRent" value="60" min="0" max="200" step="5">
       </div>
     </div>
+    <div class="section">
+      <div class="section-title">영역 필터</div>
+      <label><input type="checkbox" id="chk_area" checked> 영역 안 매물만 표시</label>
+      <div class="area-btns">
+        <button type="button" id="btnDraw">영역 다시 그리기</button>
+        <button type="button" id="btnResetArea">기본 영역(박스)</button>
+      </div>
+      <div class="area-status" id="areaStatus">꼭짓점 4개 (기본 박스)</div>
+    </div>
     <div class="section stats">
       <div class="stat-row"><span>표시 중</span><span class="total-count" id="totalCount">0</span>건</div>
       <div class="load-status" id="loadStatus">로딩 중...</div>
@@ -98,6 +112,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="data_naver.js"></script>
 <script src="listing-data-source.js"></script>
 <script src="favorites.js"></script>
+<script src="area-filter.js"></script>
 <script>
 const COLORS = { dabang: '#FF5C38', daangn: '#FF6F00', zigbang: '#6366F1', naver: '#03C75A' };
 const NAMES  = { dabang: '다방', daangn: '당근', zigbang: '직방', naver: '네이버' };
@@ -118,6 +133,31 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
 L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>').openPopup();
+
+// ------- Area (polygon) filter — backed by shared AreaFilter -------
+const areaOverlay = AreaFilter.mountMapOverlay(map, { drawing: true });
+
+function refreshAreaStatus() {
+  document.getElementById('chk_area').checked = AreaFilter.enabled;
+  document.getElementById('areaStatus').textContent =
+    '꼭짓점 ' + AreaFilter.points.length + '개' + (AreaFilter.isDefault() ? ' (기본 박스)' : '');
+  document.getElementById('btnDraw').classList.toggle('active', areaOverlay.isDrawing());
+}
+
+document.getElementById('btnDraw').addEventListener('click', () => {
+  if (areaOverlay.isDrawing()) areaOverlay.endDraw(false);
+  else areaOverlay.startDraw();
+  refreshAreaStatus();
+});
+document.getElementById('btnResetArea').addEventListener('click', () => {
+  if (areaOverlay.isDrawing()) areaOverlay.endDraw(false);
+  AreaFilter.reset();
+});
+document.getElementById('chk_area').addEventListener('change', e => {
+  AreaFilter.setEnabled(e.target.checked);
+});
+AreaFilter.subscribe(() => { refreshAreaStatus(); applyFilter(); });
+refreshAreaStatus();
 
 const allMarkers = [];
 
@@ -162,15 +202,16 @@ function addMarkersForSource(src, rows) {
 }
 
 function applyFilter() {
-  const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 9999;
-  const maxRent = parseFloat(document.getElementById('maxRent').value) || 999;
-  const shown   = { dabang: 0, daangn: 0, zigbang: 0, naver: 0 };
+  const maxDep   = parseFloat(document.getElementById('maxDeposit').value) || 9999;
+  const maxRent  = parseFloat(document.getElementById('maxRent').value) || 999;
+  const shown    = { dabang: 0, daangn: 0, zigbang: 0, naver: 0 };
 
   allMarkers.forEach(({ marker, src, data }) => {
     const chk    = document.getElementById('chk_' + src).checked;
     const depOk  = data.deposit === null || data.deposit <= maxDep;
     const rentOk = data.rent    === null || data.rent    <= maxRent;
-    if (chk && depOk && rentOk) {
+    const areaOk = AreaFilter.applies(data);
+    if (chk && depOk && rentOk && areaOk) {
       marker.setStyle({ fillOpacity: 0.85, opacity: 1 });
       shown[src]++;
     } else {

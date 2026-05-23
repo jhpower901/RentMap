@@ -1,0 +1,47 @@
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f0f0f0}
+nav a.active-nav{background:#222 !important;color:#fff !important}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.badge-dabang{background:#FF5C38}
+.badge-daangn{background:#FF6F00}
+.badge-zigbang{background:#6366F1}
+.badge-naver{background:#03C75A}
+.page{max-width:1440px;margin:0 auto;padding:16px}
+h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
+.controls label{font-size:13px;display:flex;align-items:center;gap:4px}
+.controls input[type=number]{width:74px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
+.controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
+.count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
+.layout{display:grid;grid-template-columns:1fr minmax(360px,400px);gap:14px;align-items:start}
+.layout>div:last-child{position:sticky;top:60px;align-self:start}
+@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;align-self:stretch;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow:auto}.count{margin-left:0}}
+.map-box{height:min(620px,calc(100vh - 80px));min-height:420px;border-radius:10px;overflow:hidden;border:1px solid #ddd}
+@media(max-width:960px){.map-box{height:34dvh;min-height:180px;max-height:320px;border-radius:8px;position:relative;top:auto}}
+.table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
+table{width:100%;border-collapse:collapse;background:#fff;min-width:800px}
+th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid #e0e0e0;position:relative}
+th:hover{background:#e4e4e4}
+th.sorted{color:var(--accent)}
+td{padding:7px 10px;border-top:1px solid #f0f0f0;vertical-align:middle;font-size:13px}
+tr:hover td{background:#fafafa;cursor:pointer}
+.img-thumb{width:68px;height:51px;object-fit:cover;border-radius:5px;display:block}
+.no-img{width:68px;height:51px;background:#eee;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#aaa;text-align:center;line-height:1.3}
+.price{font-weight:600}
+.total-price{color:#c00;font-weight:700}
+.agency-cell{font-size:12px;line-height:1.5;max-width:140px}
+.phone-small{color:#666;font-size:11px}
+.link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
+.link-btn:hover{background:#eee}
+.note-warn{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6}
+.leaflet-popup-content{font-size:13px;line-height:1.7;min-width:210px;max-width:260px}
+.popup-title{font-weight:700;margin-bottom:4px;font-size:14px;line-height:1.4}
+.popup-price{color:#c00;font-weight:700;font-size:15px}
+.popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
+.popup-meta{color:#555;font-size:12px}
+.heart-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;vertical-align:middle}

@@ -104,13 +104,13 @@ Unlike the Dabang API observed in this project, this Zigbang detail API returned
 From the workspace root:
 
 ```powershell
-python .\scripts\crawl_zigbang.py
+python .\scripts\rentmap.py crawl-zigbang
 ```
 
 Custom output:
 
 ```powershell
-python .\scripts\crawl_zigbang.py `
+python .\scripts\rentmap.py crawl-zigbang `
   --output-csv .\data\zigbang_ajou_2026-05-22.csv
 ```
 

@@ -1,14 +1,73 @@
 import os
 import json
 import shutil
+import subprocess
+import sys
 import time
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Any
+from zoneinfo import ZoneInfo
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-app = FastAPI()
+ROOT = Path(__file__).resolve().parent.parent
+RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
+TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
+
+
+def run_hourly_crawl_and_gen() -> None:
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    print(f"[scheduler] crawl-all --skip-naver --gen-web --date {today}", flush=True)
+    try:
+        subprocess.run(
+            [sys.executable, str(RENTMAP_CLI), "crawl-all", "--skip-naver", "--gen-web", "--date", today],
+            cwd=str(ROOT),
+            check=False,
+            timeout=50 * 60,
+        )
+        print(f"[scheduler] crawl-all done", flush=True)
+    except Exception as exc:
+        print(f"[scheduler] crawl-all failed: {exc}", flush=True)
+
+
+scheduler = BackgroundScheduler(timezone=TZ)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    scheduler.add_job(
+        run_hourly_crawl_and_gen,
+        trigger=CronTrigger(minute=5, timezone=TZ),
+        id="hourly_crawl",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30 * 60,
+    )
+    # Kick off once a few seconds after startup so a fresh container has data immediately
+    scheduler.add_job(
+        run_hourly_crawl_and_gen,
+        trigger="date",
+        run_date=datetime.now(TZ) + timedelta(seconds=15),
+        id="startup_crawl",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.start()
+    print("[scheduler] started (hourly at :05 KST, plus startup kick)", flush=True)
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Data storage paths
 DATA_DIR = "data"

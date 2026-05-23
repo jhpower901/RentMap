@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "web-preview",
-      "runtimeExecutable": "C:/Users/Jaehyung Ahn/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe",
-      "runtimeArgs": ["C:/Users/Jaehyung Ahn/AppData/Local/Temp/static_server.js", "C:/Users/Jaehyung Ahn/Nextcloud/git/RentMap/web", "3000"],
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3000", "--directory", "C:/Users/Ahnbujang/Nextcloud/git/RentMap"],
       "port": 3000
     }
   ]

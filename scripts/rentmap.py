@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
@@ -22,7 +23,10 @@ import requests
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATE = "2026-05-22"
+# Today's date in the container/host local timezone (the rentmap-server image
+# sets TZ=Asia/Seoul). Schedulers always pass --date explicitly, so this only
+# affects manual CLI invocations — and there "today" is the expected default.
+DEFAULT_DATE = datetime.now().strftime("%Y-%m-%d")
 DEFAULT_MIN_LAT = 37.260
 DEFAULT_MAX_LAT = 37.290
 DEFAULT_MIN_LNG = 127.025
@@ -629,11 +633,11 @@ def bbox_ok(lat: Any, lon: Any, args: argparse.Namespace) -> bool:
 
 
 NAVER_DEFAULT_URLS = [
-    "https://new.land.naver.com/rooms?cortarNo=4111710200&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111514000&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111710100&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111710300&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111710400&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&warrantPrc=0:3000&rentPrc=0:60&order=rank",
+    "https://new.land.naver.com/rooms?cortarNo=4111710200&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
+    "https://new.land.naver.com/rooms?cortarNo=4111514000&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
+    "https://new.land.naver.com/rooms?cortarNo=4111710100&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
+    "https://new.land.naver.com/rooms?cortarNo=4111710300&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
+    "https://new.land.naver.com/rooms?cortarNo=4111710400&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
 ]
 
 

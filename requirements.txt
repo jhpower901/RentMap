@@ -2,3 +2,5 @@ requests>=2.31,<3
 fastapi
 uvicorn
 python-multipart
+apscheduler>=3.10,<4
+tzdata

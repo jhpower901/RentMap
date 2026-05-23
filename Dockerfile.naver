@@ -13,5 +13,4 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
-ENTRYPOINT ["python", "scripts/rentmap.py"]
-CMD ["--help"]
+CMD ["python", "scripts/scheduler_naver.py"]

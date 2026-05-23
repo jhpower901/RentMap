@@ -7,4 +7,6 @@ if (-not $RentMapArgs -or $RentMapArgs.Count -eq 0) {
     $RentMapArgs = @("crawl-naver")
 }
 
-docker compose --profile naver run --rm rentmap-naver @RentMapArgs
+# Ad-hoc naver-side rentmap subcommand. rentmap-naver already runs the
+# every-3h scheduler; this is for manual one-off runs.
+docker compose run --rm rentmap-naver python scripts/rentmap.py @RentMapArgs

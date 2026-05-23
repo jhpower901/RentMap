@@ -7,55 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="platform-common.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
-a{color:inherit;text-decoration:none}
-nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
-nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
-nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
-nav a:hover{background:#f0f0f0}
-nav a.active-nav{background:#222 !important;color:#fff !important}
-.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
-.badge-dabang{background:#FF5C38}
-.badge-daangn{background:#FF6F00}
-.badge-zigbang{background:#6366F1}
-.badge-naver{background:#03C75A}
-.page{max-width:1440px;margin:0 auto;padding:16px}
-h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
-.controls label{font-size:13px;display:flex;align-items:center;gap:4px}
-.controls input[type=number]{width:74px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
-.controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
-.count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
-.layout{display:grid;grid-template-columns:1fr minmax(360px,400px);gap:14px;align-items:start}.layout>div:last-child{position:sticky;top:60px;align-self:start}
-@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;align-self:stretch;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow:auto}.count{margin-left:0}}
-.map-box{height:min(620px,calc(100vh - 80px));min-height:420px;border-radius:10px;overflow:hidden;border:1px solid #ddd}
-@media(max-width:960px){.map-box{height:34dvh;min-height:180px;max-height:320px;border-radius:8px;position:relative;top:auto}}
-.table-wrap{overflow-x:auto;border-radius:10px;box-shadow:0 1px 4px #0001}
-table{width:100%;border-collapse:collapse;background:#fff;min-width:800px}
-th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid #e0e0e0;position:relative}
-th:hover{background:#e4e4e4}
-th.sorted{color:var(--accent)}
-td{padding:7px 10px;border-top:1px solid #f0f0f0;vertical-align:middle;font-size:13px}
-tr:hover td{background:#fafafa;cursor:pointer}
-.img-thumb{width:68px;height:51px;object-fit:cover;border-radius:5px;display:block}
-.no-img{width:68px;height:51px;background:#eee;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#aaa;text-align:center;line-height:1.3}
-.price{font-weight:600}
-.total-price{color:#c00;font-weight:700}
-.agency-cell{font-size:12px;line-height:1.5;max-width:140px}
-.phone-small{color:#666;font-size:11px}
-.link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
-.link-btn:hover{background:#eee}
-.note-warn{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6}
-.leaflet-popup-content{font-size:13px;line-height:1.7;min-width:210px;max-width:260px}
-.popup-title{font-weight:700;margin-bottom:4px;font-size:14px;line-height:1.4}
-.popup-price{color:#c00;font-weight:700;font-size:15px}
-.popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
-.popup-meta{color:#555;font-size:12px}
-.heart-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;vertical-align:middle}
-</style>
 </head>
 <body>
 <nav>
@@ -75,6 +28,7 @@ tr:hover td{background:#fafafa;cursor:pointer}
     <label>월세 최대 <input type="number" id="maxRent" value="60" min="0" max="200" step="5"> 만원</label>
     <label>방 유형 <select id="typeFilter"><option value="">전체</option></select></label>
     <input type="text" id="search" placeholder="검색어...">
+    <span id="areaCtl"></span>
     <span class="count" id="countLabel">0건</span>
   </div>
   <div class="layout">
@@ -106,10 +60,10 @@ tr:hover td{background:#fafafa;cursor:pointer}
   </div>
 </div>
 <script src="favorites.js"></script>
+<script src="area-filter.js"></script>
+<script src="platform-common.js"></script>
 <script>
-const SOURCE  = 'naver';
-const ACCENT  = '#03C75A';
-const RAW     = [
+PlatformPage.init({ source: 'naver', accent: '#03C75A', raw: [
 {"source":"naver","id":"2627543916","url":"https://new.land.naver.com/rooms?articleNo=2627543916","agency":"-","phone":"","region":"","address":"광교경동해피리움","lat":37.290355,"lon":127.045421,"title":"공실, 즉시 입주 가능","deposit":12200,"rent":26,"maint":null,"total":26,"type":"오피스텔","area":"53/22","floor":"11/15","img1":"https://landthumb-phinf.pstatic.net/20260521_297/1779331290309eUJg5_JPEG/2627543916_20260521114127318976.jpg","img2":""},
 {"source":"naver","id":"2627762862","url":"https://new.land.naver.com/rooms?articleNo=2627762862","agency":"36.5 공인중개사사무소","phone":"","region":"","address":"광교더샵레이크파크","lat":37.286969,"lon":127.061862,"title":"전입및전세대출가능,입주일협의가능,호수뷰,맞통풍인기구조,풀옵션,커뮤니티좋음","deposit":33000,"rent":20,"maint":null,"total":20,"type":"오피스텔","area":"96/48","floor":"저/35","img1":"https://landthumb-phinf.pstatic.net/20260522_160/1779418742763FJD26_JPEG/2627762862_20260522115901346260.jpg","img2":""},
 {"source":"naver","id":"2625750830","url":"https://new.land.naver.com/rooms?articleNo=2625750830","agency":"36.5 공인중개사사무소","phone":"","region":"","address":"힐스테이트광교","lat":37.284704,"lon":127.063948,"title":"예쁜호수뷰와 숲뷰,풀옵션2룸.전입및전세대출가능,입주일협의가능","deposit":35000,"rent":null,"maint":null,"total":null,"type":"오피스텔","area":"97/41","floor":"3/19","img1":"https://landthumb-phinf.pstatic.net/20260513_102/1778651001656m7rWR_JPEG/2625750830_20260513144320399030.jpg","img2":""},
@@ -538,217 +492,7 @@ const RAW     = [
 {"source":"naver","id":"2627300049","url":"https://new.land.naver.com/rooms?articleNo=2627300049","agency":"힐광이너스공인중개사사무소","phone":"","region":"","address":"힐스테이트광교","lat":37.284704,"lon":127.063948,"title":"막힘 없는 호수뷰, 짜임새 있는 구조, 풀옵션","deposit":40000,"rent":null,"maint":null,"total":null,"type":"오피스텔","area":"97/41","floor":"중/19","img1":"","img2":""},
 {"source":"naver","id":"2627701505","url":"https://new.land.naver.com/rooms?articleNo=2627701505","agency":"힐광이너스공인중개사사무소","phone":"","region":"","address":"힐스테이트광교","lat":37.284704,"lon":127.063948,"title":"투룸의 알찬 구조,  멋진 호수뷰와 힐링 숲뷰, 풀옵션","deposit":35000,"rent":null,"maint":null,"total":null,"type":"오피스텔","area":"97/41","floor":"3/19","img1":"","img2":""},
 {"source":"naver","id":"2626070632","url":"https://new.land.naver.com/rooms?articleNo=2626070632","agency":"힐광호수공인중개사사무소","phone":"","region":"","address":"힐스테이트광교","lat":37.284704,"lon":127.063948,"title":"호수뷰 방2 입주협의 전입가","deposit":35000,"rent":null,"maint":null,"total":null,"type":"오피스텔","area":"97/41","floor":"3/19","img1":"","img2":""}
-];
-
-const PALETTE = [
-  '#e6194B','#3cb44b','#4363d8','#f58231','#911eb4',
-  '#42d4f4','#f032e6','#469990','#9a6324','#800000',
-  '#808000','#000075','#6F4E37','#C71585','#556B2F',
-];
-const agencyColors = (() => {
-  const keys = [...new Set(RAW.map(r => r.agency).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b),'ko'));
-  const out = {};
-  keys.forEach((k, i) => { out[k] = PALETTE[i % PALETTE.length]; });
-  return out;
-})();
-function agencyColor(agency) { return agencyColors[agency] || ACCENT; }
-
-const PLATFORM_NAMES = {
-  dabang: '다방', daangn: '당근부동산', zigbang: '직방', naver: '네이버부동산'
-};
-
-// Apply branding
-document.documentElement.style.setProperty('--accent', ACCENT);
-const pName = PLATFORM_NAMES[SOURCE] || SOURCE;
-document.title = pName + ' - 아주대 월세 매물';
-document.getElementById('page-badge').textContent = pName;
-document.getElementById('page-badge').style.background = ACCENT;
-document.getElementById('page-title').textContent = '매물 목록';
-const navEl = document.getElementById('nav-' + SOURCE);
-if (navEl) navEl.classList.add('active-nav');
-
-// Agency label translation (Daangn uses DIRECT/BROKER codes)
-function agencyLabel(agency) {
-  if (SOURCE === 'daangn') {
-    if (agency === 'DIRECT') return '직거래';
-    if (agency === 'BROKER') return '중개사';
-  }
-  return agency || '-';
-}
-
-function fmtDeposit(v) {
-  if (v === null || v === undefined) return '-';
-  if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '억';
-  return v + '만';
-}
-function fmtRent(v) {
-  if (v === null || v === undefined) return '-';
-  return v + '만';
-}
-function fmtArea(v) {
-  if (!v) return '-';
-  return String(v).split('/').map(p => {
-    const n = parseFloat(p);
-    return isNaN(n) ? p : n.toFixed(1);
-  }).join('/') + 'm²';
-}
-function imageSrc(src) {
-  if (!src) return '';
-  if (SOURCE !== 'zigbang' || !src.startsWith('https://ic.zigbang.com/') || src.includes('?')) return src;
-  return src + '?w=400&h=300&q=70';
-}
-function scheduleImageLoad(container) {
-  const load = () => {
-    container.querySelectorAll('img[data-src]').forEach(img => {
-      img.src = img.dataset.src;
-      img.removeAttribute('data-src');
-    });
-  };
-  if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 800 });
-  else setTimeout(load, 0);
-}
-
-function sortData(data, col, asc) {
-  return [...data].sort((a, b) => {
-    let va = a[col], vb = b[col];
-    if (va === null || va === undefined) va = asc ? Infinity : -Infinity;
-    if (vb === null || vb === undefined) vb = asc ? Infinity : -Infinity;
-    if (typeof va === 'string') return asc ? va.localeCompare(vb, 'ko') : vb.localeCompare(va, 'ko');
-    return asc ? va - vb : vb - va;
-  });
-}
-
-// Populate type filter
-const types = [...new Set(RAW.map(r => r.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'));
-const sel = document.getElementById('typeFilter');
-types.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
-
-// Map setup
-const map = L.map('map').setView([37.2779, 127.0438], 15);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
-}).addTo(map);
-L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
-// Re-measure on orientation change / window resize so tiles fill the container
-window.addEventListener('resize', () => map.invalidateSize());
-
-const markerMap = new Map();
-RAW.forEach(r => {
-  if (!r.lat || !r.lon) return;
-  const m = L.circleMarker([r.lat, r.lon], {
-    radius: 7, fillColor: agencyColor(r.agency), color: '#fff', weight: 2, fillOpacity: 0.85
-  }).addTo(map);
-  const imgHtml = r.img1
-    ? '<img class="popup-img" src="' + imageSrc(r.img1) + '" onerror="this.style.display=\'none\'">'
-    : '';
-  m.bindPopup(
-    '<div class="popup-title">' + (r.title || '') + '</div>' +
-    imgHtml +
-    '<div class="popup-price">보증금 ' + fmtDeposit(r.deposit) + ' / 월세 ' + fmtRent(r.rent) + '</div>' +
-    '<div class="popup-meta">관리비 ' + fmtRent(r.maint) + ' | 총 ' + fmtRent(r.total) + '</div>' +
-    '<div class="popup-meta"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + agencyColor(r.agency) + ';vertical-align:middle;margin-right:4px"></span>' + agencyLabel(r.agency) + (r.phone ? ' ' + r.phone : '') + '</div>' +
-    '<div class="popup-meta">' + (r.address || r.region || '') + '</div>' +
-    '<div style="margin-top:6px"><a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a></div>'
-  );
-  markerMap.set(r.id, { marker: m, data: r });
-});
-
-let sortCol = 'total', sortAsc = true;
-
-function getFiltered() {
-  const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 9999;
-  const maxRent = parseFloat(document.getElementById('maxRent').value) || 999;
-  const type    = document.getElementById('typeFilter').value;
-  const q       = (document.getElementById('search').value || '').toLowerCase();
-  return RAW.filter(r => {
-    if (r.deposit !== null && r.deposit > maxDep) return false;
-    if (r.rent    !== null && r.rent    > maxRent) return false;
-    if (type && r.type !== type) return false;
-    if (q) {
-      const hay = [r.title, r.address, r.region, r.agency, r.type].join(' ').toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-}
-
-function render() {
-  const filtered = sortData(getFiltered(), sortCol, sortAsc);
-  document.getElementById('countLabel').textContent = filtered.length + '건';
-  const visibleIds = new Set(filtered.map(r => r.id));
-
-  markerMap.forEach(({ marker, data }) => {
-    if (visibleIds.has(data.id)) {
-      marker.setStyle({ fillOpacity: 0.85, opacity: 1 });
-    } else {
-      marker.setStyle({ fillOpacity: 0.12, opacity: 0.3 });
-    }
-  });
-
-  const tbody = document.getElementById('tbody');
-  tbody.innerHTML = '';
-  filtered.forEach(r => {
-    const tr = document.createElement('tr');
-    const imgCell = r.img1
-      ? '<img class="img-thumb" data-src="' + imageSrc(r.img1) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
-      : '<div class="no-img">사진없음</div>';
-    tr.innerHTML =
-      '<td style="padding:0;width:6px;background:' + agencyColor(r.agency) + '"></td>' +
-      '<td>' + imgCell + '</td>' +
-      '<td class="price">' + fmtDeposit(r.deposit) + '</td>' +
-      '<td class="price">' + fmtRent(r.rent) + '</td>' +
-      '<td>' + fmtRent(r.maint) + '</td>' +
-      '<td class="total-price">' + fmtRent(r.total) + '</td>' +
-      '<td>' + (r.type || '-') + '</td>' +
-      '<td>' + fmtArea(r.area) + '</td>' +
-      '<td>' + (r.floor || '-') + '</td>' +
-      '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (r.address || r.region || '-') + '</td>' +
-      '<td class="agency-cell">' + agencyLabel(r.agency) + (r.phone ? '<br><span class="phone-small">' + r.phone + '</span>' : '') + '</td>' +
-      '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
-      '<td style="text-align:center"><button class="heart-btn" onclick="toggleFav(\'' + r.id + '\',\'' + r.source + '\',this)">' +
-        (window.Favorites && window.Favorites.isFav(r.id, r.source) ? '❤️' : '🤍') +
-      '</button></td>';
-    tr.addEventListener('click', () => {
-      const entry = markerMap.get(r.id);
-      if (entry && r.lat && r.lon) { map.flyTo([r.lat, r.lon], 17, { duration: 0.5 }); entry.marker.openPopup(); }
-    });
-    tbody.appendChild(tr);
-  });
-  scheduleImageLoad(tbody);
-}
-
-// Sort headers
-document.querySelectorAll('th[data-col]').forEach(th => {
-  th.addEventListener('click', () => {
-    const col = th.dataset.col;
-    if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
-    document.querySelectorAll('th[data-col]').forEach(t => {
-      t.classList.toggle('sorted', t.dataset.col === sortCol);
-      t.textContent = t.textContent.replace(/ [▲▼]$/, '') + (t.dataset.col === sortCol ? (sortAsc ? ' ▲' : ' ▼') : '');
-    });
-    render();
-  });
-});
-
-['maxDeposit', 'maxRent', 'typeFilter', 'search'].forEach(id => {
-  document.getElementById(id).addEventListener('input', render);
-});
-
-function toggleFav(id, source, btn) {
-  if (!window.Favorites) return;
-  const r = RAW.find(x => String(x.id) === String(id));
-  if (!r) return;
-  event.stopPropagation();
-  if (window.Favorites.isFav(id, source)) {
-    window.Favorites.remove(id, source);
-    btn.textContent = '🤍';
-  } else {
-    window.Favorites.add(r);
-    btn.textContent = '❤️';
-  }
-}
-
-render();
+] });
 </script>
 </body>
 </html>

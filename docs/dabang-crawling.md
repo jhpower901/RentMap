@@ -104,13 +104,13 @@ lng 127.0451149
 Run:
 
 ```powershell
-python .\scripts\crawl_dabang.py
+python .\scripts\rentmap.py crawl-dabang
 ```
 
 Useful variants:
 
 ```powershell
-python .\scripts\crawl_dabang.py `
+python .\scripts\rentmap.py crawl-dabang `
   --min-lat 37.2736 --min-lng 127.0408 --max-lat 37.2809 --max-lng 127.0494 `
   --max-deposit 3000 --max-rent 60 `
   --output-csv .\data\dabang_ajou_2026-05-22.csv

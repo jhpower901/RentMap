@@ -14,5 +14,17 @@ services:
       - TZ=Asia/Seoul
     restart: unless-stopped
 
-# 기존 크롤링 기능이 필요할 때를 위해 별도 프로파일로 유지 가능하지만, 
-# 웹 서버 실행을 기본 서비스로 설정했습니다.
+  # Naver crawler runs in its own playwright-based container at a slower
+  # cadence (every 3 hours at :30 KST). Shares the data volume so the main
+  # container's hourly gen-web picks up the freshly-written CSV.
+  rentmap-naver:
+    build:
+      context: .
+      dockerfile: Dockerfile.naver
+    container_name: rentmap-naver
+    volumes:
+      - ./data:/app/data
+      - ./scripts:/app/scripts
+    environment:
+      - TZ=Asia/Seoul
+    restart: unless-stopped

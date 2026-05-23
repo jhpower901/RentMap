@@ -1,2 +1,4 @@
 requests>=2.31,<3
 playwright>=1.45,<2
+apscheduler>=3.10,<4
+tzdata

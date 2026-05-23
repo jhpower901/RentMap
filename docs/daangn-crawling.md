@@ -67,21 +67,21 @@ Karrot uses different salesType codes than Dabang:
 Run:
 
 ```powershell
-python .\scripts\crawl_daangn.py
+python .\scripts\rentmap.py crawl-daangn
 ```
 
 Useful variants:
 
 ```powershell
-python .\scripts\crawl_daangn.py `
+python .\scripts\rentmap.py crawl-daangn `
   --max-deposit 3000 --max-rent 60 `
   --output-csv .\data\daangn_ajou_2026-05-22.csv
 
 # Skip detail page fetches (faster, no coordinates):
-python .\scripts\crawl_daangn.py --skip-detail
+python .\scripts\rentmap.py crawl-daangn --skip-detail
 
 # Custom region list:
-python .\scripts\crawl_daangn.py `
+python .\scripts\rentmap.py crawl-daangn `
   --region-ids 1289 1290 1298
 ```
 

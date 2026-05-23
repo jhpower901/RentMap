@@ -34,13 +34,13 @@ The app supplies dynamic query parameters such as `cortarNo`, map bounds, zoom, 
 Run:
 
 ```powershell
-python .\scripts\crawl_naver_land.py
+python .\scripts\rentmap.py crawl-naver
 ```
 
 Useful variants:
 
 ```powershell
-python .\scripts\crawl_naver_land.py `
+python .\scripts\rentmap.py crawl-naver `
   --url "https://new.land.naver.com/rooms?ms=2AzVQ9,3zkrDJ,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT" `
   --max-pages 5 `
   --output-csv .\data\naver_land_ajou_2026-05-22.csv
@@ -49,13 +49,13 @@ python .\scripts\crawl_naver_land.py `
 If headless Chrome is blocked or you want to watch the crawl:
 
 ```powershell
-python .\scripts\crawl_naver_land.py --headed
+python .\scripts\rentmap.py crawl-naver --headed
 ```
 
 If you need the raw article-list JSON:
 
 ```powershell
-python .\scripts\crawl_naver_land.py `
+python .\scripts\rentmap.py crawl-naver `
   --raw-json .\data\naver_land_ajou_2026-05-22.raw.json
 ```
 
