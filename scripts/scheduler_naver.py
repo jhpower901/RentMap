@@ -38,12 +38,16 @@ def run_naver_crawl() -> None:
                 "crawl-naver",
                 "--output-csv", str(out_csv),
                 "--raw-json", str(raw_json),
-                "--max-pages", "5",
+                # 20 pages × 100 articles = up to 2000 per cortarNo. cortarNo dedup
+                # inside rentmap.py keeps total pagination calls bounded.
+                "--max-pages", "20",
                 "--skip-home",
             ],
             cwd=str(ROOT),
             check=False,
-            timeout=30 * 60,
+            # 45 min: list crawl (~5min) + detail-API enrichment for ~1000 bbox
+            # articles at ~250ms each (~5min) leaves comfortable headroom.
+            timeout=45 * 60,
         )
         print(f"[naver-scheduler] crawl-naver done", flush=True)
     except Exception as exc:

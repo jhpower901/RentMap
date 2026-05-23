@@ -14,6 +14,19 @@ services:
       - ./scripts:/app/scripts
     environment:
       - TZ=Asia/Seoul
+      - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
+      - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
+      - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}
+      - RENTMAP_RADIUS_KM=${RENTMAP_RADIUS_KM:-3.0}
+      - RENTMAP_MAX_DEPOSIT=${RENTMAP_MAX_DEPOSIT:-999999}
+      - RENTMAP_MAX_RENT=${RENTMAP_MAX_RENT:-999999}
+      # Daangn region IDs (comma-separated). Default = Suwon Gwonseon-gu (아주대 주변).
+      # To use in another city: find IDs at daangn.com/kr/realty/?in=x-XXXX and set here.
+      - RENTMAP_DAANGN_REGION_IDS=${RENTMAP_DAANGN_REGION_IDS:-}
+      # Naver Land URLs (pipe "|" separated). Leave empty to auto-generate a viewport
+      # grid from CENTER_LAT/LNG + RADIUS_KM. Set only to override with specific URLs.
+      # NOTE: comma cannot be used as separator — ms= params contain commas.
+      - RENTMAP_NAVER_URLS=${RENTMAP_NAVER_URLS:-}
     restart: unless-stopped
 
   # Naver crawler runs in its own playwright-based container, in lock-step
@@ -30,6 +43,14 @@ services:
       - ./scripts:/app/scripts
     environment:
       - TZ=Asia/Seoul
+      - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
+      - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
+      - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}
+      - RENTMAP_RADIUS_KM=${RENTMAP_RADIUS_KM:-3.0}
+      - RENTMAP_MAX_DEPOSIT=${RENTMAP_MAX_DEPOSIT:-999999}
+      - RENTMAP_MAX_RENT=${RENTMAP_MAX_RENT:-999999}
+      # Same Naver URL override — naver container uses env vars to generate its grid.
+      - RENTMAP_NAVER_URLS=${RENTMAP_NAVER_URLS:-}
     restart: unless-stopped
 
 networks:

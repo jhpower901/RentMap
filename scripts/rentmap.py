@@ -31,9 +31,20 @@ DEFAULT_MIN_LAT = 37.260
 DEFAULT_MAX_LAT = 37.290
 DEFAULT_MIN_LNG = 127.025
 DEFAULT_MAX_LNG = 127.095
+DEFAULT_CENTER_LAT = 37.280062
+DEFAULT_CENTER_LNG = 127.043688
+DEFAULT_RADIUS_KM = 3.0
 NO_PRICE_LIMIT_MANWON = 999999
 DEFAULT_ZIGBANG_GEOHASHES = ["wyd7f", "wyd7g", "wyd7u", "wydk4", "wydk5", "wydkh"]
 DEFAULT_DAANGN_REGION_IDS = [1289, 1290, 1298, 1294, 1295, 1296, 1297, 1291, 1302, 1303]
+# Naver Land ms= grid parameters
+# At zoom 16 each tile covers ~1.5km. Step 1.2km gives ~50% overlap → solid coverage.
+NAVER_TILE_STEP_KM = 1.2
+NAVER_ZOOM = 16
+NAVER_DEFAULT_PARAMS = (
+    "a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL"
+    "&e=RETAIL&aa=SMALLSPCRENT&ae=ONEROOM"
+)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
 
 DABANG_COLUMNS = [
@@ -61,6 +72,16 @@ DAANGN_COLUMNS = [
     "crawl_note",
 ]
 
+NAVER_COLUMNS = [
+    "source", "listing_no", "room_id", "url", "agency", "agent_name", "agent_phone",
+    "region", "address", "latitude", "longitude", "address_public_level", "title",
+    "deposit_manwon", "rent_manwon", "maintenance_manwon", "total_monthly_manwon",
+    "room_type", "room_count", "bathroom_count", "area_m2", "floor", "direction",
+    "room_structure", "duplex", "parking", "move_in", "approval_date",
+    "building_use", "description", "options", "security_options",
+    "image_1", "image_2", "crawl_note",
+]
+
 
 def first(obj: Any, names: list[str], default: Any = "") -> Any:
     if obj is None:
@@ -70,6 +91,54 @@ def first(obj: Any, names: list[str], default: Any = "") -> Any:
         if value is not None and value != "":
             return value
     return default
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        print(f"[config] ignoring invalid {name}={raw!r}; using {default}", file=sys.stderr)
+        return default
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"[config] ignoring invalid {name}={raw!r}; using {default}", file=sys.stderr)
+        return default
+
+
+def default_max_deposit() -> int:
+    return env_int("RENTMAP_MAX_DEPOSIT", NO_PRICE_LIMIT_MANWON)
+
+
+def default_max_rent() -> int:
+    return env_int("RENTMAP_MAX_RENT", NO_PRICE_LIMIT_MANWON)
+
+
+def bbox_from_center_radius(center_lat: float, center_lng: float, radius_km: float) -> tuple[float, float, float, float]:
+    lat_delta = radius_km / 111.0
+    lng_delta = radius_km / (111.0 * max(math.cos(math.radians(center_lat)), 0.01))
+    return (
+        center_lat - lat_delta,
+        center_lat + lat_delta,
+        center_lng - lng_delta,
+        center_lng + lng_delta,
+    )
+
+
+def default_bbox_from_env() -> tuple[float, float, float, float]:
+    center_lat = env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT)
+    center_lng = env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG)
+    radius_km = env_float("RENTMAP_RADIUS_KM", DEFAULT_RADIUS_KM)
+    return bbox_from_center_radius(center_lat, center_lng, radius_km)
 
 
 def nested(obj: dict[str, Any] | None, path: list[str], default: Any = "") -> Any:
@@ -632,15 +701,6 @@ def bbox_ok(lat: Any, lon: Any, args: argparse.Namespace) -> bool:
         return True
 
 
-NAVER_DEFAULT_URLS = [
-    "https://new.land.naver.com/rooms?cortarNo=4111710200&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111514000&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111710100&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111710300&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
-    "https://new.land.naver.com/rooms?cortarNo=4111710400&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&order=rank",
-]
-
-
 def crawl_naver(args: argparse.Namespace) -> None:
     try:
         from playwright.async_api import async_playwright
@@ -650,7 +710,7 @@ def crawl_naver(args: argparse.Namespace) -> None:
 
 
 async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> None:
-    urls = args.urls or NAVER_DEFAULT_URLS
+    urls = args.urls or default_naver_urls()
     chrome = find_chrome(args.chrome_path)
     async with async_playwright() as p:
         launch_options: dict[str, Any] = {
@@ -679,11 +739,17 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                 await page.goto("https://new.land.naver.com/", wait_until="domcontentloaded", timeout=45000)
                 await page.wait_for_timeout(1200)
             seen: set[str] = set()
+            # Naver's list API is cortarNo-scoped (dong-level), not viewport-scoped,
+            # so multiple ms= tiles often resolve to the same cortarNo. We track
+            # which cortarNos have already been fully paginated and skip pagination
+            # for subsequent duplicates (page 1 still arrives from the navigation
+            # but the article dedup below filters it out).
+            seen_cortarnos: set[str] = set()
             records: list[dict[str, Any]] = []
             raw_payloads: list[Any] = []
             for idx, url in enumerate(urls, 1):
                 print(f"\nCrawling Naver URL {idx}/{len(urls)}: {url}")
-                one_records, payloads = await crawl_naver_one(page, context, url, article_headers, args)
+                one_records, payloads, cortarno = await crawl_naver_one(page, context, url, article_headers, args, seen_cortarnos)
                 raw_payloads.extend(payloads)
                 new_count = 0
                 for record in one_records:
@@ -694,9 +760,37 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                         seen.add(key)
                     records.append(record)
                     new_count += 1
-                print(f"  Found {len(one_records)} in bbox, {new_count} new after dedup")
+                print(f"  Found {len(one_records)} in bbox, {new_count} new after dedup (cortarNo={cortarno or '?'})")
+            print(f"\nList API summary: {len(records)} unique articles across {len(seen_cortarnos)} cortarNos, {len(raw_payloads)} payload pages")
+
+            # Detail-API enrichment: list API never returns the exact address or
+            # room/parking/move-in/description fields. We call /api/articles/{no}
+            # for every bbox article and merge the extra fields in place. Reuses
+            # the session cookies captured by the request listener above.
+            skip_detail = getattr(args, "skip_detail", False)
+            if not skip_detail and records:
+                detail_source = article_headers
+                if detail_source is None:
+                    print("[naver-detail] no captured headers; skipping detail enrichment", file=sys.stderr)
+                else:
+                    print(f"\nFetching Naver detail API for {len(records)} bbox articles...")
+                    detail_ok = 0
+                    for i, record in enumerate(records, 1):
+                        article_no = to_text(record.get("listing_no"))
+                        if not article_no:
+                            continue
+                        if i % 50 == 0:
+                            print(f"  detail: {i}/{len(records)} ({detail_ok} enriched)", flush=True)
+                        detail = await fetch_naver_article_detail(context, article_no, detail_source)
+                        if detail:
+                            enrich_from_naver_detail(record, detail)
+                            detail_ok += 1
+                    print(f"  detail: {len(records)}/{len(records)} done ({detail_ok} enriched)")
+            elif skip_detail:
+                print("[naver-detail] --skip-detail set; leaving list-API placeholders in place")
+
             records.sort(key=lambda r: (to_text(r["agency"]), float_or_inf(r["total_monthly_manwon"])))
-            write_csv(Path(args.output_csv), records, DABANG_COLUMNS)
+            write_csv(Path(args.output_csv), records, NAVER_COLUMNS)
             if args.raw_json:
                 Path(args.raw_json).parent.mkdir(parents=True, exist_ok=True)
                 Path(args.raw_json).write_text(json.dumps(raw_payloads, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -722,7 +816,7 @@ def find_chrome(explicit: str = "") -> str | None:
     return None
 
 
-async def crawl_naver_one(page: Any, context: Any, target_url: str, article_headers: dict[str, str] | None, args: argparse.Namespace) -> tuple[list[dict[str, Any]], list[Any]]:
+async def crawl_naver_one(page: Any, context: Any, target_url: str, article_headers: dict[str, str] | None, args: argparse.Namespace, seen_cortarnos: set[str]) -> tuple[list[dict[str, Any]], list[Any], str]:
     center = get_map_center(target_url)
     async with page.expect_response(lambda r: "/api/articles?" in r.url and r.status == 200, timeout=45000) as response_info:
         await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
@@ -738,24 +832,35 @@ async def crawl_naver_one(page: Any, context: Any, target_url: str, article_head
             raise RuntimeError(f"Naver article API request failed: {response.status}")
         first_json = await response.json()
     payloads = [first_json]
-    page_no = 2
-    while page_no <= args.max_pages and first_json.get("isMoreData"):
-        next_url = set_query_param(first_url, "page", str(page_no))
-        response = await context.request.get(next_url, headers=clean_headers(request_headers or article_headers), timeout=30000)
-        if not response.ok:
-            break
-        payload = await response.json()
-        payloads.append(payload)
-        first_json = payload
-        page_no += 1
-        await page.wait_for_timeout(250)
+    # Extract cortarNo from the captured first_url. If we've already paginated
+    # this cortarNo from a previous tile, skip pages 2..N — page 1 was already
+    # delivered by the navigation above and all articles will be filtered out
+    # by the listing_no dedup in the caller.
+    qs = parse_qs(urlparse(first_url).query)
+    cortarno = (qs.get("cortarNo") or [""])[0]
+    if cortarno and cortarno in seen_cortarnos:
+        print(f"  cortarNo {cortarno} already paginated — skipping pages 2..{args.max_pages}")
+    else:
+        if cortarno:
+            seen_cortarnos.add(cortarno)
+        page_no = 2
+        while page_no <= args.max_pages and first_json.get("isMoreData"):
+            next_url = set_query_param(first_url, "page", str(page_no))
+            response = await context.request.get(next_url, headers=clean_headers(request_headers or article_headers), timeout=30000)
+            if not response.ok:
+                break
+            payload = await response.json()
+            payloads.append(payload)
+            first_json = payload
+            page_no += 1
+            await page.wait_for_timeout(250)
     records = []
     for payload in payloads:
         for article in payload.get("articleList") or []:
             record = normalize_naver_article(article, target_url, center)
             if bbox_ok(record.get("latitude"), record.get("longitude"), args):
                 records.append(record)
-    return records, payloads
+    return records, payloads, cortarno
 
 
 def clean_headers(headers: dict[str, str] | None) -> dict[str, str] | None:
@@ -788,6 +893,90 @@ def decode_base62(value: str) -> int | None:
 def decode_coord(value: str) -> float | None:
     decoded = decode_base62(value)
     return None if decoded is None else (decoded - 2000000000) / 10000000
+
+
+def encode_coord(value: float) -> str:
+    """Encode a lat/lng float to Naver Land's base62 ms= format (inverse of decode_coord)."""
+    chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    number = int(round(value * 10000000)) + 2000000000
+    if number <= 0:
+        return "0"
+    result = ""
+    while number > 0:
+        number, rem = divmod(number, 62)
+        result = chars[rem] + result
+    return result or "0"
+
+
+def gen_naver_grid_urls(center_lat: float, center_lng: float, radius_km: float) -> list[str]:
+    """Generate a grid of Naver Land ms= viewport URLs covering the given radius.
+
+    Each tile at zoom 16 covers roughly 1.5 km. Tiles are spaced NAVER_TILE_STEP_KM
+    apart (with ~50% overlap) so no area is missed between tile edges.
+    """
+    step_lat = NAVER_TILE_STEP_KM / 111.0
+    step_lng = NAVER_TILE_STEP_KM / (111.0 * max(math.cos(math.radians(center_lat)), 0.01))
+    n = max(1, math.ceil(radius_km / NAVER_TILE_STEP_KM))
+    urls: list[str] = []
+    seen: set[str] = set()
+    for i in range(-n, n + 1):
+        for j in range(-n, n + 1):
+            # Skip tiles whose centres are more than one step beyond the radius
+            dist_km = math.sqrt((i * NAVER_TILE_STEP_KM) ** 2 + (j * NAVER_TILE_STEP_KM) ** 2)
+            if dist_km > radius_km + NAVER_TILE_STEP_KM:
+                continue
+            lat = center_lat + i * step_lat
+            lng = center_lng + j * step_lng
+            ms = f"{encode_coord(lat)},{encode_coord(lng)},{NAVER_ZOOM}"
+            if ms not in seen:
+                seen.add(ms)
+                urls.append(f"https://new.land.naver.com/rooms?ms={ms}&{NAVER_DEFAULT_PARAMS}")
+    return urls
+
+
+def default_naver_urls() -> list[str]:
+    """Return Naver crawl URLs.
+
+    Priority:
+    1. RENTMAP_NAVER_URLS env var (comma-separated list of full URLs).
+    2. Auto-generated grid from RENTMAP_CENTER_LAT/LNG + RENTMAP_RADIUS_KM.
+    """
+    raw = os.environ.get("RENTMAP_NAVER_URLS", "").strip()
+    if raw:
+        # Use "|" as separator — Naver ms= URLs contain commas (ms=lat,lng,zoom)
+        # so comma-splitting would corrupt them.
+        urls = [u.strip() for u in raw.split("|") if u.strip()]
+        if urls:
+            print(f"[naver] using {len(urls)} URLs from RENTMAP_NAVER_URLS", file=sys.stderr)
+            return urls
+    center_lat = env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT)
+    center_lng = env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG)
+    radius_km = env_float("RENTMAP_RADIUS_KM", DEFAULT_RADIUS_KM)
+    urls = gen_naver_grid_urls(center_lat, center_lng, radius_km)
+    print(f"[naver] generated {len(urls)} grid URLs (center={center_lat},{center_lng} r={radius_km}km)", file=sys.stderr)
+    return urls
+
+
+def default_daangn_region_ids() -> list[int]:
+    """Return Daangn region IDs.
+
+    Priority:
+    1. RENTMAP_DAANGN_REGION_IDS env var (comma-separated integers).
+    2. DEFAULT_DAANGN_REGION_IDS (Ajou University / Suwon Gwonseon-gu).
+
+    To find region IDs for a different city: browse daangn.com/kr/realty/, navigate
+    to the target neighbourhood and read the `in=x-XXXX` value from the URL.
+    """
+    raw = os.environ.get("RENTMAP_DAANGN_REGION_IDS", "").strip()
+    if raw:
+        try:
+            ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
+            if ids:
+                print(f"[daangn] using {len(ids)} region IDs from RENTMAP_DAANGN_REGION_IDS", file=sys.stderr)
+                return ids
+        except ValueError as exc:
+            print(f"[config] ignoring invalid RENTMAP_DAANGN_REGION_IDS: {exc}", file=sys.stderr)
+    return list(DEFAULT_DAANGN_REGION_IDS)
 
 
 def get_map_center(url: str) -> dict[str, Any]:
@@ -834,6 +1023,12 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
     img = first(article, ["representativeImgUrl"])
     if img and to_text(img).startswith("/"):
         img = f"https://landthumb-phinf.pstatic.net{img}"
+    # The list API never returns the actual jibun/road address (detailAddressYn=N
+    # for almost every listing). Use the dong-level region as a sane placeholder;
+    # the detail-API enrichment step will overwrite this with the exact address
+    # (e.g. "경기도 수원시 영통구 원천동 90-15").
+    region_parts = [to_text(first(article, [k])) for k in ("cityName", "divisionName", "sectionName")]
+    region_addr = " ".join([p for p in region_parts if p])
     return {
         "source": "naver_land",
         "listing_no": article_no,
@@ -843,29 +1038,193 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
         "agent_name": "",
         "agent_phone": "",
         "region": first(article, ["cityName", "divisionName", "sectionName"]),
-        "address": first(article, ["articleName", "buildingName"]),
+        "address": region_addr or first(article, ["articleName", "buildingName"]),
         "latitude": lat,
         "longitude": lon,
-        "address_public_level": "naver_public_listing_level",
+        "address_public_level": "naver_dong_level_until_detail_enrichment",
         "title": first(article, ["articleFeatureDesc", "articleName"]),
         "deposit_manwon": parsed.get("deposit") or parse_amount_manwon(deposit_text),
         "rent_manwon": rent,
         "maintenance_manwon": maintenance,
         "total_monthly_manwon": "" if rent == "" else round1(float(rent) + (float(maintenance) if maintenance != "" else 0)),
         "room_type": first(article, ["realEstateTypeName", "articleName"]),
+        "room_count": "",
+        "bathroom_count": "",
         "area_m2": "/".join([to_text(x) for x in [first(article, ["supplySpace", "area1"]), first(article, ["exclusiveSpace", "area2"])] if x]),
         "floor": " ".join([to_text(x) for x in [first(article, ["floorInfo"]), first(article, ["floorLayerName"])] if x]),
         "direction": first(article, ["direction"]),
+        "room_structure": "",
+        "duplex": "",
         "parking": "",
         "move_in": "",
         "approval_date": format_date_text(first(article, ["articleConfirmYmd", "confirmYmd"])),
         "building_use": first(article, ["articleRealEstateTypeName"]),
+        "description": "",
         "options": join_text_list([first(article, ["tagList"]), first(article, ["articleFeatureDesc"])]),
         "security_options": "",
         "image_1": img,
         "image_2": "",
         "crawl_note": "Captured from Naver Land article list API.",
     }
+
+
+async def fetch_naver_article_detail(context: Any, article_no: str, headers: dict[str, str] | None, delay_ms: int = 250, retries: int = 2) -> dict[str, Any]:
+    """Fetch one Naver Land article's detail-API payload, with light retry.
+
+    Naver returns the full ``articleDetail``/``articleOneroom``/``articleFacility``/
+    ``articleRealtor``/``articleSpace``/``articlePhotos`` tree at
+    ``/api/articles/{articleNo}``. The request reuses the captured browser-session
+    headers (same cookies as the list-API call).
+    """
+    url = f"https://new.land.naver.com/api/articles/{article_no}"
+    cleaned = clean_headers(headers)
+    for attempt in range(retries + 1):
+        try:
+            response = await context.request.get(url, headers=cleaned, timeout=20000)
+            if delay_ms:
+                await asyncio.sleep(delay_ms / 1000)
+            if response.ok:
+                return await response.json()
+            if response.status in (429, 503) and attempt < retries:
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
+            print(f"  [naver-detail] {article_no}: HTTP {response.status}", file=sys.stderr)
+            return {}
+        except Exception as exc:
+            if attempt < retries:
+                await asyncio.sleep(1)
+                continue
+            print(f"  [naver-detail] {article_no}: {exc}", file=sys.stderr)
+            return {}
+    return {}
+
+
+def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> None:
+    """Merge ``/api/articles/{articleNo}`` fields into a list-API record in place.
+
+    Overwrites placeholders (region-only address, blank phone/parking/move-in/etc.)
+    with the real values from the detail payload. Safe to call with an empty
+    ``detail`` dict — the record is left untouched in that case.
+    """
+    if not detail:
+        return
+    ad = detail.get("articleDetail") or {}
+    ao = detail.get("articleOneroom") or {}
+    af = detail.get("articleFacility") or {}
+    ar = detail.get("articleRealtor") or {}
+    asp = detail.get("articleSpace") or {}
+    photos = detail.get("articlePhotos") or []
+
+    # Real address: ``exposureAddress`` is the jibun shown to logged-out users
+    # (e.g. "경기도 수원시 영통구 원천동 90-15"); fall back to the dong region
+    # if for some reason it's empty.
+    exposure_addr = first(ad, ["exposureAddress"])
+    if exposure_addr:
+        record["address"] = exposure_addr
+        record["address_public_level"] = "naver_exposure_address_from_detail_api"
+
+    # Agency contact (overrides empty list-API values)
+    rep_name = first(ar, ["representativeName"])
+    if rep_name:
+        record["agent_name"] = rep_name
+    cell = first(ar, ["cellPhoneNo"])
+    tel = first(ar, ["representativeTelNo"])
+    phone = normalize_phone(cell or tel)
+    if phone:
+        record["agent_phone"] = phone
+
+    # Room / bathroom counts
+    room_cnt = first(ad, ["roomCount"])
+    if room_cnt not in (None, ""):
+        record["room_count"] = room_cnt
+    bath_cnt = first(ad, ["bathroomCount"])
+    if bath_cnt not in (None, ""):
+        record["bathroom_count"] = bath_cnt
+
+    # Room structure (분리형 / 일자형 / etc.) from articleOneroom
+    room_structure = first(ao, ["roomType"])
+    if room_structure:
+        record["room_structure"] = room_structure
+
+    # Parking
+    parking_yn = to_text(first(ad, ["parkingPossibleYN"]))
+    parking_cnt = first(ad, ["parkingCount"])
+    if parking_yn == "Y":
+        record["parking"] = f"가능 ({parking_cnt}대)" if parking_cnt not in (None, "", 0) else "가능"
+    elif parking_yn == "N":
+        record["parking"] = "불가"
+
+    # Move-in: prefer the actual date when present, otherwise the human label
+    move_in_name = first(ad, ["moveInTypeName"])
+    move_in_ymd = to_text(first(ad, ["moveInPossibleYmd"]))
+    if move_in_ymd and move_in_ymd != "NOW":
+        record["move_in"] = move_in_ymd
+    elif move_in_name:
+        record["move_in"] = move_in_name
+
+    # Duplex / floor structure (e.g. 단층 / 복층)
+    duplex_yn = to_text(first(ad, ["duplexYN"]))
+    floor_layer = first(ad, ["floorLayerName"])
+    if floor_layer:
+        record["duplex"] = floor_layer
+    elif duplex_yn:
+        record["duplex"] = "복층" if duplex_yn == "Y" else "단층"
+
+    # Approval date — articleFacility has the precise YYYYMMDD; better than the
+    # confirmYmd we already pulled from the list API.
+    aprvymd = to_text(first(af, ["buildingUseAprvYmd"]))
+    if re.match(r"^\d{8}$", aprvymd):
+        record["approval_date"] = format_date_text(aprvymd)
+
+    # Description (full listing body)
+    desc = first(ad, ["detailDescription"])
+    if desc:
+        record["description"] = desc
+
+    # Options: union of lifeFacilities, airconFacilities, roomFacilities, tagList
+    tag_list = ad.get("tagList") or []
+    life_fac = af.get("lifeFacilities") or []
+    aircon_fac = af.get("airconFacilities") or []
+    room_fac = ao.get("roomFacilities") or []
+    seen: list[str] = []
+    for lst in (tag_list, life_fac, aircon_fac, room_fac):
+        for item in lst:
+            label = to_text(item).strip()
+            if label and label not in seen:
+                seen.append(label)
+    if seen:
+        record["options"] = "; ".join(seen)
+
+    # Security options: union of securityFacilities (facility) + buildingFacilities (oneroom)
+    sec_fac = af.get("securityFacilities") or []
+    bld_fac = ao.get("buildingFacilities") or []
+    sec_seen: list[str] = []
+    for lst in (sec_fac, bld_fac):
+        for item in lst:
+            label = to_text(item).strip()
+            if label and label not in sec_seen:
+                sec_seen.append(label)
+    if sec_seen:
+        record["security_options"] = "; ".join(sec_seen)
+
+    # Areas: articleSpace gives the canonical supply/exclusive sizes (㎡)
+    excl_space = asp.get("exclusiveSpace")
+    supp_space = asp.get("supplySpace")
+    space_parts = [to_text(s) for s in (supp_space, excl_space) if s not in (None, "", 0, 0.0)]
+    if space_parts:
+        record["area_m2"] = "/".join(space_parts)
+
+    # Photos
+    if photos:
+        def _photo_url(p: dict[str, Any]) -> str:
+            src = to_text(p.get("imageSrc", ""))
+            return f"https://landthumb-phinf.pstatic.net{src}" if src.startswith("/") else src
+        if photos:
+            record["image_1"] = _photo_url(photos[0]) or record.get("image_1", "")
+        if len(photos) > 1:
+            record["image_2"] = _photo_url(photos[1])
+
+    record["crawl_note"] = "Enriched from Naver Land /api/articles/{articleNo} detail API."
 
 
 def float_or_empty(value: Any) -> Any:
@@ -1000,10 +1359,26 @@ def write_platform(path: Path, template: str, source: str, accent: str, data: st
 
 
 def add_common_bbox(parser: argparse.ArgumentParser, *, naver: bool = False) -> None:
-    parser.add_argument("--min-lat", type=float, default=0 if naver else DEFAULT_MIN_LAT)
-    parser.add_argument("--max-lat", type=float, default=0 if naver else DEFAULT_MAX_LAT)
-    parser.add_argument("--min-lng", type=float, default=0 if naver else DEFAULT_MIN_LNG)
-    parser.add_argument("--max-lng", type=float, default=0 if naver else DEFAULT_MAX_LNG)
+    min_lat, max_lat, min_lng, max_lng = default_bbox_from_env()
+    parser.add_argument("--center-lat", type=float, default=None)
+    parser.add_argument("--center-lng", type=float, default=None)
+    parser.add_argument("--radius-km", type=float, default=None)
+    parser.add_argument("--min-lat", type=float, default=0 if naver else min_lat)
+    parser.add_argument("--max-lat", type=float, default=0 if naver else max_lat)
+    parser.add_argument("--min-lng", type=float, default=0 if naver else min_lng)
+    parser.add_argument("--max-lng", type=float, default=0 if naver else max_lng)
+
+
+def apply_center_radius(args: argparse.Namespace) -> argparse.Namespace:
+    if not all(hasattr(args, name) for name in ("min_lat", "max_lat", "min_lng", "max_lng")):
+        return args
+    center_fields = (args.center_lat, args.center_lng, args.radius_km)
+    if any(v is not None for v in center_fields):
+        center_lat = args.center_lat if args.center_lat is not None else env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT)
+        center_lng = args.center_lng if args.center_lng is not None else env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG)
+        radius_km = args.radius_km if args.radius_km is not None else env_float("RENTMAP_RADIUS_KM", DEFAULT_RADIUS_KM)
+        args.min_lat, args.max_lat, args.min_lng, args.max_lng = bbox_from_center_radius(center_lat, center_lng, radius_km)
+    return args
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1013,8 +1388,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("crawl-dabang")
     add_common_bbox(p)
     p.add_argument("--zoom", type=int, default=18)
-    p.add_argument("--max-deposit", type=int, default=NO_PRICE_LIMIT_MANWON)
-    p.add_argument("--max-rent", type=int, default=NO_PRICE_LIMIT_MANWON)
+    p.add_argument("--max-deposit", type=int, default=default_max_deposit())
+    p.add_argument("--max-rent", type=int, default=default_max_rent())
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"dabang_ajou_{DEFAULT_DATE}.csv"))
     p.add_argument("--raw-json", default="")
     p.add_argument("--delay-ms", type=int, default=120)
@@ -1023,32 +1398,36 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("crawl-zigbang")
     add_common_bbox(p)
     p.add_argument("--geohashes", nargs="+", default=DEFAULT_ZIGBANG_GEOHASHES)
-    p.add_argument("--max-deposit-manwon", type=int, default=NO_PRICE_LIMIT_MANWON)
-    p.add_argument("--max-rent-manwon", type=int, default=NO_PRICE_LIMIT_MANWON)
+    p.add_argument("--max-deposit-manwon", type=int, default=default_max_deposit())
+    p.add_argument("--max-rent-manwon", type=int, default=default_max_rent())
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"zigbang_ajou_{DEFAULT_DATE}.csv"))
     p.set_defaults(func=crawl_zigbang)
 
     p = sub.add_parser("crawl-daangn")
-    p.add_argument("--region-ids", nargs="+", type=int, default=DEFAULT_DAANGN_REGION_IDS)
-    p.add_argument("--max-deposit", type=int, default=NO_PRICE_LIMIT_MANWON)
-    p.add_argument("--max-rent", type=int, default=NO_PRICE_LIMIT_MANWON)
+    p.add_argument("--region-ids", nargs="+", type=int, default=default_daangn_region_ids())
+    p.add_argument("--max-deposit", type=int, default=default_max_deposit())
+    p.add_argument("--max-rent", type=int, default=default_max_rent())
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"daangn_ajou_{DEFAULT_DATE}.csv"))
     p.add_argument("--skip-detail", action="store_true")
-    p.add_argument("--min-lat", type=float, default=0)
-    p.add_argument("--max-lat", type=float, default=0)
-    p.add_argument("--min-lng", type=float, default=0)
-    p.add_argument("--max-lng", type=float, default=0)
+    add_common_bbox(p)  # bbox filter applied post-fetch; defaults to env-based centre/radius
     p.set_defaults(func=crawl_daangn)
 
     p = sub.add_parser("crawl-naver")
-    add_common_bbox(p, naver=True)
+    add_common_bbox(p)  # was naver=True (hardcoded 0); now uses env-based defaults like other crawlers
     p.add_argument("--url", dest="urls", action="append", default=[])
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"naver_land_ajou_{DEFAULT_DATE}.csv"))
     p.add_argument("--raw-json", default="")
-    p.add_argument("--max-pages", type=int, default=5)
+    # 5 pages = 500 articles/cortarNo: too low for busy dongs (원천동/영통동 had
+    # isMoreData=True for 138/151 payloads at that limit). 20 = up to 2000 articles
+    # per cortarNo, with cortarNo dedup avoiding redundant pagination across tiles.
+    p.add_argument("--max-pages", type=int, default=20)
     p.add_argument("--chrome-path", default="")
     p.add_argument("--headed", action="store_true")
     p.add_argument("--skip-home", action="store_true")
+    # --skip-detail: skip the per-article detail-API enrichment pass. Useful for
+    # fast smoke tests; production crawls should leave it off so address/phone/
+    # parking/move-in/room/structure/description fields get populated.
+    p.add_argument("--skip-detail", action="store_true")
     p.set_defaults(func=crawl_naver)
 
     p = sub.add_parser("gen-web")
@@ -1059,6 +1438,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("crawl-all")
     p.add_argument("--date", default=DEFAULT_DATE)
+    p.add_argument("--center-lat", type=float, default=None)
+    p.add_argument("--center-lng", type=float, default=None)
+    p.add_argument("--radius-km", type=float, default=None)
     p.add_argument("--skip-naver", action="store_true")
     p.add_argument("--gen-web", action="store_true")
     p.set_defaults(func=crawl_all)
@@ -1066,11 +1448,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def crawl_all(args: argparse.Namespace) -> None:
-    crawl_dabang(argparse.Namespace(min_lat=DEFAULT_MIN_LAT, min_lng=DEFAULT_MIN_LNG, max_lat=DEFAULT_MAX_LAT, max_lng=DEFAULT_MAX_LNG, zoom=18, max_deposit=NO_PRICE_LIMIT_MANWON, max_rent=NO_PRICE_LIMIT_MANWON, output_csv=str(ROOT / "data" / f"dabang_ajou_{args.date}.csv"), raw_json="", delay_ms=120))
-    crawl_zigbang(argparse.Namespace(min_lat=DEFAULT_MIN_LAT, min_lng=DEFAULT_MIN_LNG, max_lat=DEFAULT_MAX_LAT, max_lng=DEFAULT_MAX_LNG, geohashes=DEFAULT_ZIGBANG_GEOHASHES, max_deposit_manwon=NO_PRICE_LIMIT_MANWON, max_rent_manwon=NO_PRICE_LIMIT_MANWON, output_csv=str(ROOT / "data" / f"zigbang_ajou_{args.date}.csv")))
-    crawl_daangn(argparse.Namespace(region_ids=DEFAULT_DAANGN_REGION_IDS, max_deposit=NO_PRICE_LIMIT_MANWON, max_rent=NO_PRICE_LIMIT_MANWON, output_csv=str(ROOT / "data" / f"daangn_ajou_{args.date}.csv"), skip_detail=False, min_lat=0, max_lat=0, min_lng=0, max_lng=0))
+    min_lat, max_lat, min_lng, max_lng = default_bbox_from_env()
+    if any(getattr(args, name, None) is not None for name in ("center_lat", "center_lng", "radius_km")):
+        center_lat = args.center_lat if args.center_lat is not None else env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT)
+        center_lng = args.center_lng if args.center_lng is not None else env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG)
+        radius_km = args.radius_km if args.radius_km is not None else env_float("RENTMAP_RADIUS_KM", DEFAULT_RADIUS_KM)
+        min_lat, max_lat, min_lng, max_lng = bbox_from_center_radius(center_lat, center_lng, radius_km)
+    max_deposit = default_max_deposit()
+    max_rent = default_max_rent()
+    crawl_dabang(argparse.Namespace(min_lat=min_lat, min_lng=min_lng, max_lat=max_lat, max_lng=max_lng, zoom=18, max_deposit=max_deposit, max_rent=max_rent, output_csv=str(ROOT / "data" / f"dabang_ajou_{args.date}.csv"), raw_json="", delay_ms=120))
+    crawl_zigbang(argparse.Namespace(min_lat=min_lat, min_lng=min_lng, max_lat=max_lat, max_lng=max_lng, geohashes=DEFAULT_ZIGBANG_GEOHASHES, max_deposit_manwon=max_deposit, max_rent_manwon=max_rent, output_csv=str(ROOT / "data" / f"zigbang_ajou_{args.date}.csv")))
+    # Pass actual bbox so out-of-radius listings fetched by region-ID are excluded.
+    crawl_daangn(argparse.Namespace(region_ids=default_daangn_region_ids(), max_deposit=max_deposit, max_rent=max_rent, output_csv=str(ROOT / "data" / f"daangn_ajou_{args.date}.csv"), skip_detail=False, min_lat=min_lat, max_lat=max_lat, min_lng=min_lng, max_lng=max_lng, center_lat=None, center_lng=None, radius_km=None))
     if not args.skip_naver:
-        crawl_naver(argparse.Namespace(urls=[], output_csv=str(ROOT / "data" / f"naver_land_ajou_{args.date}.csv"), raw_json=str(ROOT / "data" / f"naver_land_ajou_{args.date}.raw.json"), max_pages=5, chrome_path="", headed=False, skip_home=True, min_lat=0, max_lat=0, min_lng=0, max_lng=0))
+        crawl_naver(argparse.Namespace(urls=[], output_csv=str(ROOT / "data" / f"naver_land_ajou_{args.date}.csv"), raw_json=str(ROOT / "data" / f"naver_land_ajou_{args.date}.raw.json"), max_pages=20, chrome_path="", headed=False, skip_home=True, skip_detail=False, min_lat=min_lat, max_lat=max_lat, min_lng=min_lng, max_lng=max_lng))
     if args.gen_web:
         gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=args.date))
 
@@ -1079,6 +1470,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if hasattr(args, "center_lat"):
+            args = apply_center_radius(args)
         args.func(args)
         return 0
     except RuntimeError as exc:
