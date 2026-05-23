@@ -81,8 +81,23 @@ DAANGN_COLUMNS = [
     "source", "listing_no", "url", "writer_type", "agency", "region_depth1",
     "region_depth2", "region_depth3", "address", "latitude", "longitude", "title",
     "deposit_manwon", "rent_manwon", "maintenance_manwon", "total_monthly_manwon",
-    "room_type", "room_count", "area_m2", "floor", "approval_date", "image_1", "image_2",
-    "crawl_note",
+    "room_type", "room_count", "area_m2", "floor", "approval_date",
+    "options", "description",
+    "image_1", "image_2", "crawl_note",
+]
+
+# Facility tokens we look for inside the Daangn description body, since the
+# proper "시설 정보" grid that the user sees on the rendered page is React-
+# rendered from a separate fetch we don't see in the SSR HTML. Most agents
+# repeat the same vocabulary in the description so a keyword scan recovers
+# the majority of the signal. Update this list if you spot a token Daangn
+# uses that doesn't appear here.
+DAANGN_FACILITY_KEYWORDS = [
+    "세탁기", "건조기", "드럼세탁기", "냉장고", "에어컨", "천장형에어컨", "벽걸이에어컨",
+    "인덕션", "가스레인지", "가스렌지", "전자레인지", "오븐", "식기세척기",
+    "TV", "와이파이", "비데", "샤워부스", "욕조",
+    "침대", "책상", "옷장", "신발장", "붙박이장", "싱크대", "화장대",
+    "엘리베이터", "주차", "오토바이주차", "베란다", "발코니", "테라스",
 ]
 
 NAVER_COLUMNS = [
@@ -618,6 +633,8 @@ def crawl_daangn(args: argparse.Namespace) -> None:
             "area_m2": listing.get("area", ""),
             "floor": listing.get("floor", ""),
             "approval_date": approval,
+            "options": detail.get("options", ""),
+            "description": detail.get("description", ""),
             "image_1": image_url(listing.get("images"), 0),
             "image_2": image_url(listing.get("images"), 1),
             "crawl_note": "",
@@ -675,7 +692,11 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
     except Exception as exc:
         print(f"WARNING: Article {article_id} fetch failed: {exc}", file=sys.stderr)
         return {}
-    detail = {"lat": "", "lon": "", "publicAddress": "", "roomCnt": "", "approvalDate": "", "writerType": "", "agencyName": ""}
+    detail = {
+        "lat": "", "lon": "", "publicAddress": "", "roomCnt": "",
+        "approvalDate": "", "writerType": "", "agencyName": "",
+        "description": "", "options": "",
+    }
     coord_ref = re.search(r'originalId\\":\\"' + re.escape(article_id) + r'\\".*?publicCoordinate\\":\{\\"__ref\\":\\"([^\\"]+)', text)
     if coord_ref:
         coord = re.search(re.escape(coord_ref.group(1)) + r'\\":\{\\"__id\\":\\"[^\\"]+\\",\\"__typename\\":\\"Coordinate\\",\\"lat\\":\\"([^\\"]+)\\",\\"lon\\":\\"([^\\"]+)', text)
@@ -691,6 +712,41 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
         match = re.search(pattern, text)
         if match:
             detail[key] = match.group(1)
+
+    # Description body: the page may inline multiple articles' content (related
+    # listings, recommendations). Anchor to THIS article's originalId and grab
+    # the first `content` field that follows.
+    #
+    # Two subtleties:
+    # - Lazy quantifier (`{n,m}?`) so we stop at the FIRST escaped quote that
+    #   closes the value — the greedy form happily ate past the closing `\"`
+    #   and grabbed the next field (`","publishedAt":"..."`).
+    # - The string is double-escaped in the SSR payload. One pass of
+    #   `json.loads('"' + raw + '"')` unescapes the outer layer (turning
+    #   raw `\\n` → literal `\n`); a second targeted pass collapses any
+    #   inner-layer escapes that remain. Doing both keeps the body readable
+    #   regardless of which Daangn template emitted it.
+    oid_match = re.search(r'originalId\\":\\"' + re.escape(article_id) + r'\\"', text)
+    if oid_match:
+        window = text[oid_match.start(): oid_match.start() + 12000]
+        cm = re.search(r'content\\":\\"((?:[^"\\]|\\.){10,5000}?)\\"', window)
+        if cm:
+            raw = cm.group(1)
+            try:
+                desc = json.loads('"' + raw + '"')
+            except Exception:
+                desc = raw
+            # Collapse the second escape layer if it's still present
+            # (real newlines stay real; literal backslash-n becomes newline).
+            desc = desc.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+            detail["description"] = desc.strip()
+            # Daangn's structured "시설 정보" grid is rendered client-side from
+            # a separate fetch we don't see here. Recover most of the signal by
+            # scanning the description body for known facility tokens — agents
+            # usually repeat them in the body.
+            facs = [fac for fac in DAANGN_FACILITY_KEYWORDS if fac in desc]
+            if facs:
+                detail["options"] = "; ".join(facs)
     meta = ""
     m1 = re.search(r'name="description"\s+content="([^"]+)"', text)
     m2 = re.search(r'content="([^"]+)"\s+name="description"', text)

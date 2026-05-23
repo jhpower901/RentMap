@@ -113,9 +113,29 @@ Docker:
 - area_m2
 - floor
 - approval_date
+- options              *(facility tokens detected in the description body — see "Description + options" below)*
+- description          *(full free-text body the agent wrote on the article page)*
 - image_1
 - image_2
 - crawl_note
+
+## Description + options
+
+The full free-text body is captured from the SSR HTML via
+`get_daangn_article_detail`. The page can inline multiple articles
+(related listings, recommendations, etc.), so the extractor anchors
+to `originalId=<article_id>` and then takes the first `content\":\"…\"`
+field that follows. The captured string is JSON-decoded (lazy regex
++ `json.loads` + a second targeted unescape pass) so the body has
+real newlines and decoded quotes.
+
+`options` is derived by scanning that body for facility keywords listed
+in `DAANGN_FACILITY_KEYWORDS` in `scripts/rentmap.py`. The proper
+"시설 정보" grid that the user sees on the rendered page is React-
+rendered from a separate fetch we don't see in the SSR HTML, but most
+agents repeat the same vocabulary in the description so a keyword scan
+recovers ~80% of the signal. Add tokens to that constant if you spot
+a new label Daangn uses (e.g. `"펫허용"`, `"오토바이주차"`, ...).
 
 ## Caveats
 
