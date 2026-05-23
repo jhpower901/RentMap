@@ -167,13 +167,24 @@ def get_fav_dir(source: str, id: str):
     os.makedirs(path, exist_ok=True)
     return path
 
+def load_favorites_state() -> dict[str, Any]:
+    if not os.path.exists(FAVORITES_FILE):
+        return {"favorites": [], "deleted": {}}
+    with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
+        return normalize_favorites_payload(json.load(f))
+
+@app.get("/api/favorites/state")
+async def get_favorites_state():
+    try:
+        return load_favorites_state()
+    except Exception as e:
+        print(f"Error reading favorites: {e}")
+        return {"favorites": [], "deleted": {}}
+
 @app.get("/api/favorites")
 async def get_favorites():
-    if not os.path.exists(FAVORITES_FILE):
-        return []
     try:
-        with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return load_favorites_state()["favorites"]
     except Exception as e:
         print(f"Error reading favorites: {e}")
         return []
@@ -194,7 +205,7 @@ async def save_favorites(favorites: Any):
         }
         with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-        return {"status": "success"}
+        return payload
     except Exception as e:
         print(f"Error saving favorites: {e}")
         raise HTTPException(status_code=500, detail=str(e))

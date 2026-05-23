@@ -43,6 +43,15 @@
     });
     return [...byKey.values()].sort((x, y) => entryTime(y) - entryTime(x));
   }
+  function applyServerState(payload) {
+    const serverState = normalizePayload(payload);
+    const deleted = mergeDeleted(loadDeleted(), serverState.deleted);
+    const merged = mergeFavorites(load(), serverState.favorites, deleted);
+    localStorage.setItem(KEY, JSON.stringify(merged));
+    saveDeleted(deleted);
+    window.dispatchEvent(new CustomEvent('favoritesSynced'));
+    return { favorites: merged, deleted };
+  }
   
   function save(favs, deleted = loadDeleted()) { 
     localStorage.setItem(KEY, JSON.stringify(favs)); 
@@ -55,28 +64,34 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ favorites: favs, deleted })
-    }).catch(err => console.error('Failed to sync favorites to server:', err));
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(payload => {
+        if (payload) applyServerState(payload);
+      })
+      .catch(err => console.error('Failed to sync favorites to server:', err));
   }
 
-  const ready = fetch('/api/favorites')
-    .then(r => r.ok ? r.json() : [])
+  function fetchServerState() {
+    return fetch('/api/favorites/state', { cache: 'no-store' })
+      .then(r => {
+        if (r.ok) return r.json();
+        return fetch('/api/favorites', { cache: 'no-store' }).then(fallback => fallback.ok ? fallback.json() : []);
+      });
+  }
+
+  const ready = fetchServerState()
     .then(serverPayload => {
-      const serverState = normalizePayload(serverPayload);
-      const localFavs = load();
-      const deleted = mergeDeleted(loadDeleted(), serverState.deleted);
-      const merged = mergeFavorites(localFavs, serverState.favorites, deleted);
-      const serverJson = JSON.stringify(serverState);
-      const mergedState = { favorites: merged, deleted };
+      const before = normalizePayload(serverPayload);
+      const serverJson = JSON.stringify(before);
+      const mergedState = applyServerState(serverPayload);
       const mergedJson = JSON.stringify(mergedState);
-      localStorage.setItem(KEY, JSON.stringify(merged));
-      saveDeleted(deleted);
-      console.log('Favorites synced:', merged.length, 'items');
-      window.dispatchEvent(new CustomEvent('favoritesSynced'));
+      console.log('Favorites synced:', mergedState.favorites.length, 'items');
 
       if (mergedJson !== serverJson) {
-        syncToServer(merged, deleted);
+        syncToServer(mergedState.favorites, mergedState.deleted);
       }
-      return merged;
+      return mergedState.favorites;
     })
     .catch(err => {
       console.warn('Server sync failed, using local storage only:', err);
