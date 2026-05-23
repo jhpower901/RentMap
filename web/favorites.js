@@ -2,49 +2,79 @@
   'use strict';
 
   const KEY = 'rentmap_favorites';
+  const DELETED_KEY = 'rentmap_favorites_deleted';
 
   function fk(id, source) { return String(source) + '::' + String(id); }
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { return []; } }
+  function loadDeleted() { try { return JSON.parse(localStorage.getItem(DELETED_KEY) || '{}'); } catch (_) { return {}; } }
+  function saveDeleted(deleted) { localStorage.setItem(DELETED_KEY, JSON.stringify(deleted || {})); }
   function entryTime(entry) {
     const t = Date.parse(entry && entry.savedAt);
     return Number.isFinite(t) ? t : 0;
   }
-  function mergeFavorites(a, b) {
+  function deletedTime(deleted, key) {
+    const t = Date.parse(deleted && deleted[key]);
+    return Number.isFinite(t) ? t : 0;
+  }
+  function normalizePayload(payload) {
+    if (Array.isArray(payload)) return { favorites: payload, deleted: {} };
+    if (payload && typeof payload === 'object') {
+      return {
+        favorites: Array.isArray(payload.favorites) ? payload.favorites : [],
+        deleted: payload.deleted && typeof payload.deleted === 'object' ? payload.deleted : {},
+      };
+    }
+    return { favorites: [], deleted: {} };
+  }
+  function mergeDeleted(a, b) {
+    const out = { ...(a || {}) };
+    Object.entries(b || {}).forEach(([key, value]) => {
+      if (!out[key] || deletedTime({ [key]: value }, key) > deletedTime(out, key)) out[key] = value;
+    });
+    return out;
+  }
+  function mergeFavorites(a, b, deleted) {
     const byKey = new Map();
     [...(a || []), ...(b || [])].forEach(entry => {
       if (!entry || !entry.key) return;
+      if (deletedTime(deleted, entry.key) >= entryTime(entry)) return;
       const prev = byKey.get(entry.key);
       if (!prev || entryTime(entry) >= entryTime(prev)) byKey.set(entry.key, entry);
     });
     return [...byKey.values()].sort((x, y) => entryTime(y) - entryTime(x));
   }
   
-  function save(favs) { 
+  function save(favs, deleted = loadDeleted()) { 
     localStorage.setItem(KEY, JSON.stringify(favs)); 
-    syncToServer(favs);
+    saveDeleted(deleted);
+    syncToServer(favs, deleted);
   }
 
-  function syncToServer(favs) {
+  function syncToServer(favs, deleted = loadDeleted()) {
     return fetch('/api/favorites', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(favs)
+      body: JSON.stringify({ favorites: favs, deleted })
     }).catch(err => console.error('Failed to sync favorites to server:', err));
   }
 
   const ready = fetch('/api/favorites')
     .then(r => r.ok ? r.json() : [])
-    .then(serverFavs => {
+    .then(serverPayload => {
+      const serverState = normalizePayload(serverPayload);
       const localFavs = load();
-      const merged = mergeFavorites(localFavs, Array.isArray(serverFavs) ? serverFavs : []);
-      const serverJson = JSON.stringify(serverFavs || []);
-      const mergedJson = JSON.stringify(merged);
+      const deleted = mergeDeleted(loadDeleted(), serverState.deleted);
+      const merged = mergeFavorites(localFavs, serverState.favorites, deleted);
+      const serverJson = JSON.stringify(serverState);
+      const mergedState = { favorites: merged, deleted };
+      const mergedJson = JSON.stringify(mergedState);
       localStorage.setItem(KEY, JSON.stringify(merged));
+      saveDeleted(deleted);
       console.log('Favorites synced:', merged.length, 'items');
       window.dispatchEvent(new CustomEvent('favoritesSynced'));
 
       if (mergedJson !== serverJson) {
-        syncToServer(merged);
+        syncToServer(merged, deleted);
       }
       return merged;
     })
@@ -59,7 +89,9 @@
 
   function add(listing) {
     const favs = load();
+    const deleted = loadDeleted();
     const k = fk(listing.id, listing.source);
+    delete deleted[k];
     const i = favs.findIndex(f => f.key === k);
     const entry = {
       key: k, id: listing.id, source: listing.source,
@@ -67,10 +99,15 @@
     };
     if (i >= 0) { entry.rating = favs[i].rating; entry.notes = favs[i].notes; favs[i] = entry; }
     else favs.push(entry);
-    save(favs);
+    save(favs, deleted);
   }
 
-  function remove(id, source) { save(load().filter(f => f.key !== fk(id, source))); }
+  function remove(id, source) {
+    const k = fk(id, source);
+    const deleted = loadDeleted();
+    deleted[k] = new Date().toISOString();
+    save(load().filter(f => f.key !== k), deleted);
+  }
 
   function updateRating(id, source, rating) {
     const favs = load();
@@ -98,8 +135,10 @@
       img1: '', img2: '',
     };
     const favs = load();
+    const deleted = loadDeleted();
+    delete deleted[fk(id, 'manual')];
     favs.push({ key: fk(id, 'manual'), id, source: 'manual', data: listing, savedAt: new Date().toISOString(), rating: null, notes: data.notes || '' });
-    save(favs);
+    save(favs, deleted);
     return id;
   }
 

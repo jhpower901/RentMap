@@ -7,7 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Any
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -102,6 +102,48 @@ PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
+def normalize_favorites_payload(payload: Any) -> dict[str, Any]:
+    if isinstance(payload, list):
+        return {"favorites": payload, "deleted": {}}
+    if isinstance(payload, dict):
+        favorites = payload.get("favorites")
+        deleted = payload.get("deleted")
+        return {
+            "favorites": favorites if isinstance(favorites, list) else [],
+            "deleted": deleted if isinstance(deleted, dict) else {},
+        }
+    return {"favorites": [], "deleted": {}}
+
+def iso_time(value: Any) -> float:
+    if not isinstance(value, str):
+        return 0
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0
+
+def merge_deleted(*states: dict[str, Any]) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for state in states:
+        for key, value in state.get("deleted", {}).items():
+            if isinstance(key, str) and isinstance(value, str):
+                if iso_time(value) >= iso_time(merged.get(key)):
+                    merged[key] = value
+    return merged
+
+def filter_deleted(favorites: list[Any], deleted: dict[str, str]) -> list[Any]:
+    filtered = []
+    for entry in favorites:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("key")
+        if not key:
+            continue
+        if iso_time(deleted.get(key)) >= iso_time(entry.get("savedAt")):
+            continue
+        filtered.append(entry)
+    return filtered
+
 def get_fav_dir(source: str, id: str):
     # Sanitize path
     folder_name = f"{source}_{id}".replace(":", "_").replace("/", "_")
@@ -121,11 +163,21 @@ async def get_favorites():
         return []
 
 @app.post("/api/favorites")
-async def save_favorites(favorites: List[Any]):
+async def save_favorites(favorites: Any):
     try:
         os.makedirs(os.path.dirname(FAVORITES_FILE), exist_ok=True)
+        existing = {"favorites": [], "deleted": {}}
+        if os.path.exists(FAVORITES_FILE):
+            with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
+                existing = normalize_favorites_payload(json.load(f))
+        incoming = normalize_favorites_payload(favorites)
+        deleted = merge_deleted(existing, incoming)
+        payload = {
+            "favorites": filter_deleted(incoming["favorites"], deleted),
+            "deleted": deleted,
+        }
         with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
-            json.dump(favorites, f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
         return {"status": "success"}
     except Exception as e:
         print(f"Error saving favorites: {e}")
