@@ -4,8 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: rentmap-server
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
+    networks:
+      - proxy
     volumes:
       - ./data:/app/data
       - ./web:/app/web
@@ -14,9 +16,10 @@ services:
       - TZ=Asia/Seoul
     restart: unless-stopped
 
-  # Naver crawler runs in its own playwright-based container at a slower
-  # cadence (every 3 hours at :30 KST). Shares the data volume so the main
-  # container's hourly gen-web picks up the freshly-written CSV.
+  # Naver crawler runs in its own playwright-based container, in lock-step
+  # with the main container's hourly crawl. Shares the data volume so the
+  # main container's gen-web cron picks up the freshly-written CSV. Not on
+  # the proxy network — only Caddy needs to reach the server container.
   rentmap-naver:
     build:
       context: .
@@ -28,3 +31,7 @@ services:
     environment:
       - TZ=Asia/Seoul
     restart: unless-stopped
+
+networks:
+  proxy:
+    external: true
