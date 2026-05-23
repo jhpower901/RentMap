@@ -203,7 +203,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="data_zigbang.js"></script>
 <script src="data_naver.js"></script>
 <script src="favorites.js?v=20260523-sync2"></script>
-<script src="area-filter.js"></script>
+<script src="area-filter.js?v=20260523-area1"></script>
 <script>
 const CRITERIA = [
   { key: 'daylight',    label: '☀️ 채광',     desc: '자연채광·햇빛' },
@@ -222,6 +222,11 @@ const SRC_COLOR = { dabang:'#FF5C38', daangn:'#FF6F00', zigbang:'#6366F1', naver
 const SRC_NAME  = { dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버', manual:'직접추가' };
 const DATA_KEY  = { dabang:'DATA_DABANG', daangn:'DATA_DAANGN', zigbang:'DATA_ZIGBANG', naver:'DATA_NAVER' };
 const openFavKeys = new Set();
+let suppressSyncRenderUntil = 0;
+
+function suppressSyncRender(ms = 1500) {
+  suppressSyncRenderUntil = Math.max(suppressSyncRenderUntil, Date.now() + ms);
+}
 
 function availability(fav) {
   if (fav.source === 'manual') return 'manual';
@@ -448,6 +453,7 @@ function renderDetail(card, fav, sid) {
         if (n > 0) rating[critKey] = n;
         else delete rating[critKey];
         fav.rating = rating;
+        suppressSyncRender();
         Favorites.updateRating(fav.id, fav.source, rating);
         tr.querySelectorAll('.star').forEach(b => {
           const starVal = parseInt(b.dataset.n);
@@ -473,6 +479,7 @@ function renderDetail(card, fav, sid) {
     clearTimeout(notesTimer);
     notesTimer = setTimeout(() => {
       fav.notes = e.target.value;
+      suppressSyncRender(2000);
       Favorites.updateNotes(fav.id, fav.source, e.target.value);
     }, 600);
   });
@@ -606,7 +613,7 @@ function isEditingFavoriteDetail() {
 }
 
 window.addEventListener('favoritesSynced', () => {
-  if (isEditingFavoriteDetail()) return;
+  if (Date.now() < suppressSyncRenderUntil || isEditingFavoriteDetail()) return;
   renderList();
 });
 

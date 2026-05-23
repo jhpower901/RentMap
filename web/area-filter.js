@@ -8,7 +8,8 @@
   ];
   const STYLE = {
     color: '#6366F1', weight: 2, fillColor: '#6366F1',
-    fillOpacity: 0.08, dashArray: '6,4',
+    fillOpacity: 0.08, dashArray: '6,4', interactive: false,
+    className: 'area-filter-shape',
   };
 
   function clonePoints(pts) { return pts.map(p => [p[0], p[1]]); }
@@ -88,6 +89,7 @@
     style.id = 'area-filter-css';
     style.textContent = `
 .leaflet-container.area-drawing{cursor:crosshair !important}
+.area-filter-shape{pointer-events:none !important}
 .area-draw-banner{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1100;background:#6366F1;color:#fff;padding:7px 12px;border-radius:18px;box-shadow:0 2px 8px rgba(0,0,0,.25);font-size:12px;display:none;align-items:center;gap:8px;font-family:'Noto Sans KR',sans-serif;white-space:nowrap}
 .area-draw-banner.on{display:flex}
 .area-draw-banner button{background:rgba(255,255,255,.2);border:none;color:#fff;padding:3px 9px;border-radius:11px;cursor:pointer;font-size:11px;font-family:inherit}
@@ -148,15 +150,15 @@
     function renderDraft() {
       draft.group.clearLayers();
       draft.points.forEach((p, i) => {
-        L.circleMarker(p, { radius: 5, color: '#fff', weight: 2, fillColor: '#6366F1', fillOpacity: 1 })
+        L.circleMarker(p, { radius: 5, color: '#fff', weight: 2, fillColor: '#6366F1', fillOpacity: 1, interactive: false, className: 'area-filter-shape' })
           .bindTooltip(String(i + 1), { permanent: true, direction: 'top', offset: [0, -6] })
           .addTo(draft.group);
       });
       if (draft.points.length >= 2) {
-        L.polyline(draft.points, { color: '#6366F1', weight: 2, dashArray: '4,4' }).addTo(draft.group);
+        L.polyline(draft.points, { color: '#6366F1', weight: 2, dashArray: '4,4', interactive: false, className: 'area-filter-shape' }).addTo(draft.group);
       }
       if (draft.points.length >= 3) {
-        L.polygon(draft.points, Object.assign({}, STYLE, { weight: 0 })).addTo(draft.group);
+        L.polygon(draft.points, Object.assign({}, STYLE, { weight: 0, interactive: false })).addTo(draft.group);
       }
       updateBanner();
     }
