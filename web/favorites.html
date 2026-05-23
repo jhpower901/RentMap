@@ -217,6 +217,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="data_naver.js"></script>
 <script src="favorites.js?v=20260524-detail1"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
+<script src="listing-info.js?v=20260524-info1"></script>
 <script>
 const CRITERIA = [
   { key: 'daylight',    label: '☀️ 채광',     desc: '자연채광·햇빛' },
@@ -274,24 +275,11 @@ function displayAgency(fav) {
   return raw || '(중개사 정보 없음)';
 }
 
-// Daangn list API returns enum codes for room_type; map to Korean labels.
-const DAANGN_TYPE_LABEL = {
-  ONE_ROOM: '원룸',
-  OPEN_ONE_ROOM: '오픈형 원룸',
-  SPLIT_ONE_ROOM: '분리형 원룸',
-  TWO_ROOM: '투룸',
-  THREE_ROOM: '쓰리룸 이상',
-  OFFICETEL: '오피스텔',
-  APARTMENT: '아파트',
-  VILLA: '빌라/연립',
-  HOUSE: '단독/다가구',
-};
-
-function esc(v) {
-  return String(v == null ? '' : v)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+// esc/typeLabel/buildSection live in web/listing-info.js so the platform
+// pages share the same renderer. Keep thin local aliases for readability.
+const esc = window.ListingInfo.esc;
+const displayType = (d, source) => window.ListingInfo.typeLabel(d, source);
+const buildListingInfoSection = (d, source) => window.ListingInfo.buildSection(d, source);
 
 // Existing favorites may have been saved before the data bundles started
 // exposing rich fields (description/options/parking/...). When the live data
@@ -304,66 +292,6 @@ function freshData(fav) {
   const live = window[k].find(r => String(r.id) === String(fav.id));
   if (!live) return base;
   return { ...base, ...live };
-}
-
-function displayType(d, source) {
-  const raw = d.type || '';
-  if (source === 'daangn' && DAANGN_TYPE_LABEL[raw]) return DAANGN_TYPE_LABEL[raw];
-  return raw;
-}
-
-function buildListingInfoSection(d, source) {
-  const typeLabel = displayType(d, source);
-  const pairs = [
-    ['용도',     d.building_use],
-    ['방유형',   typeLabel],
-    ['구조',     d.room_structure],
-    ['층 구조',  d.duplex],
-    ['방향',     d.direction],
-    ['방수',     d.room_count],
-    ['욕실',     d.bathroom_count],
-    ['주차',     d.parking],
-    ['입주',     d.move_in],
-    ['사용승인', d.approval_date],
-  ].filter(([, v]) => v != null && String(v).trim() !== '');
-
-  const description = (d.description || '').trim();
-  const options = (d.options || '').trim();
-  const security = (d.security_options || '').trim();
-
-  if (!pairs.length && !description && !options && !security) return '';
-
-  const gridHtml = pairs.length
-    ? `<div class="info-grid">${pairs.map(([k, v]) =>
-        `<div class="info-item"><span class="info-key">${k}</span><span class="info-val">${esc(v)}</span></div>`
-      ).join('')}</div>`
-    : '';
-
-  const tagsHtml = (raw, cls = '') => {
-    const items = raw.split(/[;,]\s*/).map(s => s.trim()).filter(Boolean);
-    if (!items.length) return '';
-    return `<div class="info-tags">${items.map(t =>
-      `<span class="info-tag${cls ? ' ' + cls : ''}">${esc(t)}</span>`
-    ).join('')}</div>`;
-  };
-
-  const descHtml = description
-    ? `<div class="info-long"><div class="info-long-key">📝 소개</div><div class="info-long-val">${esc(description)}</div></div>`
-    : '';
-  const optsHtml = options
-    ? `<div class="info-long"><div class="info-long-key">🛋️ 옵션</div>${tagsHtml(options)}</div>`
-    : '';
-  const secHtml = security
-    ? `<div class="info-long"><div class="info-long-key">🔒 보안</div>${tagsHtml(security, 'sec')}</div>`
-    : '';
-
-  return `
-    <div class="sec">
-      <div class="sec-title">📌 매물 정보</div>
-      ${gridHtml}
-      ${descHtml}${optsHtml}${secHtml}
-    </div>
-  `;
 }
 
 function buildCard(fav) {

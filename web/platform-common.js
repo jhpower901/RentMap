@@ -138,6 +138,19 @@
       });
     }
 
+    // Track which row IDs are currently expanded so render() can preserve
+    // their open state across re-renders (filter changes, sort clicks, etc.).
+    const openIds = new Set();
+
+    function detailRowFor(r, colspan) {
+      const html = window.ListingInfo ? window.ListingInfo.buildSection(r, source) : '';
+      if (!html) return null;
+      const tr = document.createElement('tr');
+      tr.className = 'detail-row';
+      tr.innerHTML = '<td colspan="' + colspan + '" class="detail-cell">' + html + '</td>';
+      return tr;
+    }
+
     function render() {
       const filtered = sortData(getFiltered(), sortCol, sortAsc);
       document.getElementById('countLabel').textContent = filtered.length + '건';
@@ -152,9 +165,11 @@
       });
 
       const tbody = document.getElementById('tbody');
+      const colspan = (document.querySelectorAll('#tbl thead th') || []).length || 13;
       tbody.innerHTML = '';
       filtered.forEach(r => {
         const tr = document.createElement('tr');
+        tr.dataset.rowId = r.id;
         const imgCell = r.img1
           ? '<img class="img-thumb" data-src="' + imageSrc(r.img1, source) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
           : '<div class="no-img">사진없음</div>';
@@ -175,9 +190,29 @@
             (window.Favorites && window.Favorites.isFav(r.id, r.source) ? '❤️' : '🤍') +
           '</button></td>';
         tr.addEventListener('click', e => {
-          if (e.target.classList && e.target.classList.contains('heart-btn')) return;
+          // Clicks on the heart, links, or anything inside an already-open
+          // detail row shouldn't trigger fly/toggle on the parent.
+          if (e.target.closest('.heart-btn, a, .detail-row')) return;
           const entry = markerMap.get(r.id);
-          if (entry && r.lat && r.lon) { map.flyTo([r.lat, r.lon], 17, { duration: 0.5 }); entry.marker.openPopup(); }
+          if (entry && r.lat && r.lon) {
+            map.flyTo([r.lat, r.lon], 17, { duration: 0.5 });
+            entry.marker.openPopup();
+          }
+          // Toggle the detail sub-row (information from normal_common's
+          // optional fields: description / options / parking / etc.).
+          const existing = tr.nextElementSibling;
+          if (existing && existing.classList.contains('detail-row')) {
+            existing.remove();
+            openIds.delete(r.id);
+            tr.classList.remove('row-open');
+            return;
+          }
+          const detail = detailRowFor(r, colspan);
+          if (detail) {
+            tr.insertAdjacentElement('afterend', detail);
+            openIds.add(r.id);
+            tr.classList.add('row-open');
+          }
         });
         const heart = tr.querySelector('.heart-btn');
         heart.addEventListener('click', e => {
@@ -193,6 +228,15 @@
           }
         });
         tbody.appendChild(tr);
+        // Re-attach the detail row if the user had this one open before the
+        // re-render (filter/sort cycle).
+        if (openIds.has(r.id)) {
+          const detail = detailRowFor(r, colspan);
+          if (detail) {
+            tbody.appendChild(detail);
+            tr.classList.add('row-open');
+          }
+        }
       });
       scheduleImageLoad(tbody);
     }
