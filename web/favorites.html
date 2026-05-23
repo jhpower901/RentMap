@@ -61,6 +61,19 @@ nav a.active-nav{background:#222;color:#fff}
 .sec:first-child{margin-top:0;padding-top:0;border-top:none}
 .sec-title{font-size:13px;font-weight:700;color:#555;margin-bottom:8px}
 
+/* Listing info */
+.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 14px;margin-bottom:4px}
+.info-item{display:flex;font-size:13px;line-height:1.4}
+.info-key{color:#888;width:60px;flex-shrink:0;font-weight:600}
+.info-val{color:#222;flex:1;word-break:break-all}
+.info-long{margin-top:10px;padding-top:8px;border-top:1px dashed #eee}
+.info-long:first-child{margin-top:0;padding-top:0;border-top:none}
+.info-long-key{font-size:12px;color:#666;font-weight:700;margin-bottom:4px}
+.info-long-val{font-size:13px;color:#333;line-height:1.55;white-space:pre-wrap;word-break:break-word;background:#fafafa;border-radius:6px;padding:8px 10px}
+.info-tags{display:flex;flex-wrap:wrap;gap:4px}
+.info-tag{font-size:11px;background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.info-tag.sec{background:#fef3c7;color:#92400e}
+
 /* Photos */
 .photo-grid{display:flex;flex-wrap:wrap;gap:8px}
 .photo-item{position:relative;width:90px;height:68px;flex-shrink:0}
@@ -202,7 +215,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="data_daangn.js"></script>
 <script src="data_zigbang.js"></script>
 <script src="data_naver.js"></script>
-<script src="favorites.js?v=20260523-sync2"></script>
+<script src="favorites.js?v=20260524-detail1"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script>
 const CRITERIA = [
@@ -259,6 +272,98 @@ function displayAgency(fav) {
   }
   if (fav.source === 'manual') return raw || '(직접추가)';
   return raw || '(중개사 정보 없음)';
+}
+
+// Daangn list API returns enum codes for room_type; map to Korean labels.
+const DAANGN_TYPE_LABEL = {
+  ONE_ROOM: '원룸',
+  OPEN_ONE_ROOM: '오픈형 원룸',
+  SPLIT_ONE_ROOM: '분리형 원룸',
+  TWO_ROOM: '투룸',
+  THREE_ROOM: '쓰리룸 이상',
+  OFFICETEL: '오피스텔',
+  APARTMENT: '아파트',
+  VILLA: '빌라/연립',
+  HOUSE: '단독/다가구',
+};
+
+function esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Existing favorites may have been saved before the data bundles started
+// exposing rich fields (description/options/parking/...). When the live data
+// bundle has a matching record we shallow-merge it over the stored snapshot
+// so the detail panel always shows the freshest info available.
+function freshData(fav) {
+  const base = fav.data || {};
+  const k = DATA_KEY[fav.source];
+  if (!k || !window[k]) return base;
+  const live = window[k].find(r => String(r.id) === String(fav.id));
+  if (!live) return base;
+  return { ...base, ...live };
+}
+
+function displayType(d, source) {
+  const raw = d.type || '';
+  if (source === 'daangn' && DAANGN_TYPE_LABEL[raw]) return DAANGN_TYPE_LABEL[raw];
+  return raw;
+}
+
+function buildListingInfoSection(d, source) {
+  const typeLabel = displayType(d, source);
+  const pairs = [
+    ['용도',     d.building_use],
+    ['방유형',   typeLabel],
+    ['구조',     d.room_structure],
+    ['층 구조',  d.duplex],
+    ['방향',     d.direction],
+    ['방수',     d.room_count],
+    ['욕실',     d.bathroom_count],
+    ['주차',     d.parking],
+    ['입주',     d.move_in],
+    ['사용승인', d.approval_date],
+  ].filter(([, v]) => v != null && String(v).trim() !== '');
+
+  const description = (d.description || '').trim();
+  const options = (d.options || '').trim();
+  const security = (d.security_options || '').trim();
+
+  if (!pairs.length && !description && !options && !security) return '';
+
+  const gridHtml = pairs.length
+    ? `<div class="info-grid">${pairs.map(([k, v]) =>
+        `<div class="info-item"><span class="info-key">${k}</span><span class="info-val">${esc(v)}</span></div>`
+      ).join('')}</div>`
+    : '';
+
+  const tagsHtml = (raw, cls = '') => {
+    const items = raw.split(/[;,]\s*/).map(s => s.trim()).filter(Boolean);
+    if (!items.length) return '';
+    return `<div class="info-tags">${items.map(t =>
+      `<span class="info-tag${cls ? ' ' + cls : ''}">${esc(t)}</span>`
+    ).join('')}</div>`;
+  };
+
+  const descHtml = description
+    ? `<div class="info-long"><div class="info-long-key">📝 소개</div><div class="info-long-val">${esc(description)}</div></div>`
+    : '';
+  const optsHtml = options
+    ? `<div class="info-long"><div class="info-long-key">🛋️ 옵션</div>${tagsHtml(options)}</div>`
+    : '';
+  const secHtml = security
+    ? `<div class="info-long"><div class="info-long-key">🔒 보안</div>${tagsHtml(security, 'sec')}</div>`
+    : '';
+
+  return `
+    <div class="sec">
+      <div class="sec-title">📌 매물 정보</div>
+      ${gridHtml}
+      ${descHtml}${optsHtml}${secHtml}
+    </div>
+  `;
 }
 
 function buildCard(fav) {
@@ -400,8 +505,10 @@ function renderDetail(card, fav, sid) {
 
   const score = calcScore(fav.rating);
   const savedAt = new Date(fav.savedAt).toLocaleDateString('ko-KR');
+  const infoSection = buildListingInfoSection(freshData(fav), fav.source);
 
   el.innerHTML = `
+    ${infoSection}
     <div class="sec">
       <div class="sec-title">📷 사진</div>
       <div class="photo-grid" id="pg_${sid}">
