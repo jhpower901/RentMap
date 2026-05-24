@@ -8,12 +8,18 @@ services:
       - "8000"
     networks:
       - proxy
+      - rentmap-db
     volumes:
       - ./data:/app/data
       - ./web:/app/web
       - ./scripts:/app/scripts
+      - ./db:/app/db                # migration .sql files
     environment:
       - TZ=Asia/Seoul
+      # DB connection — points at the postgres container in the external
+      # rentmap-db network. Password lives in db-stack/.env; we read it from
+      # the host env here so we never bake credentials into this file.
+      - RENTMAP_DB_URL=${RENTMAP_DB_URL:-postgresql://rentmap:${POSTGRES_PASSWORD}@rentmap-postgres:5432/rentmap}
       - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
       - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}
@@ -45,11 +51,15 @@ services:
       context: .
       dockerfile: Dockerfile.naver
     container_name: rentmap-naver
+    networks:
+      - rentmap-db
     volumes:
       - ./data:/app/data
       - ./scripts:/app/scripts
+      - ./db:/app/db
     environment:
       - TZ=Asia/Seoul
+      - RENTMAP_DB_URL=${RENTMAP_DB_URL:-postgresql://rentmap:${POSTGRES_PASSWORD}@rentmap-postgres:5432/rentmap}
       - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
       - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}
@@ -65,4 +75,6 @@ services:
 
 networks:
   proxy:
+    external: true
+  rentmap-db:
     external: true

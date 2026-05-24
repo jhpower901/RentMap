@@ -4,3 +4,4 @@ uvicorn
 python-multipart
 apscheduler>=3.10,<4
 tzdata
+psycopg[binary]>=3.1,<4

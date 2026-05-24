@@ -15,7 +15,7 @@ import shutil
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
@@ -295,19 +295,100 @@ def parse_manwon_from_text(value: Any) -> float | None:
     return round1(number / 10000) if number and number >= 10000 else number
 
 
-def relative_days_text(value: Any, now: datetime | None = None) -> str:
+def to_iso_date(value: Any, now: datetime | None = None) -> str:
+    """Coerce any plausible date input to ISO ``YYYY-MM-DD``. Returns ``""`` on failure.
+
+    Accepts:
+      - ISO datetime (with/without TZ suffix, microseconds, or space separator):
+        ``2026-05-21T11:35:04.346421Z``, ``2026-05-21 11:35:04``
+      - ISO date: ``2026-05-21``, ``2026/05/21``
+      - Korean dotted: ``2026.05.21`` (with optional trailing dot) or ``26.05.21``
+        (2-digit year → 20YY)
+      - 8-digit packed: ``20260521``
+      - Korean relative expressions: ``오늘``, ``어제``, ``그제`` / ``그저께``,
+        ``N일 전``, ``N개월 전`` (approx 30d), ``N{시간|분|초} 전`` → 오늘
+
+    Time-of-day component is intentionally dropped — every consumer column is
+    ``DATE`` in the DB schema. Caller can keep the raw string alongside if needed
+    for audit.
+    """
     text = to_text(value).strip()
     if not text:
         return ""
+
     now = now or datetime.now()
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%Y.%m.%d"):
+    today = now.date()
+
+    # Korean relative expressions — match before any digit-based parsing so
+    # the digit prefix in "5일 전" doesn't get caught by YYYYMMDD.
+    if text in ("오늘", "방금", "방금 전", "방금전", "지금"):
+        return today.isoformat()
+    if text == "어제":
+        return (today - timedelta(days=1)).isoformat()
+    if text in ("그제", "그저께"):
+        return (today - timedelta(days=2)).isoformat()
+    m = re.match(r"^\s*(\d+)\s*일\s*전\s*$", text)
+    if m:
+        return (today - timedelta(days=int(m.group(1)))).isoformat()
+    m = re.match(r"^\s*(\d+)\s*개월\s*전\s*$", text)
+    if m:
+        # Approximate — exact month math doesn't add value at day granularity.
+        return (today - timedelta(days=int(m.group(1)) * 30)).isoformat()
+    if re.match(r"^\s*\d+\s*(시간|분|초)\s*전\s*$", text):
+        return today.isoformat()
+
+    # 8-digit packed (YYYYMMDD), no separator. Common in naver payloads.
+    if re.fullmatch(r"\d{8}", text):
         try:
-            dt = datetime.strptime(text.rstrip("Z")[:26], fmt)
-            days = max(0, (now.date() - dt.date()).days)
-            return "오늘" if days == 0 else f"{days}일 전"
+            return datetime.strptime(text, "%Y%m%d").date().isoformat()
+        except ValueError:
+            return ""
+
+    # Korean dotted: YYYY.MM.DD or YY.MM.DD (sometimes trailing dot).
+    m = re.match(r"^(\d{2,4})\.(\d{1,2})\.(\d{1,2})\.?$", text)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if y < 100:
+            y += 2000  # YY → 20YY (every site we crawl is post-2000)
+        try:
+            return date(y, mo, d).isoformat()
+        except ValueError:
+            return ""
+
+    # ISO / slash. Trim TZ suffix and microsecond tail so strptime stays simple.
+    trimmed = text.rstrip("Z").strip()[:26]
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+    ):
+        try:
+            return datetime.strptime(trimmed, fmt).date().isoformat()
         except ValueError:
             continue
     return ""
+
+
+def days_ago_text(iso_date: str, now: datetime | None = None) -> str:
+    """Render an ISO ``YYYY-MM-DD`` as ``오늘`` / ``N일 전``. Empty/invalid → ``""``.
+
+    Future dates return ``""`` rather than a negative count — they usually mean
+    the source feed had a malformed date, not an actual future event.
+    """
+    if not iso_date:
+        return ""
+    try:
+        d = datetime.strptime(iso_date, "%Y-%m-%d").date()
+    except ValueError:
+        return ""
+    now = now or datetime.now()
+    days = (now.date() - d).days
+    if days < 0:
+        return ""
+    return "오늘" if days == 0 else f"{days}일 전"
 
 
 def split_area_pair(value: Any) -> tuple[str, str]:
@@ -498,8 +579,8 @@ def crawl_dabang(args: argparse.Namespace) -> None:
         images = first(detail, ["image_list", "imageList", "images", "photos", "room_images", "roomImages"])
         options = first(room_data, ["room_options", "roomOptions", "options", "option"])
         security = first(room_data, ["safeties", "safety_options", "safetyOptions", "security_options", "securityOptions"])
-        published_at = first(room_data, ["saved_time_str", "savedTimeStr", "created_at", "createdAt"])
-        confirmed_at = first(room_data, ["confirm_date_str", "confirmDateStr", "naver_verify_date_str", "naverVerifyDateStr"])
+        published_at = to_iso_date(first(room_data, ["saved_time_str", "savedTimeStr", "created_at", "createdAt"]))
+        confirmed_at = to_iso_date(first(room_data, ["confirm_date_str", "confirmDateStr", "naver_verify_date_str", "naverVerifyDateStr"]))
         records.append({
             "source": "dabang",
             "listing_no": listing_no,
@@ -528,8 +609,8 @@ def crawl_dabang(args: argparse.Namespace) -> None:
             "move_in": first(room_data, ["moving_date", "movingDate"]),
             "published_at": published_at,
             "confirmed_at": confirmed_at,
-            "listing_age_text": relative_days_text(published_at),
-            "approval_date": first(room_data, ["building_approval_date_str", "buildingApprovalDateStr"]),
+            "listing_age_text": days_ago_text(published_at),
+            "approval_date": to_iso_date(first(room_data, ["building_approval_date_str", "buildingApprovalDateStr"])),
             "maintenance_detail": maintenance_detail,
             "maintenance_basis": maintenance_basis,
             "maintenance_items": maintenance_items,
@@ -591,11 +672,6 @@ def normalize_phone(phone: Any) -> str:
     return text
 
 
-def format_date_text(value: Any) -> str:
-    text = to_text(value)
-    return f"{text[:4]}.{text[4:6]}.{text[6:]}" if re.match(r"^\d{8}$", text) else text
-
-
 def crawl_zigbang(args: argparse.Namespace) -> None:
     session = requests.Session()
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain, */*", "Origin": "https://www.zigbang.com", "Referer": "https://www.zigbang.com/"}
@@ -631,7 +707,7 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
             if excluded_maintenance_items:
                 maintenance_items = "; ".join([x for x in [maintenance_items, f"excluded: {excluded_maintenance_items}"] if x])
             images = item.get("images") or []
-            updated_at = item.get("updatedAt", "")
+            updated_at = to_iso_date(item.get("updatedAt", ""))
             area_m2 = get_area_m2(item.get("area"))
             rows.append({
                 "source": "zigbang",
@@ -665,11 +741,11 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
                 "direction": item.get("roomDirection", ""),
                 "parking": item.get("parkingAvailableText", ""),
                 "elevator": item.get("elevator", ""),
-                "move_in": item.get("moveinDate", ""),
+                "move_in": to_iso_date(item.get("moveinDate", "")),
                 "published_at": "",
                 "confirmed_at": updated_at,
-                "listing_age_text": relative_days_text(updated_at),
-                "approval_date": format_date_text(item.get("approveDate", "")),
+                "listing_age_text": days_ago_text(updated_at),
+                "approval_date": to_iso_date(item.get("approveDate", "")),
                 "residence_type": item.get("residenceType", ""),
                 "maintenance_detail": join_nested_text(manage_payload),
                 "maintenance_basis": "",
@@ -740,12 +816,13 @@ def crawl_daangn(args: argparse.Namespace) -> None:
         region = listing.get("_regionInfo") or {}
         lat, lon = detail.get("lat", ""), detail.get("lon", "")
         public_addr = detail.get("publicAddress") or listing.get("address", "")
-        approval = detail.get("approvalDate") or listing.get("buildingApprovalDate", "")
+        approval = to_iso_date(detail.get("approvalDate") or listing.get("buildingApprovalDate", ""))
         writer_type = detail.get("writerType") or listing.get("writerType", "")
         maintenance = float(listing.get("manageCost") or 0)
         rent = float(trade.get("monthlyPay") or 0)
         title = re.sub(r"\s*\|\s*[^\|]+$", "", to_text(listing.get("title", "")))
-        published_at = detail.get("publishedAt", "")
+        published_at = to_iso_date(detail.get("publishedAt", ""))
+        confirmed_at = to_iso_date(detail.get("updatedAt", ""))
         records.append({
             "source": "daangn",
             "listing_no": article_id,
@@ -775,10 +852,10 @@ def crawl_daangn(args: argparse.Namespace) -> None:
             "elevator": detail.get("elevator", ""),
             "pet_allowed": detail.get("petAllowed", ""),
             "loan_available": detail.get("loanAvailable", ""),
-            "move_in": detail.get("moveIn", ""),
+            "move_in": to_iso_date(detail.get("moveIn", "")),
             "published_at": published_at,
-            "confirmed_at": detail.get("updatedAt", ""),
-            "listing_age_text": relative_days_text(published_at),
+            "confirmed_at": confirmed_at,
+            "listing_age_text": days_ago_text(published_at or confirmed_at),
             "approval_date": approval,
             "maintenance_detail": detail.get("maintenanceDetail", ""),
             "maintenance_basis": detail.get("maintenanceBasis", ""),
@@ -1437,7 +1514,7 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
     region_parts = [to_text(first(article, [k])) for k in ("cityName", "divisionName", "sectionName")]
     region_addr = " ".join([p for p in region_parts if p])
     supply_area, exclusive_area = split_area_pair("/".join([to_text(x) for x in [first(article, ["supplySpace", "area1"]), first(article, ["exclusiveSpace", "area2"])] if x]))
-    confirmed_at = format_date_text(first(article, ["articleConfirmYmd", "confirmYmd"]))
+    confirmed_at = to_iso_date(first(article, ["articleConfirmYmd", "confirmYmd"]))
     return {
         "source": "naver_land",
         "listing_no": article_no,
@@ -1471,7 +1548,7 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
         "approval_date": confirmed_at,
         "published_at": "",
         "confirmed_at": confirmed_at,
-        "listing_age_text": relative_days_text(confirmed_at),
+        "listing_age_text": days_ago_text(confirmed_at),
         "maintenance_detail": "",
         "maintenance_basis": "",
         "maintenance_items": "",
@@ -1573,10 +1650,10 @@ def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> 
     if phone:
         _set("agent_phone", phone)
 
-    confirm_ymd = to_text(first(ad, ["articleConfirmYmd", "confirmYmd"]))
-    if re.match(r"^\d{8}$", confirm_ymd):
-        _set("confirmed_at", format_date_text(confirm_ymd))
-        _set("listing_age_text", relative_days_text(format_date_text(confirm_ymd)))
+    confirm_iso = to_iso_date(first(ad, ["articleConfirmYmd", "confirmYmd"]))
+    if confirm_iso:
+        _set("confirmed_at", confirm_iso)
+        _set("listing_age_text", days_ago_text(confirm_iso))
 
     # Room / bathroom counts
     room_cnt = first(ad, ["roomCount"])
@@ -1602,8 +1679,9 @@ def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> 
     # Move-in: prefer the actual date when present, otherwise the human label
     move_in_name = first(ad, ["moveInTypeName"])
     move_in_ymd = to_text(first(ad, ["moveInPossibleYmd"]))
-    if move_in_ymd and move_in_ymd != "NOW":
-        _set("move_in", move_in_ymd)
+    move_in_iso = to_iso_date(move_in_ymd) if move_in_ymd and move_in_ymd != "NOW" else ""
+    if move_in_iso:
+        _set("move_in", move_in_iso)
     elif move_in_name:
         _set("move_in", move_in_name)
 
@@ -1620,9 +1698,9 @@ def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> 
     # *building*'s use-approval date (construction-era), semantically different
     # from the list API's articleConfirmYmd (last-verified date). The column
     # name is intentionally generic; if you need both, split the schema.
-    aprvymd = to_text(first(af, ["buildingUseAprvYmd"]))
-    if re.match(r"^\d{8}$", aprvymd):
-        _set("approval_date", format_date_text(aprvymd))
+    aprv_iso = to_iso_date(first(af, ["buildingUseAprvYmd"]))
+    if aprv_iso:
+        _set("approval_date", aprv_iso)
 
     building_use = first_deep(detail, ["buildingUseName", "buildingUse", "principalUse", "principalUseName"])
     if building_use:
