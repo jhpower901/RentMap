@@ -3,7 +3,7 @@
 Runs inside the playwright-based image (Dockerfile.naver). Every hour at :00
 KST, in lock-step with the main `rentmap-server` container which crawls the
 other three sources at the same time. Both containers share `./data`, so
-the `rentmap-server`'s gen-web cron (at :00 and :30) picks up whichever
+the `rentmap-server`'s gen-web cron (at :50) picks up whichever
 naver CSV is currently on disk — and gen-web falls back to the most recent
 naver CSV if the current run hasn't finished yet.
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -29,9 +30,22 @@ def run_naver_crawl() -> None:
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     out_csv = ROOT / "data" / f"naver_land_ajou_{today}.csv"
     raw_json = ROOT / "data" / f"naver_land_ajou_{today}.raw.json"
-    print(f"[naver-scheduler] crawl-naver --date {today}", flush=True)
+    started = time.monotonic()
+    area = os.environ.get("RENTMAP_AREA_NAME", "")
+    center_lat = os.environ.get("RENTMAP_CENTER_LAT", "")
+    center_lng = os.environ.get("RENTMAP_CENTER_LNG", "")
+    radius_km = os.environ.get("RENTMAP_RADIUS_KM", "")
+    max_deposit = os.environ.get("RENTMAP_MAX_DEPOSIT", "")
+    max_rent = os.environ.get("RENTMAP_MAX_RENT", "")
+    print(
+        "[naver-scheduler] crawl-naver START "
+        f"date={today} area={area or '-'} center={center_lat},{center_lng} "
+        f"radius_km={radius_km or '-'} max_deposit={max_deposit or '-'} max_rent={max_rent or '-'} "
+        f"output={out_csv}",
+        flush=True,
+    )
     try:
-        subprocess.run(
+        result = subprocess.run(
             [
                 sys.executable,
                 str(RENTMAP_CLI),
@@ -49,9 +63,15 @@ def run_naver_crawl() -> None:
             # articles at ~250ms each (~5min) leaves comfortable headroom.
             timeout=45 * 60,
         )
-        print(f"[naver-scheduler] crawl-naver done", flush=True)
+        elapsed = time.monotonic() - started
+        status = "OK" if result.returncode == 0 else "FAILED"
+        print(f"[naver-scheduler] crawl-naver {status} exit={result.returncode} elapsed={elapsed:.1f}s output={out_csv}", flush=True)
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started
+        print(f"[naver-scheduler] crawl-naver TIMEOUT after {elapsed:.1f}s limit=2700s output={out_csv}: {exc}", flush=True)
     except Exception as exc:
-        print(f"[naver-scheduler] crawl-naver failed: {exc}", flush=True)
+        elapsed = time.monotonic() - started
+        print(f"[naver-scheduler] crawl-naver ERROR after {elapsed:.1f}s output={out_csv}: {exc}", flush=True)
 
 
 def main() -> None:

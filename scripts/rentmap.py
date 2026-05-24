@@ -440,7 +440,48 @@ def request_json(session: requests.Session, url: str, *, headers: dict[str, str]
     return resp.json()
 
 
+def _fmt_bbox(args: argparse.Namespace) -> str:
+    return (
+        f"lat={args.min_lat:.6f}..{args.max_lat:.6f} "
+        f"lng={args.min_lng:.6f}..{args.max_lng:.6f}"
+    )
+
+
+def _fmt_limit(value: int | float | str | None) -> str:
+    if value in (None, "", NO_PRICE_LIMIT_MANWON):
+        return "none"
+    return str(value)
+
+
+def _target_area() -> str:
+    return os.environ.get("RENTMAP_AREA_NAME") or "unspecified"
+
+
+def _log_crawl_start(source: str, args: argparse.Namespace, *, extra: str = "") -> None:
+    parts = [
+        f"[crawl:{source}] START",
+        f"area={_target_area()}",
+        f"bbox=({_fmt_bbox(args)})",
+    ]
+    if extra:
+        parts.append(extra)
+    print(" ".join(parts), flush=True)
+
+
+def _log_crawl_done(source: str, rows: int, output_csv: str, elapsed_s: float) -> None:
+    print(f"[crawl:{source}] DONE rows={rows} output={output_csv} elapsed={elapsed_s:.1f}s", flush=True)
+
+
 def crawl_dabang(args: argparse.Namespace) -> None:
+    started = time.monotonic()
+    _log_crawl_start(
+        "dabang",
+        args,
+        extra=(
+            f"source=dabang-api zoom={args.zoom} "
+            f"max_deposit={_fmt_limit(args.max_deposit)} max_rent={_fmt_limit(args.max_rent)}"
+        ),
+    )
     session = requests.Session()
     headers = {
         "Accept": "application/json, text/plain, */*",
@@ -476,7 +517,7 @@ def crawl_dabang(args: argparse.Namespace) -> None:
     encoded_filters = quote(json.dumps(filters, ensure_ascii=False, separators=(",", ":")))
     encoded_bbox = quote(json.dumps(bbox, ensure_ascii=False, separators=(",", ":")))
 
-    print("Fetching Dabang list...")
+    print(f"[crawl:dabang] fetching list pages", flush=True)
     rooms: list[dict[str, Any]] = []
     page = 1
     while True:
@@ -489,7 +530,7 @@ def crawl_dabang(args: argparse.Namespace) -> None:
         page += 1
     if not rooms:
         raise RuntimeError("No Dabang rooms found.")
-    print(f"Found {len(rooms)} list rows. Fetching details...")
+    print(f"[crawl:dabang] list_rows={len(rooms)} detail_fetch=yes", flush=True)
 
     detail_headers = dict(headers)
     detail_headers["D-Api-Version"] = "3.0.1"
@@ -630,7 +671,7 @@ def crawl_dabang(args: argparse.Namespace) -> None:
     if args.raw_json:
         Path(args.raw_json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.raw_json).write_text(json.dumps(raw_details, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Wrote {len(records)} rows to {args.output_csv}")
+    _log_crawl_done("dabang", len(records), args.output_csv, time.monotonic() - started)
 
 
 def best_address(obj: dict[str, Any], names: list[str]) -> str:
@@ -674,23 +715,32 @@ def normalize_phone(phone: Any) -> str:
 
 
 def crawl_zigbang(args: argparse.Namespace) -> None:
+    started = time.monotonic()
+    _log_crawl_start(
+        "zigbang",
+        args,
+        extra=(
+            f"source=zigbang-api geohashes={','.join(args.geohashes)} "
+            f"max_deposit={_fmt_limit(args.max_deposit_manwon)} max_rent={_fmt_limit(args.max_rent_manwon)}"
+        ),
+    )
     session = requests.Session()
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain, */*", "Origin": "https://www.zigbang.com", "Referer": "https://www.zigbang.com/"}
     items_by_id: dict[str, dict[str, Any]] = {}
     for geohash in args.geohashes:
-        print(f"Fetching Zigbang list {geohash}")
+        print(f"[crawl:zigbang] fetching list geohash={geohash}", flush=True)
         url = f"https://apis.zigbang.com/v2/items/oneroom?geohash={quote(geohash)}&depositMin=0&rentMin=0&salesTypes%5B0%5D=%EC%9B%94%EC%84%B8&domain=zigbang&checkAnyItemWithoutFilter=true"
         payload = request_json(session, url, headers=headers)
         for item in payload.get("items", []):
             lat, lng = float(item.get("lat", 0)), float(item.get("lng", 0))
             if args.min_lat <= lat <= args.max_lat and args.min_lng <= lng <= args.max_lng:
                 items_by_id[to_text(item.get("itemId"))] = item
-    print(f"Detail candidates in bbox: {len(items_by_id)}")
+    print(f"[crawl:zigbang] detail_candidates_in_bbox={len(items_by_id)}", flush=True)
 
     rows: list[dict[str, Any]] = []
     for idx, item_id in enumerate(sorted(items_by_id), 1):
         if idx % 20 == 0:
-            print(f"Fetched details: {idx}/{len(items_by_id)}")
+            print(f"[crawl:zigbang] detail_progress={idx}/{len(items_by_id)}", flush=True)
         try:
             detail = request_json(session, f"https://apis.zigbang.com/v3/items/{quote(item_id)}", headers=headers)
             item = detail.get("item")
@@ -766,7 +816,7 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
             print(f"WARNING: Failed detail {item_id}: {exc}", file=sys.stderr)
     rows.sort(key=lambda r: (to_text(r["agency"]), float_or_inf(r["rent_manwon"]), float_or_inf(r["deposit_manwon"])))
     write_csv(Path(args.output_csv), rows, ZIGBANG_COLUMNS)
-    print(f"Wrote {len(rows)} rows to {args.output_csv}")
+    _log_crawl_done("zigbang", len(rows), args.output_csv, time.monotonic() - started)
     _reconcile_after_crawl("zigbang", rows, "zigbang")
 
 
@@ -796,26 +846,36 @@ def get_utf8(session: requests.Session, url: str, delay_ms: int = 0) -> str:
 
 
 def crawl_daangn(args: argparse.Namespace) -> None:
+    started = time.monotonic()
+    _log_crawl_start(
+        "daangn",
+        args,
+        extra=(
+            f"source=daangn-region-pages region_ids={','.join(str(x) for x in args.region_ids)} "
+            f"max_deposit={_fmt_limit(args.max_deposit)} max_rent={_fmt_limit(args.max_rent)} "
+            f"detail_fetch={not args.skip_detail}"
+        ),
+    )
     valid_types = {"SPLIT_ONE_ROOM", "OPEN_ONE_ROOM", "TWO_ROOM", "OFFICETEL"}
     session = requests.Session()
     all_raw: list[dict[str, Any]] = []
     seen: set[str] = set()
-    print(f"Fetching Daangn listings from {len(args.region_ids)} regions...")
+    print(f"[crawl:daangn] fetching regions={len(args.region_ids)}", flush=True)
     for region_id in args.region_ids:
         listings = get_daangn_listings(session, region_id, args.max_deposit, args.max_rent, valid_types)
-        print(f"  Region {region_id}: {len(listings)} listings within budget")
+        print(f"[crawl:daangn] region={region_id} listings_within_budget={len(listings)}", flush=True)
         for listing in listings:
             article_id = article_id_from_url(listing.get("webUrl", ""))
             if not article_id or article_id in seen:
                 continue
             seen.add(article_id)
             all_raw.append(listing)
-    print(f"Total unique listings: {len(all_raw)}")
+    print(f"[crawl:daangn] unique_listings={len(all_raw)}", flush=True)
 
     records: list[dict[str, Any]] = []
     for idx, listing in enumerate(all_raw, 1):
         article_id = article_id_from_url(listing.get("webUrl", ""))
-        print(f"[{idx}/{len(all_raw)}] {article_id}")
+        print(f"[crawl:daangn] detail_progress={idx}/{len(all_raw)} article_id={article_id}", flush=True)
         trades = listing.get("trades") or []
         trade = next((t for t in trades if t.get("type") == "MONTH"), {})
         detail = {} if args.skip_detail else get_daangn_article_detail(session, article_id)
@@ -876,10 +936,10 @@ def crawl_daangn(args: argparse.Namespace) -> None:
     if all(v != 0 for v in [args.min_lat, args.max_lat, args.min_lng, args.max_lng]):
         before = len(records)
         records = [r for r in records if bbox_ok(r.get("latitude"), r.get("longitude"), args)]
-        print(f"Bbox filter: {before} -> {len(records)} records")
+        print(f"[crawl:daangn] bbox_filter rows_before={before} rows_after={len(records)}", flush=True)
     records.sort(key=lambda r: (to_text(r["region_depth3"]), float_or_inf(r["total_monthly_manwon"]), float_or_inf(r["rent_manwon"])))
     write_csv(Path(args.output_csv), records, DAANGN_COLUMNS)
-    print(f"Wrote {len(records)} rows to {args.output_csv}")
+    _log_crawl_done("daangn", len(records), args.output_csv, time.monotonic() - started)
     _reconcile_after_crawl("daangn", records, "daangn")
 
 
@@ -1128,8 +1188,17 @@ async def _paginate_naver_cortarno(context: Any, template_url: str, cortarno: st
 
 
 async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> None:
+    started = time.monotonic()
     urls = args.urls or default_naver_urls()
     explicit_cortarnos = default_naver_cortarnos()
+    _log_crawl_start(
+        "naver",
+        args,
+        extra=(
+            f"source=naver-land urls={len(urls)} explicit_cortarnos={len(explicit_cortarnos)} "
+            f"max_pages={args.max_pages} detail_fetch={not getattr(args, 'skip_detail', False)}"
+        ),
+    )
     chrome = find_chrome(args.chrome_path)
     async with async_playwright() as p:
         launch_options: dict[str, Any] = {
@@ -1172,7 +1241,7 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
             records: list[dict[str, Any]] = []
             raw_payloads: list[Any] = []
             for idx, url in enumerate(urls, 1):
-                print(f"\nCrawling Naver URL {idx}/{len(urls)}: {url}")
+                print(f"[crawl:naver] url_progress={idx}/{len(urls)} url={url}", flush=True)
                 one_records, payloads, cortarno = await crawl_naver_one(page, context, url, article_headers, args, seen_cortarnos)
                 raw_payloads.extend(payloads)
                 new_count = 0
@@ -1184,8 +1253,8 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                         seen.add(key)
                     records.append(record)
                     new_count += 1
-                print(f"  Found {len(one_records)} in bbox, {new_count} new after dedup (cortarNo={cortarno or '?'})")
-            print(f"\nList API (grid pass): {len(records)} unique articles across {len(seen_cortarnos)} cortarNos, {len(raw_payloads)} payload pages")
+                print(f"[crawl:naver] url_result in_bbox={len(one_records)} new_after_dedup={new_count} cortarNo={cortarno or '?'}", flush=True)
+            print(f"[crawl:naver] grid_pass unique_articles={len(records)} cortarNos={len(seen_cortarnos)} payload_pages={len(raw_payloads)}", flush=True)
 
             # Coverage backstop: paginate every cortarNo from RENTMAP_NAVER_CORTARNOS
             # that the grid didn't already cover. Defends against Naver's
@@ -1196,7 +1265,7 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
             missing_cortarnos = [cn for cn in explicit_cortarnos if cn not in seen_cortarnos]
             if missing_cortarnos and template and article_headers:
                 center = get_map_center(urls[0]) if urls else {"latitude": 0, "longitude": 0, "zoom": "16"}
-                print(f"\nDirect-pagination pass: {len(missing_cortarnos)} cortarNos missed by grid: {missing_cortarnos}")
+                print(f"[crawl:naver] direct_pass missing_cortarnos={len(missing_cortarnos)} cortarNos={missing_cortarnos}", flush=True)
                 for cn in missing_cortarnos:
                     payloads = await _paginate_naver_cortarno(context, template, cn, article_headers, args)
                     raw_payloads.extend(payloads)
@@ -1214,11 +1283,11 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                                 seen.add(key)
                             records.append(record)
                             new_count += 1
-                    print(f"  [direct cortarNo={cn}] {len(payloads)} pages, {new_count} new in-bbox articles")
+                    print(f"[crawl:naver] direct_cortarNo={cn} pages={len(payloads)} new_in_bbox={new_count}", flush=True)
             elif missing_cortarnos and not template:
                 print(f"[naver] {len(missing_cortarnos)} explicit cortarNos requested but no list URL captured; skipping direct pass", file=sys.stderr)
 
-            print(f"\nList API total: {len(records)} unique articles across {len(seen_cortarnos)} cortarNos, {len(raw_payloads)} payload pages")
+            print(f"[crawl:naver] list_total unique_articles={len(records)} cortarNos={len(seen_cortarnos)} payload_pages={len(raw_payloads)}", flush=True)
 
             # Detail-API enrichment: list API never returns the exact address or
             # room/parking/move-in/description fields. We call /api/articles/{no}
@@ -1230,19 +1299,19 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                 if detail_source is None:
                     print("[naver-detail] no captured headers; skipping detail enrichment", file=sys.stderr)
                 else:
-                    print(f"\nFetching Naver detail API for {len(records)} bbox articles...")
+                    print(f"[crawl:naver] fetching_details articles={len(records)}", flush=True)
                     detail_ok = 0
                     for i, record in enumerate(records, 1):
                         article_no = to_text(record.get("listing_no"))
                         if not article_no:
                             continue
                         if i % NAVER_PROGRESS_EVERY == 0:
-                            print(f"  detail: {i}/{len(records)} ({detail_ok} enriched)", flush=True)
+                            print(f"[crawl:naver] detail_progress={i}/{len(records)} enriched={detail_ok}", flush=True)
                         detail = await fetch_naver_article_detail(context, article_no, detail_source)
                         if detail:
                             enrich_from_naver_detail(record, detail)
                             detail_ok += 1
-                    print(f"  detail: {len(records)}/{len(records)} done ({detail_ok} enriched)")
+                    print(f"[crawl:naver] detail_done={len(records)}/{len(records)} enriched={detail_ok}", flush=True)
             elif skip_detail:
                 print("[naver-detail] --skip-detail set; leaving list-API placeholders in place")
 
@@ -1252,7 +1321,7 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
             if args.raw_json:
                 Path(args.raw_json).parent.mkdir(parents=True, exist_ok=True)
                 Path(args.raw_json).write_text(json.dumps(raw_payloads, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"\nWrote {len(records)} rows to {args.output_csv}")
+            _log_crawl_done("naver", len(records), args.output_csv, time.monotonic() - started)
         finally:
             await browser.close()
 
@@ -2317,6 +2386,8 @@ def _run_parallel_crawlers(jobs: list[tuple[str, Any, argparse.Namespace]]) -> d
     errors: dict[str, BaseException | None] = {label: None for label, _, _ in jobs}
     start = time.time()
     print(f"[crawl-all] launching {len(jobs)} crawlers in parallel: {', '.join(l for l, _, _ in jobs)}", flush=True)
+    for label, _, ns in jobs:
+        print(f"[crawl-all] [{label}] target output={getattr(ns, 'output_csv', '-')} bbox=({_fmt_bbox(ns)})", flush=True)
     with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
         future_to_label = {ex.submit(fn, ns): label for label, fn, ns in jobs}
         for fut in as_completed(future_to_label):
@@ -2333,12 +2404,22 @@ def _run_parallel_crawlers(jobs: list[tuple[str, Any, argparse.Namespace]]) -> d
 
 
 def crawl_all(args: argparse.Namespace) -> None:
+    started = time.monotonic()
     bbox = default_bbox_from_env()
     cr = _resolve_center_radius(args)
     if cr is not None:
         bbox = bbox_from_center_radius(*cr)
     max_deposit = default_max_deposit()
     max_rent = default_max_rent()
+    min_lat, max_lat, min_lng, max_lng = bbox
+    print(
+        "[crawl-all] START "
+        f"date={args.date} area={_target_area()} "
+        f"bbox=(lat={min_lat:.6f}..{max_lat:.6f} lng={min_lng:.6f}..{max_lng:.6f}) "
+        f"max_deposit={_fmt_limit(max_deposit)} max_rent={_fmt_limit(max_rent)} "
+        f"skip_naver={args.skip_naver} gen_web={args.gen_web}",
+        flush=True,
+    )
 
     # Dabang/Zigbang/Daangn are I/O-bound (external HTTP), no shared state, and
     # each writes to its own CSV — perfect candidates for thread-parallel.
@@ -2352,12 +2433,15 @@ def crawl_all(args: argparse.Namespace) -> None:
         # by Daangn region-ID are excluded post-fetch.
         ("daangn",  crawl_daangn,  _daangn_args(args.date, bbox, max_deposit, max_rent)),
     ]
-    _run_parallel_crawlers(jobs)
+    errors = _run_parallel_crawlers(jobs)
+    failed = [label for label, exc in errors.items() if exc is not None]
+    print(f"[crawl-all] crawler_summary ok={len(jobs) - len(failed)} failed={failed or []}", flush=True)
 
     if not args.skip_naver:
         crawl_naver(_naver_args(args.date, bbox))
     if args.gen_web:
         gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=args.date))
+    print(f"[crawl-all] DONE elapsed={time.monotonic() - started:.1f}s", flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:

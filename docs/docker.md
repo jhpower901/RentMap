@@ -6,7 +6,7 @@ RentMap runs as two long-lived containers via `docker compose`:
   port 8000 (favorites/photos persistence) plus an APScheduler with two cron
   jobs (all times KST):
   - **Every hour at :00** — `crawl-all --skip-naver` (dabang + zigbang + daangn)
-  - **Every 30 minutes (:00 and :30)** — `gen-web` regenerates platform HTML
+  - **Every hour at :50** — `gen-web` regenerates platform HTML
     pages from whatever CSVs are currently on disk
 - **`rentmap-naver`** ([Dockerfile.naver](../Dockerfile.naver), Playwright base)
   — runs `crawl-naver` every hour at :00 in lock-step with the main container.
@@ -17,8 +17,8 @@ boot, slow naver crawl still running, etc.) it falls back to the most recent
 CSV for that source. The web stays usable even when one source is mid-crawl
 or has failed.
 
-Both containers run startup-kick jobs shortly after boot so a fresh stack
-populates `data/` and `web/` without waiting for the first cron tick.
+The main container also runs startup-kick crawl and `gen-web` jobs shortly
+after boot so a fresh stack has pages without waiting for the first `:50` tick.
 
 ## Build & start
 
@@ -67,8 +67,8 @@ sh scripts/docker-naver.sh crawl-naver
 
 - Hourly crawl (dabang/zigbang/daangn): `CronTrigger(minute=0, ...)` in
   [scripts/server.py](../scripts/server.py), job id `hourly_crawl`.
-- gen-web cadence: `CronTrigger(minute="0,30", ...)` in the same file, job
-  id `gen_web_30m`.
+- gen-web cadence: `CronTrigger(minute=50, ...)` in the same file, job id
+  `gen_web_hourly_50`.
 - Naver crawl: `CronTrigger(minute=0, ...)` in
   [scripts/scheduler_naver.py](../scripts/scheduler_naver.py).
 

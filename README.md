@@ -12,7 +12,7 @@
 
 | 컨테이너 | 위치 | 역할 | 자동 스케줄 |
 |---|---|---|---|
-| `rentmap-server` | RentMap | dabang / zigbang / daangn 크롤 + `gen-web` + 웹서버(:8000) + webhook worker | 크롤 매시간 `:00`, `gen-web` `:00` / `:30`, webhook 매분 |
+| `rentmap-server` | RentMap | dabang / zigbang / daangn 크롤 + `gen-web` + 웹서버(:8000) + webhook worker | 크롤 매시간 `:00`, `gen-web` 매시간 `:50`, webhook 매분 |
 | `rentmap-naver`  | RentMap | naver 크롤 (playwright) | 매시간 `:00` |
 | `rentmap-postgres` | [`../db-stack/`](../db-stack/) (별 compose) | 매물 history DB. 크롤 후 reconcile이 incremental snapshot 적재 | — (상시) |
 

@@ -24,27 +24,49 @@ TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 
 
 def _run_rentmap(args: list[str], label: str, timeout_s: int) -> None:
-    print(f"[scheduler] {label}: rentmap {' '.join(args)}", flush=True)
+    started = time.monotonic()
+    command = " ".join(args)
+    print(f"[scheduler] {label}: START rentmap {command}", flush=True)
     try:
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(RENTMAP_CLI), *args],
             cwd=str(ROOT),
             check=False,
             timeout=timeout_s,
         )
-        print(f"[scheduler] {label}: done", flush=True)
+        elapsed = time.monotonic() - started
+        status = "OK" if result.returncode == 0 else "FAILED"
+        print(f"[scheduler] {label}: {status} exit={result.returncode} elapsed={elapsed:.1f}s rentmap {command}", flush=True)
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started
+        print(f"[scheduler] {label}: TIMEOUT after {elapsed:.1f}s limit={timeout_s}s rentmap {command}: {exc}", flush=True)
     except Exception as exc:
-        print(f"[scheduler] {label}: failed — {exc}", flush=True)
+        elapsed = time.monotonic() - started
+        print(f"[scheduler] {label}: ERROR after {elapsed:.1f}s rentmap {command}: {exc}", flush=True)
 
 
 def run_hourly_crawl() -> None:
     today = datetime.now(TZ).strftime("%Y-%m-%d")
+    area = os.environ.get("RENTMAP_AREA_NAME", "")
+    center_lat = os.environ.get("RENTMAP_CENTER_LAT", "")
+    center_lng = os.environ.get("RENTMAP_CENTER_LNG", "")
+    radius_km = os.environ.get("RENTMAP_RADIUS_KM", "")
+    max_deposit = os.environ.get("RENTMAP_MAX_DEPOSIT", "")
+    max_rent = os.environ.get("RENTMAP_MAX_RENT", "")
+    print(
+        "[scheduler] hourly-crawl: target "
+        f"date={today} area={area or '-'} center={center_lat},{center_lng} "
+        f"radius_km={radius_km or '-'} max_deposit={max_deposit or '-'} max_rent={max_rent or '-'} "
+        "sources=dabang,zigbang,daangn",
+        flush=True,
+    )
     _run_rentmap(["crawl-all", "--skip-naver", "--date", today], label="hourly-crawl", timeout_s=50 * 60)
 
 
 def run_gen_web() -> None:
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     # gen_web is fault-tolerant: missing today's CSV falls back to most recent.
+    print(f"[scheduler] gen-web: target date={today} sources=db-auto-fallback", flush=True)
     _run_rentmap(["gen-web", "--date", today], label="gen-web", timeout_s=5 * 60)
 
 
@@ -81,18 +103,18 @@ async def lifespan(_app: FastAPI):
         coalesce=True,
         misfire_grace_time=30 * 60,
     )
-    # Every 30 minutes (:00 and :30) — regenerate web pages from whatever CSVs
-    # are present (gen-web falls back to most-recent files for missing sources).
+    # Every hour at :50, after the hourly crawlers have had time to finish.
+    # gen-web falls back to most-recent files for missing sources.
     scheduler.add_job(
         run_gen_web,
-        trigger=CronTrigger(minute="0,30", timezone=TZ),
-        id="gen_web_30m",
+        trigger=CronTrigger(minute=50, timezone=TZ),
+        id="gen_web_hourly_50",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=10 * 60,
     )
-    # Startup kicks — crawl shortly after boot, then gen-web a bit later so a
-    # fresh container ends up with rendered pages without waiting for the cron.
+    # Startup kicks crawl shortly after boot, then gen-web a bit later so a
+    # fresh container has pages without waiting for the first :50 cron.
     now = datetime.now(TZ)
     scheduler.add_job(
         run_hourly_crawl, trigger="date",
@@ -116,7 +138,7 @@ async def lifespan(_app: FastAPI):
         misfire_grace_time=30,
     )
     scheduler.start()
-    print("[scheduler] started — crawl at :00 hourly, gen-web at :00/:30, webhook-flush every minute (KST)", flush=True)
+    print("[scheduler] started - crawl at :00 hourly, gen-web at :50 hourly, webhook-flush every minute (KST)", flush=True)
     try:
         yield
     finally:
