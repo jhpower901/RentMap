@@ -27,9 +27,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Iterable
 
 import psycopg
@@ -50,6 +51,14 @@ PRICE_KEYS = (
 # Detail fields contribute to detail_hash *and* content_hash.
 # Listed explicitly (rather than "everything not in PRICE_KEYS") so a future
 # column added to the snapshot schema doesn't silently change every hash.
+#
+# ``raw_normalized_json`` is intentionally OUT of the hash. It's a catch-all
+# JSONB column for fields that don't have a normalized home yet, and its
+# contents drift between ingestion paths: a CSV replay's string-typed
+# ``"True"`` is not the same JSON as a live crawl's bool ``True``, even
+# though the underlying value is identical. Hashing it produces a flood of
+# false ``detail_changed`` events on the first crawl after a backfill. If
+# we later promote a raw key to a normalized column, add it to this list.
 DETAIL_KEYS = (
     "title", "description", "room_type_raw", "property_type",
     "address_raw", "road_address", "jibun_address",
@@ -59,7 +68,6 @@ DETAIL_KEYS = (
     "direction", "parking_raw", "move_in_raw", "move_in_available_date",
     "approval_date", "building_usage", "structure_type",
     "verified_at", "is_verified",
-    "raw_normalized_json",
 )
 
 
@@ -796,4 +804,66 @@ def reconcile_crawl(
     # Caller commits on success; we leave it open so callers can chain
     # multiple reconciles (e.g. one per platform) in one transaction if they
     # prefer. backfill.py commits after each platform.
+    return summary
+
+
+def reconcile_csv_rows_safely(
+    platform_code: str,
+    rows: list[dict[str, Any]],
+    label: str | None = None,
+    target_area: str | None = None,
+) -> CrawlSummary | None:
+    """Crawler-side wrapper: opens its own session, swallows every failure
+    mode so the CSV path keeps working when Postgres isn't.
+
+    Behaviour contract:
+    - DB not configured (``RENTMAP_DB_URL`` unset) → log one line, return None.
+    - DB unreachable / migration not applied → log the error, return None.
+    - Any error inside reconcile_crawl → log, return None. The crawl run row
+      that reconcile inserted before the failure already got marked 'failed'
+      and committed by reconcile itself, so the DB stays auditable.
+
+    ``RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS=1`` flips the worker to mark events
+    as already-sent — useful for the first few production runs to verify the
+    pipeline before opening the Discord firehose.
+    """
+    label = label or platform_code
+    try:
+        # Late import — keeps every CLI command runnable in containers that
+        # don't have psycopg installed yet (e.g. a CSV-only smoke environment).
+        import sys
+        from pathlib import Path as _Path
+
+        sys.path.insert(0, str(_Path(__file__).resolve().parent))
+        from db import session, DBConfigError  # noqa: WPS433
+    except ImportError as exc:
+        print(f"[reconcile] {label}: skipped — db module unavailable ({exc})")
+        return None
+
+    dry = os.environ.get("RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS", "").strip().lower() in ("1", "true", "yes")
+    try:
+        with session() as conn:
+            summary = reconcile_crawl(
+                conn,
+                platform_code=platform_code,
+                rows=rows,
+                crawled_at=datetime.now(timezone.utc),
+                target_area=target_area,
+                dry_run_webhooks=dry,
+            )
+    except DBConfigError as exc:
+        print(f"[reconcile] {label}: skipped — DB not configured ({exc})")
+        return None
+    except Exception as exc:  # noqa: BLE001 — last-resort safety net
+        print(f"[reconcile] {label}: failed (CSV write OK) — {type(exc).__name__}: {exc}")
+        return None
+
+    suffix = " [dry-run-webhooks]" if dry else ""
+    print(
+        f"[reconcile] {label}{suffix}: run={summary.crawl_run_id} "
+        f"disc={summary.discovered} Δprice={summary.price_changed} "
+        f"Δdetail={summary.detail_changed} unchanged={summary.unchanged} "
+        f"missing={summary.missing} removed={summary.removed} "
+        f"reappeared={summary.reappeared} errors={len(summary.errors)}"
+    )
     return summary

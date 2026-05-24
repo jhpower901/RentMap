@@ -626,6 +626,7 @@ def crawl_dabang(args: argparse.Namespace) -> None:
 
     records.sort(key=lambda r: (to_text(r["agency"]), float_or_inf(r["total_monthly_manwon"]), float_or_inf(r["rent_manwon"])))
     write_csv(Path(args.output_csv), records, DABANG_COLUMNS)
+    _reconcile_after_crawl("dabang", records, "dabang")
     if args.raw_json:
         Path(args.raw_json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.raw_json).write_text(json.dumps(raw_details, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -762,6 +763,7 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
     rows.sort(key=lambda r: (to_text(r["agency"]), float_or_inf(r["rent_manwon"]), float_or_inf(r["deposit_manwon"])))
     write_csv(Path(args.output_csv), rows, ZIGBANG_COLUMNS)
     print(f"Wrote {len(rows)} rows to {args.output_csv}")
+    _reconcile_after_crawl("zigbang", rows, "zigbang")
 
 
 def get_floor_text(floor: Any) -> str:
@@ -874,6 +876,7 @@ def crawl_daangn(args: argparse.Namespace) -> None:
     records.sort(key=lambda r: (to_text(r["region_depth3"]), float_or_inf(r["total_monthly_manwon"]), float_or_inf(r["rent_manwon"])))
     write_csv(Path(args.output_csv), records, DAANGN_COLUMNS)
     print(f"Wrote {len(records)} rows to {args.output_csv}")
+    _reconcile_after_crawl("daangn", records, "daangn")
 
 
 def get_daangn_listings(session: requests.Session, region_id: int, max_deposit: int, max_rent: int, valid_types: set[str]) -> list[dict[str, Any]]:
@@ -1241,6 +1244,7 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
 
             records.sort(key=lambda r: (to_text(r["agency"]), float_or_inf(r["total_monthly_manwon"])))
             write_csv(Path(args.output_csv), records, NAVER_COLUMNS)
+            _reconcile_after_crawl("naver_land", records, "naver")
             if args.raw_json:
                 Path(args.raw_json).parent.mkdir(parents=True, exist_ok=True)
                 Path(args.raw_json).write_text(json.dumps(raw_payloads, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1819,6 +1823,31 @@ def _latest_csv(data_dir: Path, prefix: str, target_date: str) -> Path | None:
         return target
     candidates = sorted(data_dir.glob(f"{prefix}_*.csv"))
     return candidates[-1] if candidates else None
+
+
+def _reconcile_after_crawl(platform_code: str, rows: list[dict[str, Any]], label: str) -> None:
+    """Hand a freshly-crawled record list to the DB reconcile engine.
+
+    All four crawlers call this immediately after ``write_csv`` so the CSV
+    remains the canonical "what we saw this run" snapshot **and** the DB
+    accumulates the incremental price/detail history that powers webhooks
+    and the sparkline API.
+
+    Robustness contract: this MUST NOT throw. reconcile is best-effort —
+    if Postgres is down, migrations aren't applied, or the module isn't
+    importable, the crawl keeps producing CSVs as before. Errors are logged
+    in a single line that's easy to grep for in the scheduler log.
+    """
+    try:
+        from reconcile import reconcile_csv_rows_safely  # late import
+    except ImportError as exc:
+        print(f"[reconcile] {label}: skipped — reconcile module unavailable ({exc})", file=sys.stderr)
+        return
+    target_area = os.environ.get("RENTMAP_AREA_NAME") or None
+    try:
+        reconcile_csv_rows_safely(platform_code, rows, label=label, target_area=target_area)
+    except Exception as exc:  # noqa: BLE001 — defensive
+        print(f"[reconcile] {label}: outer guard caught {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def _read_csv_lenient(data_dir: Path, prefix: str, target_date: str, label: str) -> list[dict[str, str]]:
