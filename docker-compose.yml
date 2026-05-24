@@ -20,6 +20,14 @@ services:
       # rentmap-db network. Password lives in db-stack/.env; we read it from
       # the host env here so we never bake credentials into this file.
       - RENTMAP_DB_URL=${RENTMAP_DB_URL:-postgresql://rentmap:${POSTGRES_PASSWORD}@rentmap-postgres:5432/rentmap}
+      # Discord webhook for listing change notifications. Unset → worker
+      # silently skips delivery (events still queue in DB for later). See
+      # docs/webhook-discord.md.
+      - RENTMAP_DISCORD_WEBHOOK_URL=${RENTMAP_DISCORD_WEBHOOK_URL:-}
+      # 1 = reconcile marks every event as already-sent so the worker never
+      # picks it up. Safety toggle for the first cron cycles after a schema
+      # change. Default 0 = live delivery.
+      - RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS=${RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS:-0}
       - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
       - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}
@@ -60,6 +68,9 @@ services:
     environment:
       - TZ=Asia/Seoul
       - RENTMAP_DB_URL=${RENTMAP_DB_URL:-postgresql://rentmap:${POSTGRES_PASSWORD}@rentmap-postgres:5432/rentmap}
+      # naver container itself doesn't run the webhook worker, but it does
+      # call reconcile after every crawl and honors the dry-run toggle.
+      - RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS=${RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS:-0}
       - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
       - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}

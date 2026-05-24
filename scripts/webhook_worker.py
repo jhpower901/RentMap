@@ -242,7 +242,15 @@ def flush_once(batch: int = DEFAULT_BATCH, dry_run: bool = False) -> dict[str, i
             payload = {"embeds": [embed]}
             attempts = row["webhook_attempts"] + 1
             try:
-                resp = requests.post(url, json=payload, timeout=10)
+                # Explicit User-Agent — Discord's Cloudflare front (error 1010)
+                # rejects the python-urllib default and at least some bare
+                # ``python-requests`` versions. requests already defaults to a
+                # workable UA, but pin it so a future libcurl/urllib3 shift
+                # doesn't silently start tripping the same wall.
+                resp = requests.post(
+                    url, json=payload, timeout=10,
+                    headers={"User-Agent": "RentMap-Webhook/1.0 (+rentmap)"},
+                )
             except requests.RequestException as exc:
                 next_try = now + _next_backoff(attempts)
                 _mark_retry(cur, row["event_id"], attempts, next_try, f"network: {exc}")
