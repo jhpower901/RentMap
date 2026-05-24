@@ -127,16 +127,60 @@ nav a.active-nav{background:#222;color:#fff}
 .field-row .field{flex:1}
 .modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
 @media(max-width:640px){
+  /* Strategy: cards fit screen width (no horizontal scroll on the list);
+     fonts shrink ~1 step across the board so a 360px viewport still shows
+     the whole row without wrapping awkwardly. The only thing we still let
+     scroll sideways is the eval table inside the detail panel — too dense
+     to compress without losing the comparison.
+
+     Aim for "readable without zooming, decisions possible without rotating
+     to landscape." Bigger phones (≥360px) should not need to scroll the
+     card itself at all. */
+  body{font-size:13px}
   nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .page{padding:10px}
-  .controls{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  nav a{padding:4px 9px;font-size:12px}
+  nav .brand{font-size:14px;margin-right:4px}
+  .page{padding:8px}
+  .controls{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:8px 10px}
   .controls>*{flex:0 0 auto}
-  .controls input[type=text]{width:180px}
-  #favList{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding-bottom:4px}
-  .fav-card{min-width:520px}
-  .fav-title{max-width:190px}
-  .fav-detail{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .eval-table{min-width:430px}
+  .controls input[type=text]{width:140px;font-size:12px}
+  .controls select{font-size:12px}
+  .count{font-size:12px}
+  .btn{padding:4px 9px;font-size:12px}
+
+  /* favorite card list — no more 520px min-width forcing a sideways scroll */
+  #favList{overflow-x:visible;padding-bottom:4px}
+  .fav-card{min-width:0;margin-bottom:8px;border-radius:8px}
+  .fav-header{padding:8px 10px;gap:6px}
+  .fav-title{max-width:100%;min-width:0;font-size:13px;flex:1 1 auto}
+  .fav-price{font-size:12px}
+  .fav-sub{font-size:11px;margin-top:1px}
+  .status-badge{font-size:10px;padding:1px 6px}
+  .score-chip{font-size:11px;padding:1px 6px}
+  .expand-arrow{font-size:11px}
+
+  /* detail panel: shrink content fonts; eval table is the only thing that
+     keeps its desktop width so the rating columns stay legible */
+  .fav-detail{padding:0 10px 10px}
+  .sec{padding:8px 0}
+  .sec-title{font-size:12px;margin-bottom:6px}
+  .info-grid{gap:3px 8px}
+  .info-item{font-size:12px;line-height:1.35}
+  .info-key{width:52px;font-size:11px}
+  .info-long{margin-top:7px;padding-top:6px}
+  .info-long-key{font-size:11px;margin-bottom:3px}
+  .info-long-val{font-size:12px;padding:6px 8px;line-height:1.45;max-height:220px;overflow-y:auto}
+  .info-tags{gap:3px}
+  .info-tag{font-size:10px;padding:1px 6px;border-radius:8px}
+
+  /* eval-table is the only horizontal-scroll survivor inside the card */
+  .eval-table-wrap,.fav-detail .eval-table{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .eval-table{min-width:380px;font-size:12px}
+  .crit-label{width:74px;font-size:12px}
+  .crit-desc{width:120px;font-size:10px}
+
+  .photo-add{width:70px;height:54px;font-size:18px}
+
   .gallery-overlay{padding:8px}
   .gallery-img{max-height:82vh}
   .gallery-btn{width:38px;height:38px;font-size:24px}
