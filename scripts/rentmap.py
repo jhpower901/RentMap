@@ -748,7 +748,11 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
                 "listing_age_text": days_ago_text(updated_at),
                 "approval_date": to_iso_date(item.get("approveDate", "")),
                 "residence_type": item.get("residenceType", ""),
-                "maintenance_detail": join_nested_text(manage_payload),
+                # maintenance_detail intentionally empty for zigbang — the
+                # full manageCost dict is just code/name pairs that duplicate
+                # ``maintenance_items``. The client builds the panel from items
+                # alone (includes vs excludes split).
+                "maintenance_detail": "",
                 "maintenance_basis": "",
                 "maintenance_items": maintenance_items,
                 "non_compliant_building": item.get("nonCompliantBuilding", ""),

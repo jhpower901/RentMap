@@ -51,10 +51,19 @@
     return true;
   }
 
-  // ───────── 다방 관리비 enum 한국어 매핑 ─────────
-  // Dabang's API returns maintenance metadata as opaque enums + a key-value
-  // dump (``detail_code: E06; detail_cost: 70000; detail_include_types: ...``).
-  // Show the human-relevant slice only, mapped to Korean.
+  // ───────── 관리비 표시 ─────────
+  // Each platform ships maintenance metadata in a very different shape:
+  //   dabang  → "detail_code: E06; detail_cost: 50000; detail_include_types:
+  //              WATER_RATES; PUBLIC_USE_RATES; ETC_USE_RATES"
+  //              + basis "FIXED_FEE_CHARGE"
+  //   zigbang → items "수도; excluded: 전기; 가스; ..."  (already Korean,
+  //              just needs label-splitting)
+  //              + detail "amount: 1; includes: ...; include: code: 03; ..."
+  //              (noisy dict dump — we drop it)
+  //   daangn  → detail "관리비 8만원" (already a one-liner; nothing else known)
+  //
+  // humanizeMaintenance() consolidates all three into a structured object,
+  // and renderMaintenanceBlock() turns that into the panel HTML.
   const MAINT_ENUM_LABEL = {
     PUBLIC_USE_RATES: "공용관리",
     WATER_RATES: "수도",
@@ -70,34 +79,69 @@
     ELEVATOR_RATES: "엘리베이터",
     ETC_USE_RATES: "기타",
     FIXED_FEE_CHARGE: "정액 부과",
-    ETC_FEE_CHARGE: "기타 부과",
+    ETC_FEE_CHARGE: "실비 부과",
     UNABLE_CHECK_FEE_CHARGE: "확인 불가",
   };
 
-  function humanizeMaintItems(rawText) {
-    // Pull ``detail_include_types: A; B; C`` out of the dump and translate.
-    // Falls back to the raw text if the parse fails so nothing gets silently
-    // dropped on a payload shape we haven't seen.
-    if (!rawText) return "";
-    const m = rawText.match(/detail_include_types\s*:\s*([A-Z_][A-Z_;\s]*)/);
-    if (m) {
-      const enums = m[1].split(/[;\s]+/).map(s => s.trim()).filter(Boolean);
-      const labels = enums.map(e => MAINT_ENUM_LABEL[e] || e);
-      return labels.join("; ");
-    }
-    // A bare semicolon-separated enum list (some payloads ship it that way).
-    const tokens = rawText.split(/[;,]\s*/).map(s => s.trim()).filter(Boolean);
-    if (tokens.every(t => /^[A-Z_]+$/.test(t))) {
-      return tokens.map(t => MAINT_ENUM_LABEL[t] || t).join("; ");
-    }
-    return rawText;
+  function fmtWonNumber(n) {
+    return n.toLocaleString("ko-KR") + "원";
   }
 
-  function humanizeMaintBasis(rawText) {
-    const s = (rawText || "").trim();
-    if (!s) return "";
-    if (/^[A-Z_]+$/.test(s)) return MAINT_ENUM_LABEL[s] || s;
-    return s;
+  function labelEnum(s) {
+    const t = (s || "").trim();
+    if (!t) return "";
+    if (/^[A-Z_]+$/.test(t)) return MAINT_ENUM_LABEL[t] || t;
+    return t;
+  }
+
+  // Returns {cost, basis, includes:[], excludes:[]}. Missing fields are
+  // omitted; the renderer hides empty rows.
+  function humanizeMaintenance(d) {
+    const out = { cost: null, basis: null, includes: [], excludes: [] };
+    const rawDetail = (d.maintenance_detail || "").trim();
+    const rawBasis  = (d.maintenance_basis  || "").trim();
+    const rawItems  = (d.maintenance_items  || "").trim();
+
+    // ── dabang: detail_code / detail_cost / detail_include_types ────────
+    if (/detail_(cost|code|include_types)\s*:/.test(rawDetail)) {
+      const cost = rawDetail.match(/detail_cost\s*:\s*([\d,]+)/);
+      if (cost) {
+        const n = parseInt(cost[1].replace(/,/g, ""), 10);
+        if (!isNaN(n) && n > 0) out.cost = fmtWonNumber(n);
+      }
+      const inc = rawDetail.match(/detail_include_types\s*:\s*([A-Z_][A-Z_;\s]*)/);
+      if (inc) {
+        out.includes = inc[1].split(/[;\s]+/).map(s => s.trim()).filter(Boolean).map(labelEnum);
+      }
+      if (rawBasis) out.basis = labelEnum(rawBasis);
+    }
+    // ── zigbang: items already say "포함; excluded: 미포함" in Korean ───
+    else if (/excluded\s*:/i.test(rawItems)) {
+      const parts = rawItems.split(/excluded\s*:/i);
+      out.includes = (parts[0] || "").split(/;\s*/).map(s => s.trim()).filter(Boolean);
+      out.excludes = (parts[1] || "").split(/;\s*/).map(s => s.trim()).filter(Boolean);
+    }
+    // ── daangn / other: detail is already a one-liner like "관리비 8만원" ──
+    else if (rawDetail) {
+      out.cost = rawDetail;
+    }
+    // ── fallback: nothing matched; surface whatever items hold, raw ──
+    else if (rawItems) {
+      out.includes = rawItems.split(/;\s*/).map(s => s.trim()).filter(Boolean).map(labelEnum);
+    }
+    return out;
+  }
+
+  function renderMaintenanceBlock(d) {
+    const h = humanizeMaintenance(d);
+    const lines = [];
+    if (h.cost) lines.push(h.cost);
+    if (h.basis) lines.push("부과방식: " + h.basis);
+    if (h.includes.length) lines.push("포함: " + h.includes.join(", "));
+    if (h.excludes.length) lines.push("미포함: " + h.excludes.join(", "));
+    if (!lines.length) return "";
+    return '<div class="info-long"><div class="info-long-key">관리비 상세</div>' +
+           '<div class="info-long-val">' + esc(lines.join("\n")) + "</div></div>";
   }
 
   // ───────── price sparkline ─────────
@@ -203,13 +247,11 @@
     const description = (d.description || "").trim();
     const options = (d.options || "").trim();
     const security = (d.security_options || "").trim();
-    // Dabang's payload arrives as opaque enums + key-value dump; humanize
-    // here so the panel stays readable. Other sources pass through as-is.
-    const maintenanceDetail = humanizeMaintItems((d.maintenance_detail || "").trim());
-    const maintenanceBasis = humanizeMaintBasis((d.maintenance_basis || "").trim());
-    const maintenanceItems = humanizeMaintItems((d.maintenance_items || "").trim());
+    // Build the structured maintenance block via humanizeMaintenance.
+    // Empty string when the source has no maintenance metadata at all.
+    const maintenanceHtml = renderMaintenanceBlock(d);
 
-    if (!pairs.length && !description && !options && !security && !maintenanceDetail && !maintenanceBasis && !maintenanceItems && !d.id) return "";
+    if (!pairs.length && !description && !options && !security && !maintenanceHtml && !d.id) return "";
 
     const gridHtml = pairs.length
       ? `<div class="info-grid">${pairs.map(([k, v]) =>
@@ -224,10 +266,6 @@
         `<span class="info-tag${cls ? " " + cls : ""}">${esc(t)}</span>`
       ).join("")}</div>`;
     };
-
-    const maintenanceHtml = (maintenanceDetail || maintenanceBasis || maintenanceItems)
-      ? `<div class="info-long"><div class="info-long-key">관리비 상세</div><div class="info-long-val">${esc([maintenanceDetail, maintenanceBasis, maintenanceItems].filter(Boolean).join("\n"))}</div></div>`
-      : "";
     const descHtml = description
       ? `<div class="info-long"><div class="info-long-key">소개</div><div class="info-long-val">${esc(description)}</div></div>`
       : "";
