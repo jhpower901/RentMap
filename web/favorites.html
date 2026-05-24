@@ -434,6 +434,13 @@ function renderDetail(card, fav, sid) {
   const score = calcScore(fav.rating);
   const savedAt = new Date(fav.savedAt).toLocaleDateString('ko-KR');
   const infoSection = buildListingInfoSection(freshData(fav), fav.source);
+  // After this innerHTML lands, attach the sparkline. We do it via setTimeout
+  // so the DOM is settled before the lazy-loader queries for placeholders.
+  setTimeout(() => {
+    if (window.ListingInfo && window.ListingInfo.attachSparklines) {
+      window.ListingInfo.attachSparklines(el, fav.source);
+    }
+  }, 0);
 
   el.innerHTML = `
     ${infoSection}

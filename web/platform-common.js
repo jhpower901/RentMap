@@ -148,6 +148,13 @@
       const tr = document.createElement('tr');
       tr.className = 'detail-row';
       tr.innerHTML = '<td colspan="' + colspan + '" class="detail-cell">' + html + '</td>';
+      // Lazy-load the price sparkline from /api/listings/.../price-history.
+      // The placeholder inside the panel is already in the DOM, so we just
+      // hand the cell to ListingInfo to find and fill it. Idempotent —
+      // re-rendering an already-open row won't trigger a second fetch.
+      if (window.ListingInfo && window.ListingInfo.attachSparklines) {
+        window.ListingInfo.attachSparklines(tr, source);
+      }
       return tr;
     }
 

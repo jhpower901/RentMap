@@ -1831,6 +1831,142 @@ def _read_csv_lenient(data_dir: Path, prefix: str, target_date: str, label: str)
     return read_csv(path)
 
 
+def _won_to_manwon_str(value: Any) -> str:
+    """Reverse the manwon→won conversion ingestion did, for CSV-shape output.
+
+    normal_common does its own float parsing on the result, so emitting a
+    plain string keeps the path identical to the CSV-fed gen-web.
+    """
+    if value is None:
+        return ""
+    try:
+        return str(int(value) // 10000)
+    except (TypeError, ValueError):
+        return ""
+
+
+def _date_to_iso_str(value: Any) -> str:
+    if value is None:
+        return ""
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _db_row_to_csv_shape(row: dict[str, Any]) -> dict[str, str]:
+    """Project a (listings ⋈ latest snapshot) row into the CSV-shape dict
+    ``normal_common`` already understands, so the rest of gen_web is unchanged.
+
+    Anything that lived in ``raw_normalized_json`` (options, security,
+    images, agency contact, daangn region depth1/2/3, etc.) flows through
+    untouched — the CSV-shape we used to ingest is also the shape we re-emit.
+    """
+    raw = row.get("raw_normalized_json") or {}
+    if isinstance(raw, str):
+        # psycopg returns JSONB as a dict already, but defend against a stray
+        # string in case a future driver/version round-trips it as text.
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            raw = {}
+
+    out: dict[str, str] = {
+        "listing_no": str(row.get("platform_listing_id") or ""),
+        "url": row.get("source_url") or "",
+        "title": row.get("title") or "",
+        "address": row.get("address_raw") or "",
+        "latitude": "" if row.get("lat") is None else str(row["lat"]),
+        "longitude": "" if row.get("lng") is None else str(row["lng"]),
+        "deposit_manwon": _won_to_manwon_str(row.get("deposit_won")),
+        "rent_manwon": _won_to_manwon_str(row.get("monthly_rent_won")),
+        "maintenance_manwon": _won_to_manwon_str(row.get("maintenance_fee_won")),
+        "total_monthly_manwon": _won_to_manwon_str(row.get("expected_monthly_cost_won")),
+        "room_type": row.get("room_type_raw") or "",
+        "area_m2": row.get("area_raw") or "",
+        "supply_area_m2": "" if row.get("supply_area_m2") is None else str(row["supply_area_m2"]),
+        "exclusive_area_m2": "" if row.get("exclusive_area_m2") is None else str(row["exclusive_area_m2"]),
+        "floor": row.get("floor_raw") or "",
+        "direction": row.get("direction") or "",
+        "room_count": "" if row.get("room_count") is None else str(row["room_count"]),
+        "bathroom_count": "" if row.get("bathroom_count") is None else str(row["bathroom_count"]),
+        "parking": row.get("parking_raw") or "",
+        "move_in": row.get("move_in_raw") or "",
+        "approval_date": _date_to_iso_str(row.get("approval_date")),
+        "building_use": row.get("building_usage") or "",
+        "room_structure": row.get("structure_type") or "",
+        "description": row.get("description") or "",
+    }
+    # Merge raw_normalized_json AFTER core fields — raw never overrides a
+    # normalized column, only adds the ones we don't have a home for.
+    for key, value in raw.items():
+        if key not in out and value not in (None, ""):
+            out[key] = str(value)
+    return out
+
+
+def _read_db_active(platform_code: str, label: str) -> list[dict[str, str]]:
+    """Pull active listings + their most recent snapshot from Postgres.
+
+    Returns a list of CSV-shape dicts so the rest of gen_web doesn't care
+    where the data came from. Returns [] (with a warning) when the DB is
+    unreachable — the caller's CSV fallback kicks in.
+    """
+    # Late import so the CSV-only path (--source csv) doesn't pay for psycopg.
+    from db import session, DBConfigError  # type: ignore
+
+    try:
+        with session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    l.platform_listing_id, l.source_url, l.current_status,
+                    s.title, s.description, s.room_type_raw, s.address_raw,
+                    s.lat, s.lng,
+                    s.deposit_won, s.monthly_rent_won, s.maintenance_fee_won,
+                    s.expected_monthly_cost_won,
+                    s.supply_area_m2, s.exclusive_area_m2, s.area_raw,
+                    s.floor_raw, s.room_count, s.bathroom_count,
+                    s.direction, s.parking_raw, s.move_in_raw,
+                    s.approval_date, s.building_usage, s.structure_type,
+                    s.raw_normalized_json
+                FROM listings l
+                JOIN platforms p ON p.id = l.platform_id
+                JOIN LATERAL (
+                    SELECT * FROM listing_snapshots
+                    WHERE listing_id = l.id
+                    ORDER BY captured_at DESC LIMIT 1
+                ) s ON TRUE
+                WHERE p.code = %s
+                  AND l.current_status = 'active'
+                ORDER BY l.id
+                """,
+                (platform_code,),
+            )
+            rows = [_db_row_to_csv_shape(r) for r in cur.fetchall()]
+            return rows
+    except (DBConfigError, Exception) as exc:
+        print(f"  [gen-web] {label}: DB unavailable ({exc!s}); will try CSV fallback")
+        return []
+
+
+def _read_for_gen_web(source: str, data_dir: Path, prefix: str, target_date: str,
+                       label: str, platform_code: str) -> list[dict[str, str]]:
+    """Source selector for gen_web. ``source`` is 'db', 'csv', or 'auto'.
+
+    auto = DB first, fall back to CSV if DB returns empty (cold start, or DB
+    intentionally not provisioned). Default operating mode after the DB is in
+    place; lets a freshly cloned repo still render pages from the seed CSVs.
+    """
+    if source == "csv":
+        return _read_csv_lenient(data_dir, prefix, target_date, label)
+    db_rows = _read_db_active(platform_code, label)
+    if source == "db":
+        return db_rows
+    # auto
+    if db_rows:
+        return db_rows
+    print(f"  [gen-web] {label}: DB empty, falling back to CSV")
+    return _read_csv_lenient(data_dir, prefix, target_date, label)
+
+
 def gen_web(args: argparse.Namespace) -> None:
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
@@ -1839,11 +1975,12 @@ def gen_web(args: argparse.Namespace) -> None:
     tpl_platform = (tpl_dir / "_tpl_platform.html").read_text(encoding="utf-8")
     tpl_index = (tpl_dir / "_tpl_index.html").read_text(encoding="utf-8")
 
-    dabang = _read_csv_lenient(data_dir, "dabang_ajou", args.date, "dabang")
-    daangn = _read_csv_lenient(data_dir, "daangn_ajou", args.date, "daangn")
-    zigbang = _read_csv_lenient(data_dir, "zigbang_ajou", args.date, "zigbang")
-    naver = _read_csv_lenient(data_dir, "naver_land_ajou", args.date, "naver")
-    print(f"Loaded: dabang={len(dabang)} daangn={len(daangn)} zigbang={len(zigbang)} naver={len(naver)}")
+    src = args.source
+    dabang = _read_for_gen_web(src, data_dir, "dabang_ajou", args.date, "dabang", "dabang")
+    daangn = _read_for_gen_web(src, data_dir, "daangn_ajou", args.date, "daangn", "daangn")
+    zigbang = _read_for_gen_web(src, data_dir, "zigbang_ajou", args.date, "zigbang", "zigbang")
+    naver = _read_for_gen_web(src, data_dir, "naver_land_ajou", args.date, "naver", "naver_land")
+    print(f"Loaded ({src}): dabang={len(dabang)} daangn={len(daangn)} zigbang={len(zigbang)} naver={len(naver)}")
 
     js_dabang = js_array([normal_common(r, "dabang") for r in dabang])
     js_daangn = js_array([normal_daangn(r) for r in daangn])
@@ -2061,6 +2198,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--data-dir", default=str(ROOT / "data"))
     p.add_argument("--out-dir", default=str(ROOT / "web"))
     p.add_argument("--date", default=DEFAULT_DATE)
+    p.add_argument(
+        "--source",
+        choices=("auto", "db", "csv"),
+        default="auto",
+        help=(
+            "Data source for the bundle. 'db' reads active listings + latest "
+            "snapshot from Postgres. 'csv' reads the dated CSV files (legacy). "
+            "'auto' (default) prefers DB and falls back to CSV per-platform "
+            "when DB is empty/unreachable."
+        ),
+    )
     p.set_defaults(func=gen_web)
 
     p = sub.add_parser("crawl-all")

@@ -49,6 +49,24 @@ def run_gen_web() -> None:
     _run_rentmap(["gen-web", "--date", today], label="gen-web", timeout_s=5 * 60)
 
 
+def run_webhook_flush() -> None:
+    """Drain pending listing_status_events to Discord. Safe to call frequently
+    — exits cheaply when there's nothing to send or no URL configured.
+    """
+    try:
+        # Local import keeps DB / requests out of server startup if the worker
+        # module ever gains heavier imports.
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from webhook_worker import flush_once  # noqa: WPS433 — intentional late import
+        counts = flush_once()
+        nonzero = {k: v for k, v in counts.items() if v}
+        if nonzero:
+            print(f"[scheduler] webhook-flush: {nonzero}", flush=True)
+    except Exception as exc:
+        # Worker failures must never kill the scheduler thread. Log and move on.
+        print(f"[scheduler] webhook-flush: failed — {exc}", flush=True)
+
+
 scheduler = BackgroundScheduler(timezone=TZ)
 
 
@@ -87,8 +105,19 @@ async def lifespan(_app: FastAPI):
         run_date=now + timedelta(seconds=30),
         id="startup_gen_web", max_instances=1, coalesce=True,
     )
+    # Every minute — flush pending Discord notifications. The worker self-caps
+    # at 25 events per pass, so even a large backlog drains gracefully rather
+    # than bursting through Discord's 30/min rate limit.
+    scheduler.add_job(
+        run_webhook_flush,
+        trigger=CronTrigger(minute="*", timezone=TZ),
+        id="webhook_flush",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
     scheduler.start()
-    print("[scheduler] started — crawl at :00 hourly, gen-web at :00/:30 (KST), plus startup kicks", flush=True)
+    print("[scheduler] started — crawl at :00 hourly, gen-web at :00/:30, webhook-flush every minute (KST)", flush=True)
     try:
         yield
     finally:
@@ -96,6 +125,83 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+_VALID_SOURCES = {"dabang", "daangn", "zigbang", "naver"}
+_SOURCE_TO_PLATFORM_CODE = {
+    # UI uses short codes; DB platforms table stores "naver_land" for naver.
+    "dabang": "dabang",
+    "daangn": "daangn",
+    "zigbang": "zigbang",
+    "naver": "naver_land",
+}
+
+
+@app.get("/api/listings/{source}/{listing_no}/price-history")
+def price_history(source: str, listing_no: str, limit: int = 60) -> dict[str, Any]:
+    """Return up to ``limit`` price snapshots for one listing, oldest first.
+
+    Powers the sparkline that the detail row lazy-loads when a user expands
+    a listing. The UI cap is small (≈20 points), but we default the API at
+    60 to leave room for future "show full history" UIs without a schema
+    change.
+
+    Returns ``{ "points": [{t, deposit, rent, maint, total}, ...] }``. Empty
+    points list is a valid response when the DB is empty or the listing was
+    never matched (e.g. a CSV-only environment).
+    """
+    if source not in _VALID_SOURCES:
+        raise HTTPException(status_code=404, detail=f"unknown source: {source}")
+    if not listing_no or len(listing_no) > 100:
+        raise HTTPException(status_code=400, detail="invalid listing_no")
+    limit = max(1, min(int(limit), 500))
+
+    platform_code = _SOURCE_TO_PLATFORM_CODE[source]
+    # Late import keeps server boot independent of DB availability — a fresh
+    # container can serve static pages even before db-stack is up.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        from db import session, DBConfigError  # noqa: WPS433
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail=f"db module unavailable: {exc}")
+
+    try:
+        with session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ps.captured_at, ps.deposit_won, ps.monthly_rent_won,
+                       ps.maintenance_fee_won, ps.expected_monthly_cost_won
+                FROM listing_price_snapshots ps
+                JOIN listings l ON l.id = ps.listing_id
+                JOIN platforms p ON p.id = l.platform_id
+                WHERE p.code = %s AND l.platform_listing_id = %s
+                ORDER BY ps.captured_at ASC
+                LIMIT %s
+                """,
+                (platform_code, listing_no, limit),
+            )
+            rows = cur.fetchall()
+    except DBConfigError:
+        return {"points": []}
+    except Exception as exc:  # noqa: BLE001
+        # Don't 500 on a chart that's secondary UI; degrade to empty.
+        return {"points": [], "error": str(exc)[:200]}
+
+    def to_manwon(v: int | None) -> int | None:
+        return v // 10000 if v is not None else None
+
+    points = [
+        {
+            "t": r["captured_at"].isoformat(),
+            "deposit": to_manwon(r["deposit_won"]),
+            "rent": to_manwon(r["monthly_rent_won"]),
+            "maint": to_manwon(r["maintenance_fee_won"]),
+            "total": to_manwon(r["expected_monthly_cost_won"]),
+        }
+        for r in rows
+    ]
+    return {"points": points}
+
 
 # Data storage paths
 DATA_DIR = "data"
