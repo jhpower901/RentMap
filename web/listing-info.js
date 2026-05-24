@@ -35,6 +35,71 @@
     return raw;
   }
 
+  // ───────── value gating ─────────
+  // Numeric fields where 0 means "missing", not "literally zero". Dabang's
+  // provision_size is 0 for ~22% of its inventory; displaying "공급면적: 0.00"
+  // is just noise.
+  const NUMERIC_PAIR_KEYS = new Set(["공급면적", "전용면적", "방수", "욕실"]);
+  function isMeaningful(key, value) {
+    if (value == null) return false;
+    const s = String(value).trim();
+    if (s === "") return false;
+    if (NUMERIC_PAIR_KEYS.has(key)) {
+      const n = parseFloat(s);
+      return !isNaN(n) && n > 0;
+    }
+    return true;
+  }
+
+  // ───────── 다방 관리비 enum 한국어 매핑 ─────────
+  // Dabang's API returns maintenance metadata as opaque enums + a key-value
+  // dump (``detail_code: E06; detail_cost: 70000; detail_include_types: ...``).
+  // Show the human-relevant slice only, mapped to Korean.
+  const MAINT_ENUM_LABEL = {
+    PUBLIC_USE_RATES: "공용관리",
+    WATER_RATES: "수도",
+    HOT_WATER_RATES: "온수",
+    GAS_RATES: "가스",
+    ELECTRICITY_RATES: "전기",
+    HEATING_RATES: "난방",
+    INTERNET_RATES: "인터넷",
+    TV_RATES: "TV",
+    CLEANING_RATES: "청소",
+    SECURITY_RATES: "보안",
+    PARKING_RATES: "주차",
+    ELEVATOR_RATES: "엘리베이터",
+    ETC_USE_RATES: "기타",
+    FIXED_FEE_CHARGE: "정액 부과",
+    ETC_FEE_CHARGE: "기타 부과",
+    UNABLE_CHECK_FEE_CHARGE: "확인 불가",
+  };
+
+  function humanizeMaintItems(rawText) {
+    // Pull ``detail_include_types: A; B; C`` out of the dump and translate.
+    // Falls back to the raw text if the parse fails so nothing gets silently
+    // dropped on a payload shape we haven't seen.
+    if (!rawText) return "";
+    const m = rawText.match(/detail_include_types\s*:\s*([A-Z_][A-Z_;\s]*)/);
+    if (m) {
+      const enums = m[1].split(/[;\s]+/).map(s => s.trim()).filter(Boolean);
+      const labels = enums.map(e => MAINT_ENUM_LABEL[e] || e);
+      return labels.join("; ");
+    }
+    // A bare semicolon-separated enum list (some payloads ship it that way).
+    const tokens = rawText.split(/[;,]\s*/).map(s => s.trim()).filter(Boolean);
+    if (tokens.every(t => /^[A-Z_]+$/.test(t))) {
+      return tokens.map(t => MAINT_ENUM_LABEL[t] || t).join("; ");
+    }
+    return rawText;
+  }
+
+  function humanizeMaintBasis(rawText) {
+    const s = (rawText || "").trim();
+    if (!s) return "";
+    if (/^[A-Z_]+$/.test(s)) return MAINT_ENUM_LABEL[s] || s;
+    return s;
+  }
+
   // ───────── price sparkline ─────────
   // Total monthly cost = deposit/100 (rough opportunity-cost normalization,
   // ~1%/yr deposit interest) + rent + maint. Mostly useful as a single curve
@@ -133,14 +198,16 @@
       ["확인일", d.confirmed_at],
       ["게시 경과", d.listing_age_text],
       ["사용승인", d.approval_date],
-    ].filter(([, v]) => v != null && String(v).trim() !== "");
+    ].filter(([k, v]) => isMeaningful(k, v));
 
     const description = (d.description || "").trim();
     const options = (d.options || "").trim();
     const security = (d.security_options || "").trim();
-    const maintenanceDetail = (d.maintenance_detail || "").trim();
-    const maintenanceBasis = (d.maintenance_basis || "").trim();
-    const maintenanceItems = (d.maintenance_items || "").trim();
+    // Dabang's payload arrives as opaque enums + key-value dump; humanize
+    // here so the panel stays readable. Other sources pass through as-is.
+    const maintenanceDetail = humanizeMaintItems((d.maintenance_detail || "").trim());
+    const maintenanceBasis = humanizeMaintBasis((d.maintenance_basis || "").trim());
+    const maintenanceItems = humanizeMaintItems((d.maintenance_items || "").trim());
 
     if (!pairs.length && !description && !options && !security && !maintenanceDetail && !maintenanceBasis && !maintenanceItems && !d.id) return "";
 
