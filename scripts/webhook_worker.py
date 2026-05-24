@@ -1,8 +1,9 @@
 """Discord webhook dispatcher for listing_status_events.
 
 The reconcile module's only job is to write events to ``listing_status_events``.
-This module flushes the unsent ones to Discord on a schedule, honoring rate
-limits and applying exponential backoff to transient failures.
+This module flushes the unsent ones to Discord after crawl/reconcile completes,
+honoring Discord 429 responses and applying exponential backoff to transient
+failures.
 
 Decoupling matters: a crawl never blocks on Discord, and a Discord outage
 never breaks a crawl. Events queue up and drain when the webhook is back.
@@ -11,13 +12,12 @@ Idempotency: ``webhook_sent_at`` is the single source of truth. A row is
 either NULL (eligible for delivery) or set (done, never retried). We never
 delete events after delivery — they're useful history.
 
-Concurrency: ``FOR UPDATE OF e SKIP LOCKED`` lets several workers run side
-by side without picking the same event. Today there's only one worker
-(scheduled in server.py) but the lock is cheap and future-proofs nothing.
+Concurrency: ``FOR UPDATE OF e SKIP LOCKED`` lets the main and naver schedulers
+flush side by side without picking the same event.
 
 CLI:
 
-    python scripts/webhook_worker.py flush           # one batch, then exit
+    python scripts/webhook_worker.py flush           # all pending, then exit
     python scripts/webhook_worker.py flush --batch 10
     python scripts/webhook_worker.py flush --dry-run # mark sent without HTTP
     python scripts/webhook_worker.py pending         # show queue size only
@@ -41,11 +41,10 @@ from db import session  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-# Discord's documented limit is 30 messages / minute per webhook. We default
-# below that to leave headroom for the occasional manual test, and the worker
-# itself adds a small inter-request sleep to spread the load.
-DEFAULT_BATCH = 25
-INTER_REQUEST_SLEEP_S = 1.2
+# 0 means "drain everything currently deliverable". Discord may still return
+# 429; when it does, we respect Retry-After and leave that row queued.
+DEFAULT_BATCH = 0
+INTER_REQUEST_SLEEP_S = 0.0
 
 # Exponential backoff in minutes: 2, 4, 8, 16, 32. After ``MAX_ATTEMPTS``
 # attempts the event stays NULL forever — operator must clear it manually
@@ -135,8 +134,12 @@ def _fetch_batch(cur, limit: int) -> list[dict[str, Any]]:
     parallel workers don't double-send. We don't lock listings/snapshots
     because we only read them.
     """
+    limit_clause = "" if limit <= 0 else "LIMIT %s"
+    params: list[Any] = [MAX_ATTEMPTS]
+    if limit_clause:
+        params.append(limit)
     cur.execute(
-        """
+        f"""
         SELECT
             e.id AS event_id,
             e.listing_id,
@@ -167,10 +170,10 @@ def _fetch_batch(cur, limit: int) -> list[dict[str, Any]]:
           AND (e.webhook_next_try_at IS NULL OR e.webhook_next_try_at <= now())
           AND e.webhook_attempts < %s
         ORDER BY e.event_at
-        LIMIT %s
+        {limit_clause}
         FOR UPDATE OF e SKIP LOCKED
         """,
-        (MAX_ATTEMPTS, limit),
+        params,
     )
     rows = []
     for row in cur.fetchall():
@@ -213,9 +216,9 @@ def _next_backoff(attempts: int) -> timedelta:
 
 
 def flush_once(batch: int = DEFAULT_BATCH, dry_run: bool = False) -> dict[str, int]:
-    """Process up to ``batch`` pending events and return per-status counts.
+    """Process pending events and return per-status counts.
 
-    Designed to be called from a scheduler ("every minute, flush_once()") or
+    Designed to be called after a crawl/reconcile completes or
     from the CLI for ad-hoc operation. Safe to interrupt at any point —
     events in flight stay locked only for the duration of this call.
     """
@@ -273,8 +276,8 @@ def flush_once(batch: int = DEFAULT_BATCH, dry_run: bool = False) -> dict[str, i
                             f"http_{resp.status_code}: {resp.text[:200]}")
                 counts["retried"] += 1
 
-            # Spread out within the batch so we don't burst against the rate limit.
-            time.sleep(INTER_REQUEST_SLEEP_S)
+            if INTER_REQUEST_SLEEP_S > 0:
+                time.sleep(INTER_REQUEST_SLEEP_S)
         conn.commit()
     return counts
 
@@ -305,7 +308,8 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_flush = sub.add_parser("flush", help="Send pending events once and exit")
-    p_flush.add_argument("--batch", type=int, default=DEFAULT_BATCH)
+    p_flush.add_argument("--batch", type=int, default=DEFAULT_BATCH,
+                         help="Max events to send; 0 means all deliverable pending events")
     p_flush.add_argument("--dry-run", action="store_true",
                          help="Skip HTTP, just mark events as sent (for tests)")
     sub.add_parser("pending", help="Show queue counters")

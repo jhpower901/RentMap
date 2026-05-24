@@ -8,9 +8,12 @@ RentMap runs as two long-lived containers via `docker compose`:
   - **Every hour at :00** — `crawl-all --skip-naver` (dabang + zigbang + daangn)
   - **Every hour at :50** — `gen-web` regenerates platform HTML
     pages from whatever CSVs are currently on disk
+  - **After crawl/reconcile completes** — webhook events are flushed to Discord
+    from the DB queue
 - **`rentmap-naver`** ([Dockerfile.naver](../Dockerfile.naver), Playwright base)
   — runs `crawl-naver` every hour at :00 in lock-step with the main container.
-  Shares the `./data` volume so the next gen-web tick picks up fresh CSVs.
+  Shares the `./data` volume so the next gen-web tick picks up fresh CSVs, and
+  flushes webhook events after its own crawl/reconcile completes.
 
 `gen-web` is fault-tolerant: if today's CSV for some source is missing (first
 boot, slow naver crawl still running, etc.) it falls back to the most recent

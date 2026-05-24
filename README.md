@@ -12,7 +12,7 @@
 
 | 컨테이너 | 위치 | 역할 | 자동 스케줄 |
 |---|---|---|---|
-| `rentmap-server` | RentMap | dabang / zigbang / daangn 크롤 + `gen-web` + 웹서버(:8000) + webhook worker | 크롤 매시간 `:00`, `gen-web` 매시간 `:50`, webhook 매분 |
+| `rentmap-server` | RentMap | dabang / zigbang / daangn 크롤 + `gen-web` + 웹서버(:8000) + webhook worker | 크롤 매시간 `:00`, `gen-web` 매시간 `:50`, webhook은 크롤 완료 직후 |
 | `rentmap-naver`  | RentMap | naver 크롤 (playwright) | 매시간 `:00` |
 | `rentmap-postgres` | [`../db-stack/`](../db-stack/) (별 compose) | 매물 history DB. 크롤 후 reconcile이 incremental snapshot 적재 | — (상시) |
 
@@ -278,13 +278,13 @@ docker exec rentmap-server python scripts/backfill.py --live
 
 ### 7.3 Webhook worker (`scripts/webhook_worker.py`)
 
-평소엔 `rentmap-server` 안 scheduler가 **매 1분** 자동 호출. 수동 실행도 가능:
+평소엔 크롤/reconcile이 성공한 직후 scheduler가 자동 호출. 수동 실행도 가능:
 
 ```sh
 # 큐 상태
 docker exec rentmap-server bash -c "cd /app && python scripts/webhook_worker.py pending"
 
-# 1회 flush (기본 25건)
+# 1회 flush (기본: 현재 대기열 전체)
 docker exec rentmap-server bash -c "cd /app && python scripts/webhook_worker.py flush"
 
 # HTTP 안 보내고 sent로만 마킹 (테스트용)

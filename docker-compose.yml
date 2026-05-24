@@ -68,8 +68,9 @@ services:
     environment:
       - TZ=Asia/Seoul
       - RENTMAP_DB_URL=${RENTMAP_DB_URL:-postgresql://rentmap:${POSTGRES_PASSWORD}@rentmap-postgres:5432/rentmap}
-      # naver container itself doesn't run the webhook worker, but it does
-      # call reconcile after every crawl and honors the dry-run toggle.
+      - RENTMAP_DISCORD_WEBHOOK_URL=${RENTMAP_DISCORD_WEBHOOK_URL:-}
+      # naver flushes webhook events after its own crawl/reconcile completes
+      # and honors the dry-run toggle.
       - RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS=${RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS:-0}
       - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}

@@ -23,7 +23,7 @@ RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 
 
-def _run_rentmap(args: list[str], label: str, timeout_s: int) -> None:
+def _run_rentmap(args: list[str], label: str, timeout_s: int) -> int | None:
     started = time.monotonic()
     command = " ".join(args)
     print(f"[scheduler] {label}: START rentmap {command}", flush=True)
@@ -37,12 +37,15 @@ def _run_rentmap(args: list[str], label: str, timeout_s: int) -> None:
         elapsed = time.monotonic() - started
         status = "OK" if result.returncode == 0 else "FAILED"
         print(f"[scheduler] {label}: {status} exit={result.returncode} elapsed={elapsed:.1f}s rentmap {command}", flush=True)
+        return result.returncode
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started
         print(f"[scheduler] {label}: TIMEOUT after {elapsed:.1f}s limit={timeout_s}s rentmap {command}: {exc}", flush=True)
+        return None
     except Exception as exc:
         elapsed = time.monotonic() - started
         print(f"[scheduler] {label}: ERROR after {elapsed:.1f}s rentmap {command}: {exc}", flush=True)
+        return None
 
 
 def run_hourly_crawl() -> None:
@@ -60,7 +63,9 @@ def run_hourly_crawl() -> None:
         "sources=dabang,zigbang,daangn",
         flush=True,
     )
-    _run_rentmap(["crawl-all", "--skip-naver", "--date", today], label="hourly-crawl", timeout_s=50 * 60)
+    exit_code = _run_rentmap(["crawl-all", "--skip-naver", "--date", today], label="hourly-crawl", timeout_s=50 * 60)
+    if exit_code == 0:
+        run_webhook_flush(trigger="hourly-crawl-complete")
 
 
 def run_gen_web() -> None:
@@ -70,10 +75,8 @@ def run_gen_web() -> None:
     _run_rentmap(["gen-web", "--date", today], label="gen-web", timeout_s=5 * 60)
 
 
-def run_webhook_flush() -> None:
-    """Drain pending listing_status_events to Discord. Safe to call frequently
-    — exits cheaply when there's nothing to send or no URL configured.
-    """
+def run_webhook_flush(trigger: str = "manual") -> None:
+    """Drain pending listing_status_events to Discord after crawl completion."""
     try:
         # Local import keeps DB / requests out of server startup if the worker
         # module ever gains heavier imports.
@@ -82,7 +85,7 @@ def run_webhook_flush() -> None:
         counts = flush_once()
         nonzero = {k: v for k, v in counts.items() if v}
         if nonzero:
-            print(f"[scheduler] webhook-flush: {nonzero}", flush=True)
+            print(f"[scheduler] webhook-flush[{trigger}]: {nonzero}", flush=True)
     except Exception as exc:
         # Worker failures must never kill the scheduler thread. Log and move on.
         print(f"[scheduler] webhook-flush: failed — {exc}", flush=True)
@@ -126,19 +129,8 @@ async def lifespan(_app: FastAPI):
         run_date=now + timedelta(seconds=30),
         id="startup_gen_web", max_instances=1, coalesce=True,
     )
-    # Every minute — flush pending Discord notifications. The worker self-caps
-    # at 25 events per pass, so even a large backlog drains gracefully rather
-    # than bursting through Discord's 30/min rate limit.
-    scheduler.add_job(
-        run_webhook_flush,
-        trigger=CronTrigger(minute="*", timezone=TZ),
-        id="webhook_flush",
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=30,
-    )
     scheduler.start()
-    print("[scheduler] started - crawl at :00 hourly, gen-web at :50 hourly, webhook-flush every minute (KST)", flush=True)
+    print("[scheduler] started - crawl at :00 hourly, gen-web at :50 hourly, webhook flush after crawl completion (KST)", flush=True)
     try:
         yield
     finally:

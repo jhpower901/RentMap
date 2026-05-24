@@ -26,6 +26,19 @@ RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 
 
+def run_webhook_flush(trigger: str = "manual") -> None:
+    """Drain pending listing_status_events to Discord after naver reconcile."""
+    try:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from webhook_worker import flush_once  # noqa: WPS433
+        counts = flush_once()
+        nonzero = {k: v for k, v in counts.items() if v}
+        if nonzero:
+            print(f"[naver-scheduler] webhook-flush[{trigger}]: {nonzero}", flush=True)
+    except Exception as exc:
+        print(f"[naver-scheduler] webhook-flush failed: {exc}", flush=True)
+
+
 def run_naver_crawl() -> None:
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     out_csv = ROOT / "data" / f"naver_land_ajou_{today}.csv"
@@ -66,6 +79,8 @@ def run_naver_crawl() -> None:
         elapsed = time.monotonic() - started
         status = "OK" if result.returncode == 0 else "FAILED"
         print(f"[naver-scheduler] crawl-naver {status} exit={result.returncode} elapsed={elapsed:.1f}s output={out_csv}", flush=True)
+        if result.returncode == 0:
+            run_webhook_flush(trigger="crawl-naver-complete")
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started
         print(f"[naver-scheduler] crawl-naver TIMEOUT after {elapsed:.1f}s limit=2700s output={out_csv}: {exc}", flush=True)

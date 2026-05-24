@@ -56,6 +56,7 @@ NAVER_PROGRESS_EVERY = 50          # how often to log "detail: i/N"
 NAVER_DEFAULT_MAX_PAGES = 20       # list-API pages per cortarNo (100 articles/page)
 DABANG_DEFAULT_DELAY_MS = 120      # gap between Dabang detail requests
 DABANG_DEFAULT_ZOOM = 18
+CRAWL_DETAIL_PROGRESS_EVERY = 20
 # Trig clamp so cos(lat) for the longitude conversion never hits 0 near the poles.
 COS_LAT_FLOOR = 0.01
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
@@ -538,7 +539,9 @@ def crawl_dabang(args: argparse.Namespace) -> None:
     records: list[dict[str, Any]] = []
     raw_details: list[Any] = []
 
-    for room in rooms:
+    for idx, room in enumerate(rooms, 1):
+        if idx % CRAWL_DETAIL_PROGRESS_EVERY == 0:
+            print(f"[crawl:dabang] detail_progress={idx}/{len(rooms)}", flush=True)
         room_id = to_text(first(room, ["id", "room_id", "roomId", "seq", "hash"]))
         if not room_id or room_id in seen:
             continue
@@ -739,7 +742,7 @@ def crawl_zigbang(args: argparse.Namespace) -> None:
 
     rows: list[dict[str, Any]] = []
     for idx, item_id in enumerate(sorted(items_by_id), 1):
-        if idx % 20 == 0:
+        if idx % CRAWL_DETAIL_PROGRESS_EVERY == 0:
             print(f"[crawl:zigbang] detail_progress={idx}/{len(items_by_id)}", flush=True)
         try:
             detail = request_json(session, f"https://apis.zigbang.com/v3/items/{quote(item_id)}", headers=headers)
@@ -875,7 +878,8 @@ def crawl_daangn(args: argparse.Namespace) -> None:
     records: list[dict[str, Any]] = []
     for idx, listing in enumerate(all_raw, 1):
         article_id = article_id_from_url(listing.get("webUrl", ""))
-        print(f"[crawl:daangn] detail_progress={idx}/{len(all_raw)} article_id={article_id}", flush=True)
+        if idx % CRAWL_DETAIL_PROGRESS_EVERY == 0:
+            print(f"[crawl:daangn] detail_progress={idx}/{len(all_raw)}", flush=True)
         trades = listing.get("trades") or []
         trade = next((t for t in trades if t.get("type") == "MONTH"), {})
         detail = {} if args.skip_detail else get_daangn_article_detail(session, article_id)
