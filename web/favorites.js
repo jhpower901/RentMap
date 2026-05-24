@@ -80,6 +80,19 @@
       });
   }
 
+  // Public refresh — pull server state and merge into local, then dispatch
+  // favoritesSynced so any page listening can re-render. Used by platform
+  // pages on visibilitychange so a tab that's been backgrounded for hours
+  // catches up to changes another device made in the meantime.
+  function refresh() {
+    return fetchServerState()
+      .then(payload => applyServerState(payload))
+      .catch(err => {
+        console.warn('Favorites refresh failed:', err);
+        return null;
+      });
+  }
+
   const ready = fetchServerState()
     .then(serverPayload => {
       const before = normalizePayload(serverPayload);
@@ -177,5 +190,5 @@
     }).then(r => r.json());
   }
 
-  window.Favorites = { getAll, isFav, add, remove, updateRating, updateNotes, addManual, addPhoto, getPhotos, deletePhoto, ready };
+  window.Favorites = { getAll, isFav, add, remove, updateRating, updateNotes, addManual, addPhoto, getPhotos, deletePhoto, ready, refresh };
 })();

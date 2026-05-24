@@ -8,6 +8,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+/* iOS Safari / mobile Chrome enlarge "long, narrow" text blocks (like
+   .info-long-val for description / 관리비 상세) via auto text sizing unless
+   we lock the scale at 100%. Without this the body says 13px but rendered
+   text on iPhone is ~17px. */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
 a{color:inherit;text-decoration:none}
 nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
@@ -215,9 +220,9 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="data_daangn.js"></script>
 <script src="data_zigbang.js"></script>
 <script src="data_naver.js"></script>
-<script src="favorites.js?v=20260524-detail1"></script>
+<script src="favorites.js?v=20260525-refresh"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
-<script src="listing-info.js?v=20260524-info1"></script>
+<script src="listing-info.js?v=20260525-humanize"></script>
 <script>
 const CRITERIA = [
   { key: 'daylight',    label: '☀️ 채광',     desc: '자연채광·햇빛' },

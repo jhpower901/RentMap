@@ -39,6 +39,13 @@ Thumbs.db
 
 # Docker
 .dockerignore
+# Per-machine compose override (e.g. host port publish for local dev). Servers
+# behind a reverse proxy don't want this committed.
+docker-compose.override.yml
+
+# Archived legacy stores (sqlite favorites DB, JSON dump) — kept on disk for
+# rollback safety after the postgres migration but not tracked.
+data/legacy_pre_postgres/
 
 # IDEs
 .vscode/

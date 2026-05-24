@@ -273,6 +273,24 @@
       AreaFilter.subscribe(render);
     }
 
+    // Cross-device favorites sync — re-render heart icons when localStorage
+    // gets refreshed from the server (fires once on initial load + on every
+    // subsequent /api/favorites POST response). Without this listener the
+    // initial render uses the stale localStorage snapshot and never updates,
+    // so a heart toggled on another device stays invisible until full reload.
+    window.addEventListener('favoritesSynced', render);
+
+    // Refetch server state when the tab becomes visible again. The page may
+    // have been backgrounded for hours while a phone added/removed a
+    // favorite — visibilitychange is the cheapest cross-device convergence
+    // signal that doesn't require polling. Favorites.refresh() handles the
+    // GET, merge, and favoritesSynced dispatch which re-runs render() above.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && window.Favorites && window.Favorites.refresh) {
+        window.Favorites.refresh();
+      }
+    });
+
     render();
   }
 

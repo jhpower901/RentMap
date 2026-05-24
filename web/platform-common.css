@@ -1,4 +1,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
+/* Lock mobile text autosizing — see favorites.html for the same fix. iOS
+   Safari enlarges description / 관리비 상세 blocks otherwise. */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
 a{color:inherit;text-decoration:none}
 nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
