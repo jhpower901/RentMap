@@ -2,7 +2,6 @@ import os
 import re
 import json
 import shutil
-import sqlite3
 import subprocess
 import sys
 import time
@@ -205,166 +204,15 @@ def price_history(source: str, listing_no: str, limit: int = 60) -> dict[str, An
 
 # Data storage paths
 DATA_DIR = "data"
-FAVORITES_FILE = os.path.join(DATA_DIR, "favorites_persistent.json")
-FAVORITES_DB_FILE = os.path.join(DATA_DIR, "rentmap.db")
 PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
-def normalize_favorites_payload(payload: Any) -> dict[str, Any]:
-    if isinstance(payload, list):
-        return {"favorites": payload, "deleted": {}}
-    if isinstance(payload, dict):
-        favorites = payload.get("favorites")
-        deleted = payload.get("deleted")
-        return {
-            "favorites": favorites if isinstance(favorites, list) else [],
-            "deleted": deleted if isinstance(deleted, dict) else {},
-        }
-    return {"favorites": [], "deleted": {}}
-
-def iso_time(value: Any) -> float:
-    if not isinstance(value, str):
-        return 0
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return 0
-
-def merge_deleted(*states: dict[str, Any]) -> dict[str, str]:
-    merged: dict[str, str] = {}
-    for state in states:
-        for key, value in state.get("deleted", {}).items():
-            if isinstance(key, str) and isinstance(value, str):
-                if iso_time(value) >= iso_time(merged.get(key)):
-                    merged[key] = value
-    return merged
-
-def filter_deleted(favorites: list[Any], deleted: dict[str, str]) -> list[Any]:
-    filtered = []
-    for entry in favorites:
-        if not isinstance(entry, dict):
-            continue
-        key = entry.get("key")
-        if not key:
-            continue
-        if iso_time(deleted.get(key)) >= iso_time(entry.get("savedAt")):
-            continue
-        filtered.append(entry)
-    return filtered
-
-def merge_favorites(*states: dict[str, Any], deleted: dict[str, str]) -> list[Any]:
-    by_key: dict[str, dict[str, Any]] = {}
-    for state in states:
-        for entry in state.get("favorites", []):
-            if not isinstance(entry, dict):
-                continue
-            key = entry.get("key")
-            if not isinstance(key, str) or not key:
-                continue
-            if iso_time(deleted.get(key)) >= iso_time(entry.get("savedAt")):
-                continue
-            prev = by_key.get(key)
-            if prev is None or iso_time(entry.get("savedAt")) >= iso_time(prev.get("savedAt")):
-                by_key[key] = entry
-    return sorted(by_key.values(), key=lambda entry: iso_time(entry.get("savedAt")), reverse=True)
-
-def db_connect() -> sqlite3.Connection:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    conn = sqlite3.connect(FAVORITES_DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def ensure_favorites_db() -> None:
-    conn = db_connect()
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS favorites (
-                key TEXT PRIMARY KEY,
-                id TEXT NOT NULL,
-                source TEXT NOT NULL,
-                entry_json TEXT NOT NULL,
-                saved_at TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS favorite_deleted (
-                key TEXT PRIMARY KEY,
-                deleted_at TEXT NOT NULL
-            )
-        """)
-        fav_count = conn.execute("SELECT COUNT(*) FROM favorites").fetchone()[0]
-        del_count = conn.execute("SELECT COUNT(*) FROM favorite_deleted").fetchone()[0]
-        if fav_count == 0 and del_count == 0 and os.path.exists(FAVORITES_FILE):
-            try:
-                with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
-                    legacy = normalize_favorites_payload(json.load(f))
-                write_favorites_state(legacy, conn=conn)
-                print(f"[favorites] migrated legacy JSON to SQLite: {FAVORITES_DB_FILE}", flush=True)
-            except Exception as exc:
-                print(f"[favorites] legacy JSON migration skipped: {exc}", flush=True)
-    finally:
-        conn.close()
-
-def write_favorites_state(state: dict[str, Any], *, conn: sqlite3.Connection | None = None) -> None:
-    close_conn = conn is None
-    if conn is None:
-        conn = db_connect()
-    try:
-        conn.execute("DELETE FROM favorites")
-        for entry in state.get("favorites", []):
-            if not isinstance(entry, dict):
-                continue
-            key = entry.get("key")
-            id_value = entry.get("id")
-            source = entry.get("source")
-            if not key or id_value is None or source is None:
-                continue
-            conn.execute(
-                """
-                INSERT INTO favorites (key, id, source, entry_json, saved_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    id=excluded.id,
-                    source=excluded.source,
-                    entry_json=excluded.entry_json,
-                    saved_at=excluded.saved_at
-                """,
-                (str(key), str(id_value), str(source), json.dumps(entry, ensure_ascii=False), entry.get("savedAt") or ""),
-            )
-        conn.execute("DELETE FROM favorite_deleted")
-        for key, deleted_at in state.get("deleted", {}).items():
-            if isinstance(key, str) and isinstance(deleted_at, str):
-                conn.execute(
-                    "INSERT INTO favorite_deleted (key, deleted_at) VALUES (?, ?)",
-                    (key, deleted_at),
-                )
-        conn.commit()
-    finally:
-        if close_conn:
-            conn.close()
-
-def load_favorites_state_from_db() -> dict[str, Any]:
-    ensure_favorites_db()
-    conn = db_connect()
-    try:
-        deleted = {
-            row["key"]: row["deleted_at"]
-            for row in conn.execute("SELECT key, deleted_at FROM favorite_deleted")
-        }
-        favorites = []
-        for row in conn.execute("SELECT entry_json FROM favorites"):
-            try:
-                entry = json.loads(row["entry_json"])
-            except json.JSONDecodeError:
-                continue
-            key = entry.get("key") if isinstance(entry, dict) else None
-            if key and iso_time(deleted.get(key)) < iso_time(entry.get("savedAt")):
-                favorites.append(entry)
-        favorites.sort(key=lambda entry: iso_time(entry.get("savedAt")), reverse=True)
-        return {"favorites": favorites, "deleted": deleted}
-    finally:
-        conn.close()
+# favorites storage moved to Postgres — see scripts/favorites.py.
+# This module is imported lazily so the server starts even before the DB is
+# reachable (the API endpoints below catch failures and return empty state).
+sys.path.insert(0, str(ROOT / "scripts"))
+import favorites as fav_store  # noqa: E402, WPS433
 
 _SAFE_FOLDER_RE = re.compile(r"[^A-Za-z0-9_-]")
 _SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]")
@@ -393,21 +241,19 @@ def get_fav_dir(source: str, id: str):
     os.makedirs(resolved, exist_ok=True)
     return resolved
 
-def load_favorites_state() -> dict[str, Any]:
-    return load_favorites_state_from_db()
-
 @app.get("/api/favorites/state")
 async def get_favorites_state():
     try:
-        return load_favorites_state()
+        return fav_store.load_state()
     except Exception as e:
+        # Don't 500 the client over a DB blip — empty state lets local cache win.
         print(f"Error reading favorites: {e}")
         return {"favorites": [], "deleted": {}}
 
 @app.get("/api/favorites")
 async def get_favorites():
     try:
-        return load_favorites_state()["favorites"]
+        return fav_store.load_state()["favorites"]
     except Exception as e:
         print(f"Error reading favorites: {e}")
         return []
@@ -415,15 +261,7 @@ async def get_favorites():
 @app.post("/api/favorites")
 async def save_favorites(favorites: Any = Body(...)):
     try:
-        existing = load_favorites_state()
-        incoming = normalize_favorites_payload(favorites)
-        deleted = merge_deleted(existing, incoming)
-        payload = {
-            "favorites": merge_favorites(existing, incoming, deleted=deleted),
-            "deleted": deleted,
-        }
-        write_favorites_state(payload)
-        return payload
+        return fav_store.merge_payload(favorites)
     except Exception as e:
         print(f"Error saving favorites: {e}")
         raise HTTPException(status_code=500, detail=str(e))
