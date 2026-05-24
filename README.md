@@ -10,18 +10,28 @@
 
 ## 0. 컨테이너 구성
 
-| 컨테이너 | 역할 | 자동 스케줄 |
-|---|---|---|
-| `rentmap-server` | dabang / zigbang / daangn 크롤 + `gen-web` + 웹서버(:8000) | 크롤 매시간 `:00`, `gen-web` `:00` / `:30` |
-| `rentmap-naver` | naver 크롤 (playwright) | 매시간 `:00` |
+| 컨테이너 | 위치 | 역할 | 자동 스케줄 |
+|---|---|---|---|
+| `rentmap-server` | RentMap | dabang / zigbang / daangn 크롤 + `gen-web` + 웹서버(:8000) + webhook worker | 크롤 매시간 `:00`, `gen-web` `:00` / `:30`, webhook 매분 |
+| `rentmap-naver`  | RentMap | naver 크롤 (playwright) | 매시간 `:00` |
+| `rentmap-postgres` | [`../db-stack/`](../db-stack/) (별 compose) | 매물 history DB. 크롤 후 reconcile이 incremental snapshot 적재 | — (상시) |
 
-두 컨테이너는 `./data`, `./scripts` 볼륨을 공유하므로 어느 쪽이 CSV를 쓰든 상대편의 `gen-web`이 자동으로 집어듭니다.
+세 컨테이너는 `rentmap-db` 외부 네트워크로 연결됩니다. RentMap의 `docker-compose.yml`은 그 네트워크를 `external: true`로 참조하므로 **db-stack을 먼저 띄워야** RentMap이 정상 기동.
 
 ```sh
-docker compose up -d           # 두 컨테이너 모두 기동
-docker compose ps              # 상태 확인
-docker compose logs -f rentmap # 스케줄러 로그 (크롤/gen-web 진행)
+# 1) DB 먼저
+cd ../db-stack && docker compose up -d
+
+# 2) RentMap (DB 네트워크에 붙으면서 기동)
+cd ../RentMap && docker compose up -d
+
+# 상태 확인
+docker compose ps                              # RentMap 두 컨테이너
+docker ps --filter name=rentmap-postgres       # DB
+docker compose logs -f rentmap                 # 크롤/gen-web/webhook 진행
 ```
+
+**환경변수**: RentMap 폴더의 `.env`에서 `RENTMAP_DB_URL`, `RENTMAP_DISCORD_WEBHOOK_URL` 등 설정. 템플릿은 [`.env.example`](.env.example) 참고.
 
 ---
 
@@ -220,17 +230,118 @@ docker compose logs -f rentmap rentmap-naver
 
 | 파일 | 의미 |
 |---|---|
-| `data/<source>_ajou_<YYYY-MM-DD>.csv` | 크롤 원본 |
+| `data/<source>_ajou_<YYYY-MM-DD>.csv` | 크롤 원본 (canonical "이번 정시 결과") |
 | `data/naver_land_ajou_<DATE>.raw.json` | 네이버 원본 응답 (디버깅용) |
 | `web/data_<source>.js` | `gen-web`이 만든 페이지 데이터 |
 | `web/<source>.html` | 플랫폼별 페이지 |
 | `web/favorites.html` | 좋아요 페이지 (브라우저 localStorage 기반) |
+| `web/listing-info.js` | 매물 detail 패널 + 가격 sparkline 렌더 (공유 모듈) |
 | `web/platform-common.{js,css}` | 4개 페이지 공통 모듈 |
+| Postgres `rentmap-postgres` | 매물 history (snapshots, price_snapshots, events). 별 compose stack에서 운영 |
 
 ---
 
-## 7. 더 깊은 문서
+## 7. DB 운영 명령
 
+### 7.1 마이그레이션 (`scripts/migrate.py`)
+
+```sh
+# 적용된 / 보류 마이그레이션 확인
+docker exec rentmap-server bash -c "cd /app && python scripts/migrate.py status"
+
+# 보류 마이그레이션 모두 적용
+docker exec rentmap-server bash -c "cd /app && python scripts/migrate.py up"
+
+# 특정 버전까지만 적용
+docker exec rentmap-server bash -c "cd /app && python scripts/migrate.py up --to 001"
+```
+
+> 파일명은 `db/migrations/NNN_name.sql` 규칙. 이미 적용된 파일의 sha256이 바뀌면 거부 — 수정은 새 마이그레이션으로 fix-forward.
+
+### 7.2 백필 (`scripts/backfill.py`) — CSV → DB 시드
+
+```sh
+# data/ 디렉터리의 모든 *_ajou_*.csv를 시간순으로 적재 (dry-run-webhooks 기본)
+docker exec rentmap-server python scripts/backfill.py
+
+# 특정 날짜만
+docker exec rentmap-server python scripts/backfill.py --date 2026-05-24
+
+# 단일 파일
+docker exec rentmap-server python scripts/backfill.py --csv data/dabang_ajou_2026-05-24.csv
+
+# webhook 실 발송 허용 (위험 — 큰 backlog 시 Discord 폭주)
+docker exec rentmap-server python scripts/backfill.py --live
+```
+
+기본은 **dry-run-webhooks** — 이벤트가 큐에 들어가도 `webhook_sent_at`가 즉시 마킹돼 worker가 발송하지 않음. 빈 DB에 6,000행을 부으면서 6,000개 Discord 알림이 날아가는 사고 방지용.
+
+### 7.3 Webhook worker (`scripts/webhook_worker.py`)
+
+평소엔 `rentmap-server` 안 scheduler가 **매 1분** 자동 호출. 수동 실행도 가능:
+
+```sh
+# 큐 상태
+docker exec rentmap-server bash -c "cd /app && python scripts/webhook_worker.py pending"
+
+# 1회 flush (기본 25건)
+docker exec rentmap-server bash -c "cd /app && python scripts/webhook_worker.py flush"
+
+# HTTP 안 보내고 sent로만 마킹 (테스트용)
+docker exec rentmap-server bash -c "cd /app && python scripts/webhook_worker.py flush --dry-run"
+```
+
+Discord 발급/설정/dry-run 운용은 [`docs/webhook-discord.md`](docs/webhook-discord.md) 참고.
+
+### 7.4 gen-web 데이터 소스 (`--source`)
+
+```sh
+# 기본 (auto): DB 우선, 비어있으면 source별로 CSV fallback
+docker exec rentmap-server python scripts/rentmap.py gen-web
+
+# DB만 (백필/reconcile 결과 확인용)
+docker exec rentmap-server python scripts/rentmap.py gen-web --source db
+
+# CSV만 (DB 다운 시 안전망)
+docker exec rentmap-server python scripts/rentmap.py gen-web --source csv
+```
+
+### 7.5 가격 추이 API
+
+브라우저에서 매물 펼침 시 `listing-info.js`가 lazy 호출:
+
+```
+GET /api/listings/{source}/{listing_no}/price-history?limit=60
+```
+
+응답: `{"points": [{"t":"ISO datetime","deposit":N,"rent":N,"maint":N,"total":N}, ...]}` (시간 오름차순). 1점 이하면 sparkline 안 그림.
+
+### 7.6 운영 체크리스트
+
+```sh
+# DB 상태
+docker exec rentmap-postgres pg_isready -U rentmap
+
+# 최근 크롤 결과
+docker exec rentmap-postgres psql -U rentmap -d rentmap -c "
+SELECT p.code, c.started_at, c.finished_at, c.total_saved
+FROM crawl_runs c JOIN platforms p ON p.id=c.platform_id
+ORDER BY c.id DESC LIMIT 8;"
+
+# 미발송 이벤트
+docker exec rentmap-server bash -c "cd /app && python scripts/webhook_worker.py pending"
+
+# DB 용량
+docker exec rentmap-postgres psql -U rentmap -d rentmap -c "
+SELECT pg_size_pretty(pg_database_size('rentmap'));"
+```
+
+---
+
+## 8. 더 깊은 문서
+
+- [`docs/db-history-schema.md`](docs/db-history-schema.md) — DB 스키마 + 적재 흐름 + 정책 + 용량 예산
+- [`docs/webhook-discord.md`](docs/webhook-discord.md) — Discord webhook 발급/설정/dry-run/안전 운용
 - [`docs/dabang-crawling.md`](docs/dabang-crawling.md)
 - [`docs/zigbang-crawling.md`](docs/zigbang-crawling.md)
 - [`docs/daangn-crawling.md`](docs/daangn-crawling.md)
