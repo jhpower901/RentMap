@@ -17,6 +17,11 @@ source values stay client-side ('dabang', 'daangn', 'zigbang', 'naver',
 'manual'). For crawled sources we resolve the matching ``listings.id`` so
 favorite rows can join back to the live listing; 'naver' is mapped to the
 platforms.code 'naver_land' on the way in.
+
+All operations are scoped to ``user_id`` — favorites are per-user since the
+self-login system landed. The 003 migration added ``user_id`` as nullable and
+the operator backfills via ``scripts/users.py migrate-globals --to <user>``;
+004 promotes it to NOT NULL and swaps the primary key to ``(user_id, key)``.
 """
 
 from __future__ import annotations
@@ -94,19 +99,24 @@ def _parse_ts(value: str | None) -> datetime:
         return datetime.fromtimestamp(0, tz=timezone.utc)
 
 
-def load_state() -> dict[str, Any]:
-    """Read full favorites state from Postgres, applying the tombstone filter.
+def load_state(user_id: int) -> dict[str, Any]:
+    """Read this user's favorites state from Postgres, applying the tombstone filter.
 
     Returns the same shape the client expects: a dict with ``favorites`` (list
     sorted newest-first) and ``deleted`` (key → iso timestamp).
     """
     with session() as conn, conn.cursor() as cur:
-        cur.execute("SELECT key, deleted_at FROM favorite_deleted")
+        cur.execute(
+            "SELECT key, deleted_at FROM favorite_deleted WHERE user_id = %s",
+            (user_id,),
+        )
         deleted: dict[str, str] = {
             row["key"]: row["deleted_at"].isoformat() for row in cur.fetchall()
         }
         cur.execute(
-            "SELECT key, entry_json, saved_at FROM favorites ORDER BY saved_at DESC"
+            "SELECT key, entry_json, saved_at FROM favorites "
+            "WHERE user_id = %s ORDER BY saved_at DESC",
+            (user_id,),
         )
         favorites: list[dict[str, Any]] = []
         for row in cur.fetchall():
@@ -126,10 +136,10 @@ def load_state() -> dict[str, Any]:
     return {"favorites": favorites, "deleted": deleted}
 
 
-def merge_payload(incoming: Any) -> dict[str, Any]:
+def merge_payload(user_id: int, incoming: Any) -> dict[str, Any]:
     """Merge an incoming POST payload with current DB state and persist.
 
-    Per-key resolution:
+    Per-key resolution (scoped to this user):
       - Tombstones merge by max(deleted_at) per key.
       - Favorites: latest savedAt wins per key. Tombstone with later timestamp
         kills both sides.
@@ -137,11 +147,17 @@ def merge_payload(incoming: Any) -> dict[str, Any]:
     incoming_state = normalize_payload(incoming)
     with session() as conn, conn.cursor() as cur:
         # Pull existing state in the same transaction so the read+write is consistent.
-        cur.execute("SELECT key, deleted_at FROM favorite_deleted")
+        cur.execute(
+            "SELECT key, deleted_at FROM favorite_deleted WHERE user_id = %s",
+            (user_id,),
+        )
         existing_deleted: dict[str, str] = {
             row["key"]: row["deleted_at"].isoformat() for row in cur.fetchall()
         }
-        cur.execute("SELECT key, entry_json, saved_at FROM favorites")
+        cur.execute(
+            "SELECT key, entry_json, saved_at FROM favorites WHERE user_id = %s",
+            (user_id,),
+        )
         existing_favs: dict[str, dict[str, Any]] = {}
         for row in cur.fetchall():
             entry = row["entry_json"]
@@ -174,8 +190,8 @@ def merge_payload(incoming: Any) -> dict[str, Any]:
             if prev is None or _iso_time(entry.get("savedAt")) >= _iso_time(prev.get("savedAt")):
                 merged_favs[key] = entry
 
-        # ── Persist (full replace; the merged result IS the source of truth) ─
-        cur.execute("DELETE FROM favorites")
+        # ── Persist (full replace for this user; the merged result IS the source of truth) ─
+        cur.execute("DELETE FROM favorites WHERE user_id = %s", (user_id,))
         for entry in merged_favs.values():
             saved_at = _parse_ts(entry.get("savedAt"))
             source = str(entry.get("source") or "")
@@ -185,24 +201,24 @@ def merge_payload(incoming: Any) -> dict[str, Any]:
             listing_id = _resolve_listing_id(cur, source, listing_no)
             cur.execute(
                 """
-                INSERT INTO favorites (key, source, listing_no, listing_id,
+                INSERT INTO favorites (user_id, key, source, listing_no, listing_id,
                                        entry_json, saved_at, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s::jsonb, %s, now(), now())
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, now(), now())
                 """,
                 (
-                    entry["key"], source, listing_no, listing_id,
+                    user_id, entry["key"], source, listing_no, listing_id,
                     json.dumps(entry, ensure_ascii=False), saved_at,
                 ),
             )
 
-        cur.execute("DELETE FROM favorite_deleted")
+        cur.execute("DELETE FROM favorite_deleted WHERE user_id = %s", (user_id,))
         for key, deleted_at in merged_deleted.items():
             cur.execute(
-                "INSERT INTO favorite_deleted (key, deleted_at) VALUES (%s, %s)",
-                (key, _parse_ts(deleted_at)),
+                "INSERT INTO favorite_deleted (user_id, key, deleted_at) VALUES (%s, %s, %s)",
+                (user_id, key, _parse_ts(deleted_at)),
             )
 
-    return load_state()
+    return load_state(user_id)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -210,11 +226,11 @@ def merge_payload(incoming: Any) -> dict[str, Any]:
 # is empty and a legacy data/rentmap.db sqlite is present.
 # ──────────────────────────────────────────────────────────────────────────────
 
-def import_from_sqlite(sqlite_path: str | Path) -> dict[str, int]:
-    """Copy sqlite favorites + deleted into Postgres, idempotent.
+def import_from_sqlite(user_id: int, sqlite_path: str | Path) -> dict[str, int]:
+    """Copy sqlite favorites + deleted into Postgres for ``user_id``, idempotent.
 
-    No-ops if postgres already has rows (assume the import was done). Returns
-    counts of rows considered / inserted for logging.
+    No-ops if postgres already has rows for that user (assume the import was
+    done). Returns counts of rows considered / inserted for logging.
     """
     import sqlite3
 
@@ -225,10 +241,11 @@ def import_from_sqlite(sqlite_path: str | Path) -> dict[str, int]:
         return summary
 
     with session() as conn, conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS n FROM favorites")
+        cur.execute("SELECT COUNT(*) AS n FROM favorites WHERE user_id = %s", (user_id,))
         existing = cur.fetchone()["n"]
         if existing:
-            log.info("postgres favorites already has %d rows; import skipped", existing)
+            log.info("postgres favorites already has %d rows for user_id=%s; import skipped",
+                     existing, user_id)
             summary["skipped"] = existing
             return summary
 
@@ -252,10 +269,10 @@ def import_from_sqlite(sqlite_path: str | Path) -> dict[str, int]:
 
     summary["sqlite_favs"] = len(favs)
     summary["sqlite_deleted"] = len(deleted)
-    merge_payload({"favorites": favs, "deleted": deleted})
+    merge_payload(user_id, {"favorites": favs, "deleted": deleted})
     log.info(
-        "imported %d favorites + %d deletions from sqlite",
-        summary["sqlite_favs"], summary["sqlite_deleted"],
+        "imported %d favorites + %d deletions from sqlite for user_id=%s",
+        summary["sqlite_favs"], summary["sqlite_deleted"], user_id,
     )
     return summary
 
@@ -267,10 +284,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Favorites postgres utilities.")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_import = sub.add_parser("import", help="One-shot sqlite → postgres import")
+    p_import.add_argument("--user-id", type=int, required=True)
     p_import.add_argument("--sqlite", default="data/rentmap.db")
-    sub.add_parser("dump", help="Print current postgres state as JSON")
+    p_dump = sub.add_parser("dump", help="Print a user's postgres state as JSON")
+    p_dump.add_argument("--user-id", type=int, required=True)
     args = parser.parse_args()
     if args.cmd == "import":
-        print(import_from_sqlite(args.sqlite))
+        print(import_from_sqlite(args.user_id, args.sqlite))
     elif args.cmd == "dump":
-        print(json.dumps(load_state(), default=str, ensure_ascii=False, indent=2))
+        print(json.dumps(load_state(args.user_id), default=str, ensure_ascii=False, indent=2))

@@ -8,6 +8,21 @@
     dabang: '다방', daangn: '당근부동산', zigbang: '직방', naver: '네이버부동산',
   };
 
+  function esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function safeUrl(v) {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    try {
+      const url = new URL(raw, window.location.href);
+      if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+    } catch (_) {}
+    return '';
+  }
+
   function fmtDeposit(v) {
     if (v === null || v === undefined) return '-';
     if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '억';
@@ -99,20 +114,21 @@
 
     const markerMap = new Map();
     RAW.forEach(r => {
+      r.url = safeUrl(r.url);
       if (!r.lat || !r.lon) return;
       const m = L.circleMarker([r.lat, r.lon], {
         radius: 7, fillColor: agencyColor(r.agency), color: '#fff', weight: 2, fillOpacity: 0.85,
       }).addTo(map);
       const imgHtml = r.img1
-        ? '<img class="popup-img" src="' + imageSrc(r.img1, source) + '" onerror="this.style.display=\'none\'">'
+        ? '<img class="popup-img" src="' + esc(safeUrl(imageSrc(r.img1, source))) + '" onerror="this.style.display=\'none\'">'
         : '';
       m.bindPopup(
-        '<div class="popup-title">' + (r.title || '') + '</div>' +
+        '<div class="popup-title">' + esc(r.title || '') + '</div>' +
         imgHtml +
         '<div class="popup-price">보증금 ' + fmtDeposit(r.deposit) + ' / 월세 ' + fmtRent(r.rent) + '</div>' +
         '<div class="popup-meta">관리비 ' + fmtRent(r.maint) + ' | 총 ' + fmtRent(r.total) + '</div>' +
-        '<div class="popup-meta"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + agencyColor(r.agency) + ';vertical-align:middle;margin-right:4px"></span>' + agencyLabel(r.agency, source) + (r.phone ? ' ' + r.phone : '') + '</div>' +
-        '<div class="popup-meta">' + (r.address || r.region || '') + '</div>' +
+        '<div class="popup-meta"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + agencyColor(r.agency) + ';vertical-align:middle;margin-right:4px"></span>' + esc(agencyLabel(r.agency, source)) + (r.phone ? ' ' + esc(r.phone) : '') + '</div>' +
+        '<div class="popup-meta">' + esc(r.address || r.region || '') + '</div>' +
         '<div style="margin-top:6px"><a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a></div>'
       );
       markerMap.set(r.id, { marker: m, data: r });
@@ -176,7 +192,10 @@
       tbody.innerHTML = '';
       filtered.forEach(r => {
         const tr = document.createElement('tr');
-        tr.dataset.rowId = r.id;
+        tr.dataset.rowId = String(r.id || '');
+        r.img1 = safeUrl(imageSrc(r.img1, source));
+        const favId = esc(r.id);
+        const favSource = esc(r.source);
         const imgCell = r.img1
           ? '<img class="img-thumb" data-src="' + imageSrc(r.img1, source) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
           : '<div class="no-img">사진없음</div>';
@@ -187,13 +206,13 @@
           '<td class="price">' + fmtRent(r.rent) + '</td>' +
           '<td>' + fmtRent(r.maint) + '</td>' +
           '<td class="total-price">' + fmtRent(r.total) + '</td>' +
-          '<td>' + (r.type || '-') + '</td>' +
-          '<td>' + fmtArea(r.area) + '</td>' +
-          '<td>' + (r.floor || '-') + '</td>' +
-          '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (r.address || r.region || '-') + '</td>' +
-          '<td class="agency-cell">' + agencyLabel(r.agency, source) + (r.phone ? '<br><span class="phone-small">' + r.phone + '</span>' : '') + '</td>' +
+          '<td>' + esc(r.type || '-') + '</td>' +
+          '<td>' + esc(fmtArea(r.area)) + '</td>' +
+          '<td>' + esc(r.floor || '-') + '</td>' +
+          '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.address || r.region || '-') + '</td>' +
+          '<td class="agency-cell">' + esc(agencyLabel(r.agency, source)) + (r.phone ? '<br><span class="phone-small">' + esc(r.phone) + '</span>' : '') + '</td>' +
           '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
-          '<td style="text-align:center"><button class="heart-btn" data-fav-id="' + r.id + '" data-fav-source="' + r.source + '">' +
+          '<td style="text-align:center"><button class="heart-btn" data-fav-id="' + favId + '" data-fav-source="' + favSource + '">' +
             (window.Favorites && window.Favorites.isFav(r.id, r.source) ? '❤️' : '🤍') +
           '</button></td>';
         tr.addEventListener('click', e => {

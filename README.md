@@ -258,6 +258,37 @@ docker exec rentmap-server bash -c "cd /app && python scripts/migrate.py up --to
 
 > 파일명은 `db/migrations/NNN_name.sql` 규칙. 이미 적용된 파일의 sha256이 바뀌면 거부 — 수정은 새 마이그레이션으로 fix-forward.
 
+#### 자체 로그인 도입 (003 → 004) — 한 번만 실행
+
+기존 Caddy basic-auth만 쓰던 인스턴스를 자체 로그인 시스템으로 이전할 때 순서:
+
+```sh
+# 1) RENTMAP_SIGNUP_CODE를 .env에 설정한 뒤 컨테이너 재빌드
+docker compose up -d --build
+
+# 2) 003 까지만 적용 (users/sessions/user_area_filters 테이블, favorites.user_id NULL 컬럼)
+docker exec rentmap-server bash -c "cd /app && python scripts/migrate.py up --to 003"
+
+# 3) admin 계정 생성 — 패스워드는 stdin
+docker exec -it rentmap-server bash -c "cd /app && python scripts/users.py create-admin <username>"
+
+# 4) 기존 글로벌 favorites + photos를 admin 소유로 일괄 할당
+docker exec rentmap-server bash -c "cd /app && python scripts/users.py migrate-globals --to <username>"
+
+# 5) 004 적용 — user_id NOT NULL + (user_id, key) PK 승격
+docker exec rentmap-server bash -c "cd /app && python scripts/migrate.py up"
+```
+
+이후 회원가입은 `/login.html`의 회원가입 탭에서 `RENTMAP_SIGNUP_CODE`를 입력해 추가. 사용자 관리 명령:
+
+```sh
+docker exec rentmap-server bash -c "cd /app && python scripts/users.py list"
+docker exec -it rentmap-server bash -c "cd /app && python scripts/users.py reset-password <username>"
+docker exec rentmap-server bash -c "cd /app && python scripts/users.py deactivate <username>"
+```
+
+자체 로그인이 안정화되면 Caddy 기본 인증은 제거 가능 — 그 전까지는 이중 인증으로 둔다.
+
 ### 7.2 백필 (`scripts/backfill.py`) — CSV → DB 시드
 
 ```sh

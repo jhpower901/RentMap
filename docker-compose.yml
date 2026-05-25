@@ -28,6 +28,14 @@ services:
       # picks it up. Safety toggle for the first cron cycles after a schema
       # change. Default 0 = live delivery.
       - RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS=${RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS:-0}
+      # Self-login: signup is refused unless RENTMAP_SIGNUP_CODE is set, and a
+      # client must present the matching code at /api/auth/signup. Set this
+      # before bringing the stack up the first time.
+      - RENTMAP_SIGNUP_CODE=${RENTMAP_SIGNUP_CODE:-}
+      # Session cookie Secure flag. auto (default) follows request scheme:
+      # HTTPS gets Secure cookies, plain-http LAN/local dev does not.
+      # Force 1 behind custom proxies that do not pass X-Forwarded-Proto.
+      - RENTMAP_SESSION_SECURE=${RENTMAP_SESSION_SECURE:-auto}
       - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
       - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}

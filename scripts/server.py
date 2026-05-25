@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import shutil
 import subprocess
 import sys
 import time
@@ -13,9 +12,10 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, HTTPException, UploadFile, File, Body
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Body, Depends, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 import uvicorn
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -140,6 +140,200 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth (sessions, signup/login/logout, middleware)
+# ─────────────────────────────────────────────────────────────────────────────
+sys.path.insert(0, str(ROOT / "scripts"))
+import auth  # noqa: E402
+import favorites as fav_store  # noqa: E402
+import area_filters as area_store  # noqa: E402
+from db import session as db_session  # noqa: E402
+
+# Paths the auth middleware will let through without a session cookie.
+# Anything else under "/" or "/api" requires a logged-in user.
+_PUBLIC_EXACT = {
+    "/login.html",
+    "/favicon.ico",
+}
+_PUBLIC_PREFIXES = (
+    "/api/auth/",
+)
+# Static assets a logged-out user is allowed to request. login.html itself
+# pulls some of these (CSS reset, fonts loaded over HTTPS). We accept .html
+# being absent here on purpose — the only HTML reachable without a session
+# is /login.html, which is in _PUBLIC_EXACT.
+_PUBLIC_ASSET_EXTS = (".js", ".css", ".ico", ".png", ".jpg", ".jpeg",
+                      ".svg", ".webp", ".gif", ".woff", ".woff2", ".ttf",
+                      ".map")
+
+
+def _is_public(path: str) -> bool:
+    if path in _PUBLIC_EXACT:
+        return True
+    for p in _PUBLIC_PREFIXES:
+        if path.startswith(p):
+            return True
+    # CSV crawl data + photos live under /data/*; both need auth so we do NOT
+    # treat them as public assets even though the extension lookup might match.
+    if path.startswith("/data/"):
+        return False
+    if path.endswith(_PUBLIC_ASSET_EXTS):
+        return True
+    return False
+
+
+@app.middleware("http")
+async def session_guard(request: Request, call_next):
+    """HTML pages + API + /data require a valid session cookie.
+
+    /login.html, /api/auth/*, and static JS/CSS assets are open so the login
+    page can render. Photos in /data/photos/<uid>/... are double-checked
+    against the caller's user.id to keep one user from probing another's
+    folder by URL.
+    """
+    path = request.url.path
+    if _is_public(path):
+        return await call_next(request)
+
+    token = request.cookies.get(auth.COOKIE_NAME)
+    user = auth.lookup_session(token) if token else None
+
+    if user is None:
+        if path.startswith("/api/") or path.startswith("/data/"):
+            return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        # Pages → bounce to login. Preserve where the user was headed via ?next=.
+        target = "/login.html"
+        if path and path != "/":
+            target += f"?next={path}"
+        return RedirectResponse(target, status_code=302)
+
+    # Enforce per-user isolation on photo URLs. The folder layout is
+    # /data/photos/<user_id>/<source>_<listing_no>/<filename>; any digit-only
+    # segment in position 3 must equal the caller's user.id.
+    if path.startswith("/data/photos/"):
+        parts = path.split("/", 4)  # ['', 'data', 'photos', '<seg>', 'rest...']
+        if len(parts) >= 4 and parts[3].isdigit() and int(parts[3]) != user.id:
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)
+
+    request.state.user = user
+    return await call_next(request)
+
+
+class SignupBody(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=6, max_length=200)
+    code: str = Field(min_length=1, max_length=200)
+    display_name: str | None = Field(default=None, max_length=80)
+
+
+class LoginBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=200)
+
+
+def _public_user(user: auth.User) -> dict[str, Any]:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "displayName": user.display_name or user.username,
+        "isAdmin": user.is_admin,
+    }
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(body: SignupBody, request: Request, response: Response):
+    expected = auth.signup_code_required()
+    if body.code != expected:
+        raise HTTPException(status_code=400, detail="Invalid signup code")
+
+    username = body.username.strip()
+    if not re.match(r"^[A-Za-z0-9_.-]{2,64}$", username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username may contain letters, digits, '.', '_', '-' only",
+        )
+
+    pw_hash = auth.hash_password(body.password)
+    display_name = (body.display_name or "").strip() or username
+
+    with db_session() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="Username already taken")
+        # Decide admin: first user in the system becomes admin so the operator
+        # can run migrate-globals immediately after first signup if they prefer
+        # that over `users.py create-admin`.
+        cur.execute("SELECT COUNT(*) AS n FROM users")
+        is_first = (cur.fetchone()["n"] == 0)
+        cur.execute(
+            """
+            INSERT INTO users (username, password_hash, display_name, is_admin, last_login_at)
+            VALUES (%s, %s, %s, %s, now())
+            RETURNING id, username, display_name, is_admin, is_active
+            """,
+            (username, pw_hash, display_name, is_first),
+        )
+        row = cur.fetchone()
+
+    user = auth.User(
+        id=row["id"], username=row["username"], display_name=row["display_name"],
+        is_admin=row["is_admin"], is_active=row["is_active"],
+    )
+    token, expires_at = auth.create_session(
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+        ip=auth.get_client_ip(request),
+    )
+    auth.set_session_cookie(response, token, expires_at, request)
+    return {"user": _public_user(user)}
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: LoginBody, request: Request, response: Response):
+    username = body.username.strip()
+    with db_session() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, username, password_hash, display_name, is_admin, is_active "
+            "FROM users WHERE username = %s",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row or not row["is_active"]:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        if not auth.verify_password(body.password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        cur.execute("UPDATE users SET last_login_at = now() WHERE id = %s", (row["id"],))
+
+    user = auth.User(
+        id=row["id"], username=row["username"], display_name=row["display_name"],
+        is_admin=row["is_admin"], is_active=row["is_active"],
+    )
+    token, expires_at = auth.create_session(
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+        ip=auth.get_client_ip(request),
+    )
+    auth.set_session_cookie(response, token, expires_at, request)
+    return {"user": _public_user(user)}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    token = request.cookies.get(auth.COOKIE_NAME)
+    if token:
+        auth.revoke_session(token)
+    auth.clear_session_cookie(response, request)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: auth.User = Depends(auth.current_user)):
+    return {"user": _public_user(user)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Listings (global data, login required)
+# ─────────────────────────────────────────────────────────────────────────────
 _VALID_SOURCES = {"dabang", "daangn", "zigbang", "naver"}
 _SOURCE_TO_PLATFORM_CODE = {
     # UI uses short codes; DB platforms table stores "naver_land" for naver.
@@ -151,17 +345,12 @@ _SOURCE_TO_PLATFORM_CODE = {
 
 
 @app.get("/api/listings/{source}/{listing_no}/price-history")
-def price_history(source: str, listing_no: str, limit: int = 60) -> dict[str, Any]:
+def price_history(source: str, listing_no: str, limit: int = 60,
+                  user: auth.User = Depends(auth.current_user)) -> dict[str, Any]:
     """Return up to ``limit`` price snapshots for one listing, oldest first.
 
-    Powers the sparkline that the detail row lazy-loads when a user expands
-    a listing. The UI cap is small (≈20 points), but we default the API at
-    60 to leave room for future "show full history" UIs without a schema
-    change.
-
-    Returns ``{ "points": [{t, deposit, rent, maint, total}, ...] }``. Empty
-    points list is a valid response when the DB is empty or the listing was
-    never matched (e.g. a CSV-only environment).
+    Listings data is global — login gates the endpoint but every user sees
+    the same series.
     """
     if source not in _VALID_SOURCES:
         raise HTTPException(status_code=404, detail=f"unknown source: {source}")
@@ -170,9 +359,6 @@ def price_history(source: str, listing_no: str, limit: int = 60) -> dict[str, An
     limit = max(1, min(int(limit), 500))
 
     platform_code = _SOURCE_TO_PLATFORM_CODE[source]
-    # Late import keeps server boot independent of DB availability — a fresh
-    # container can serve static pages even before db-stack is up.
-    sys.path.insert(0, str(ROOT / "scripts"))
     try:
         from db import session, DBConfigError  # noqa: WPS433
     except ImportError as exc:
@@ -216,20 +402,20 @@ def price_history(source: str, listing_no: str, limit: int = 60) -> dict[str, An
     return {"points": points}
 
 
-# Data storage paths
+# ─────────────────────────────────────────────────────────────────────────────
+# Favorites + photos (per-user)
+# ─────────────────────────────────────────────────────────────────────────────
 DATA_DIR = "data"
 PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 
 os.makedirs(PHOTOS_DIR, exist_ok=True)
 
-# favorites storage moved to Postgres — see scripts/favorites.py.
-# This module is imported lazily so the server starts even before the DB is
-# reachable (the API endpoints below catch failures and return empty state).
-sys.path.insert(0, str(ROOT / "scripts"))
-import favorites as fav_store  # noqa: E402, WPS433
-
 _SAFE_FOLDER_RE = re.compile(r"[^A-Za-z0-9_-]")
 _SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]")
+_ALLOWED_PHOTO_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_ALLOWED_PHOTO_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+_MAX_PHOTO_BYTES = int(os.environ.get("RENTMAP_MAX_PHOTO_BYTES", str(10 * 1024 * 1024)))
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def _sanitize_folder_segment(value: str) -> str:
@@ -245,9 +431,22 @@ def _sanitize_filename(value: str) -> str:
     return cleaned
 
 
-def get_fav_dir(source: str, id: str):
+def _validate_photo_upload(file: UploadFile) -> str:
+    filename = _sanitize_filename(file.filename or "")
+    ext = os.path.splitext(filename)[1].lower()
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if ext not in _ALLOWED_PHOTO_EXTS:
+        raise HTTPException(status_code=415, detail="Unsupported photo extension")
+    if content_type and content_type not in _ALLOWED_PHOTO_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported photo content type")
+    return filename
+
+
+def get_fav_dir(user_id: int, source: str, id: str) -> str:
+    """Per-user folder: data/photos/<user_id>/<source>_<listing_no>/."""
+    user_segment = str(int(user_id))
     folder_name = f"{_sanitize_folder_segment(source)}_{_sanitize_folder_segment(id)}"
-    path = os.path.join(PHOTOS_DIR, folder_name)
+    path = os.path.join(PHOTOS_DIR, user_segment, folder_name)
     resolved = os.path.realpath(path)
     photos_root = os.path.realpath(PHOTOS_DIR)
     if not resolved.startswith(photos_root + os.sep):
@@ -255,39 +454,43 @@ def get_fav_dir(source: str, id: str):
     os.makedirs(resolved, exist_ok=True)
     return resolved
 
+
 @app.get("/api/favorites/state")
-async def get_favorites_state():
+async def get_favorites_state(user: auth.User = Depends(auth.current_user)):
     try:
-        return fav_store.load_state()
+        return fav_store.load_state(user.id)
     except Exception as e:
         # Don't 500 the client over a DB blip — empty state lets local cache win.
         print(f"Error reading favorites: {e}")
         return {"favorites": [], "deleted": {}}
 
+
 @app.get("/api/favorites")
-async def get_favorites():
+async def get_favorites(user: auth.User = Depends(auth.current_user)):
     try:
-        return fav_store.load_state()["favorites"]
+        return fav_store.load_state(user.id)["favorites"]
     except Exception as e:
         print(f"Error reading favorites: {e}")
         return []
 
+
 @app.post("/api/favorites")
-async def save_favorites(favorites: Any = Body(...)):
+async def save_favorites(favorites: Any = Body(...),
+                         user: auth.User = Depends(auth.current_user)):
     try:
-        return fav_store.merge_payload(favorites)
+        return fav_store.merge_payload(user.id, favorites)
     except Exception as e:
         print(f"Error saving favorites: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/photos")
-async def list_photos(id: str, source: str):
-    fav_dir = get_fav_dir(source, id)
+async def list_photos(id: str, source: str,
+                      user: auth.User = Depends(auth.current_user)):
+    fav_dir = get_fav_dir(user.id, source, id)
     photos = []
     for filename in sorted(os.listdir(fav_dir)):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-            # We return metadata including the web-accessible URL
-            # The URL points to /data/photos/folder/filename
             rel_path = os.path.relpath(os.path.join(fav_dir, filename), DATA_DIR).replace("\\", "/")
             photos.append({
                 "photoKey": filename,
@@ -296,33 +499,90 @@ async def list_photos(id: str, source: str):
             })
     return photos
 
+
 @app.post("/api/photos")
-async def upload_photo(id: str, source: str, file: UploadFile = File(...)):
-    fav_dir = get_fav_dir(source, id)
+async def upload_photo(id: str, source: str, file: UploadFile = File(...),
+                       user: auth.User = Depends(auth.current_user)):
+    fav_dir = get_fav_dir(user.id, source, id)
     timestamp = int(time.time() * 1000)
-    filename = f"{timestamp}_{_sanitize_filename(file.filename or '')}"
+    filename = f"{timestamp}_{_validate_photo_upload(file)}"
     file_path = os.path.join(fav_dir, filename)
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
+
+    bytes_written = 0
+    try:
+        with open(file_path, "wb") as buffer:
+            while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+                bytes_written += len(chunk)
+                if bytes_written > _MAX_PHOTO_BYTES:
+                    raise HTTPException(status_code=413, detail="Photo too large")
+                buffer.write(chunk)
+    except Exception:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise
+    finally:
+        await file.close()
+
     rel_path = os.path.relpath(file_path, DATA_DIR).replace("\\", "/")
     return {"photoKey": filename, "url": f"/data/{rel_path}"}
 
+
 @app.delete("/api/photos")
-async def delete_photo(id: str, source: str, photoKey: str):
-    fav_dir = get_fav_dir(source, id)
+async def delete_photo(id: str, source: str, photoKey: str,
+                       user: auth.User = Depends(auth.current_user)):
+    fav_dir = get_fav_dir(user.id, source, id)
     file_path = os.path.join(fav_dir, _sanitize_filename(photoKey))
     if os.path.exists(file_path):
         os.remove(file_path)
         return {"status": "deleted"}
     raise HTTPException(status_code=404, detail="Photo not found")
 
-# Mount data directory for CSV and Photo access
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-user area filter polygon
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AreaFilterBody(BaseModel):
+    points: list[list[float]]
+    enabled: bool = True
+
+
+@app.get("/api/area-filter")
+async def get_area_filter(user: auth.User = Depends(auth.current_user)):
+    try:
+        return area_store.load(user.id)
+    except Exception as e:
+        print(f"Error reading area filter: {e}")
+        # Degrade to default rather than 500ing the UI.
+        return {
+            "points": [p[:] for p in area_store.DEFAULT_POINTS],
+            "enabled": True,
+            "updated_at": None,
+            "is_default": True,
+            "error": str(e)[:200],
+        }
+
+
+@app.put("/api/area-filter")
+async def put_area_filter(body: AreaFilterBody,
+                          user: auth.User = Depends(auth.current_user)):
+    try:
+        return area_store.save(user.id, body.points, body.enabled)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error saving area filter: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Mount data directory for CSV and Photo access. Auth is enforced by the
+# session_guard middleware above (including per-user user_id check on
+# /data/photos/<uid>/...).
 app.mount("/data", StaticFiles(directory="data"), name="data")
 
 # Mount web directory at root for all other files (index.html, js, css etc.)
-# html=True enables serving index.html automatically at /
+# html=True enables serving index.html automatically at /. The middleware
+# turns away un-authenticated HTML requests before they reach this mount.
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
 if __name__ == "__main__":

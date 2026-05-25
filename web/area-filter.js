@@ -1,5 +1,7 @@
 (function () {
   const KEY = 'rentmap.areaFilter.v1';
+  const SERVER_URL = '/api/area-filter';
+  const PUSH_DEBOUNCE_MS = 500;
   const DEFAULT_POINTS = [
     [37.282812, 127.038062],
     [37.282812, 127.051938],
@@ -28,14 +30,68 @@
     }
   }
 
-  function save() {
+  function saveLocal() {
     try { localStorage.setItem(KEY, JSON.stringify({ points: state.points, enabled: state.enabled })); }
     catch (_) {}
+  }
+
+  // Debounced PUT to /api/area-filter. We don't gate UI updates on the
+  // network round-trip; localStorage is the source of truth for instant reads
+  // and the server PUT is fire-and-forget. ``suppressPush`` is set while we
+  // apply a server fetch into local state so we don't bounce it right back.
+  let pushTimer = null;
+  let suppressPush = false;
+  function schedulePush() {
+    if (suppressPush) return;
+    if (pushTimer) clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushNow, PUSH_DEBOUNCE_MS);
+  }
+  function pushNow() {
+    pushTimer = null;
+    fetch(SERVER_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ points: state.points, enabled: state.enabled }),
+    }).catch(err => console.warn('area-filter push failed:', err));
+  }
+  function save() {
+    saveLocal();
+    schedulePush();
   }
 
   const state = load();
   const listeners = new Set();
   function notify() { listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } }); }
+
+  // Pull authoritative state from the server on boot. Same-tab updates after
+  // this come through setPoints/setEnabled below; cross-tab via the storage
+  // event listener at the bottom of this file.
+  function pullFromServer() {
+    return fetch(SERVER_URL, { cache: 'no-store', credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !Array.isArray(data.points) || data.points.length < 3) return;
+        suppressPush = true;
+        try {
+          state.points = data.points.map(p => [Number(p[0]), Number(p[1])]);
+          state.enabled = data.enabled !== false;
+          saveLocal();
+          notify();
+        } finally {
+          suppressPush = false;
+        }
+      })
+      .catch(err => console.warn('area-filter pull failed:', err));
+  }
+  // Defer until the page is interactive so we don't compete with the initial
+  // marker render for network bandwidth; the localStorage value is already
+  // applied at this point.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', pullFromServer, { once: true });
+  } else {
+    pullFromServer();
+  }
 
   function isDefault() {
     if (state.points.length !== DEFAULT_POINTS.length) return false;

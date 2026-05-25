@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>로그인 - RentMap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{font-family:'Noto Sans KR',sans-serif;background:#f5f7fa;color:#222;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#fff;border-radius:14px;padding:28px 24px;box-shadow:0 6px 22px #0001;width:100%;max-width:380px}
+h1{font-size:22px;font-weight:700;text-align:center;margin-bottom:4px}
+.sub{text-align:center;color:#888;font-size:13px;margin-bottom:18px}
+.tabs{display:flex;border-bottom:1px solid #e6e8eb;margin-bottom:18px}
+.tab{flex:1;padding:9px 0;text-align:center;cursor:pointer;font-size:14px;font-weight:600;color:#888;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:#222;border-color:#222}
+form{display:flex;flex-direction:column;gap:10px}
+label{font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:3px}
+input{width:100%;padding:9px 11px;border:1px solid #d6d8dc;border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
+input:focus{outline:none;border-color:#6366F1;box-shadow:0 0 0 3px #6366F133}
+.btn{padding:10px 12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:6px}
+.btn:hover{background:#000}
+.btn:disabled{opacity:.55;cursor:default}
+.err{color:#c00;font-size:12px;min-height:16px;margin-top:2px;text-align:center}
+.note{font-size:11px;color:#999;text-align:center;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>RentMap</h1>
+  <p class="sub">아주대 월세 매물 통합</p>
+
+  <div class="tabs">
+    <div class="tab on" data-tab="login">로그인</div>
+    <div class="tab" data-tab="signup">회원가입</div>
+  </div>
+
+  <form id="loginForm" autocomplete="on">
+    <div>
+      <label for="lu">아이디</label>
+      <input id="lu" name="username" autocomplete="username" required>
+    </div>
+    <div>
+      <label for="lp">비밀번호</label>
+      <input id="lp" type="password" name="password" autocomplete="current-password" required>
+    </div>
+    <button class="btn" type="submit">로그인</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+
+  <form id="signupForm" style="display:none" autocomplete="on">
+    <div>
+      <label for="su">아이디 (2~64자, 영숫자 . _ -)</label>
+      <input id="su" name="username" autocomplete="username" required minlength="2" maxlength="64">
+    </div>
+    <div>
+      <label for="sd">표시 이름 (선택)</label>
+      <input id="sd" name="display_name" maxlength="80">
+    </div>
+    <div>
+      <label for="sp">비밀번호 (6자 이상)</label>
+      <input id="sp" type="password" name="password" autocomplete="new-password" required minlength="6">
+    </div>
+    <div>
+      <label for="sc">가입 코드</label>
+      <input id="sc" name="code" required>
+    </div>
+    <button class="btn" type="submit">가입하기</button>
+    <div class="err" id="signupErr"></div>
+  </form>
+
+  <div class="note">로그인 후 즐겨찾기 / 영역 필터 / 사진은 사용자별로 저장됩니다.</div>
+</div>
+
+<script>
+(function () {
+  const tabs = document.querySelectorAll('.tab');
+  const forms = { login: document.getElementById('loginForm'), signup: document.getElementById('signupForm') };
+  const errs = { login: document.getElementById('loginErr'), signup: document.getElementById('signupErr') };
+
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.toggle('on', x === t));
+    const which = t.dataset.tab;
+    forms.login.style.display = which === 'login' ? '' : 'none';
+    forms.signup.style.display = which === 'signup' ? '' : 'none';
+    errs.login.textContent = ''; errs.signup.textContent = '';
+  }));
+
+  function nextUrl() {
+    const params = new URLSearchParams(location.search);
+    const n = params.get('next') || '/';
+    // Only honor same-origin relative paths to avoid open-redirect.
+    return (n.startsWith('/') && !n.startsWith('//')) ? n : '/';
+  }
+
+  async function submit(url, body, errEl, btn) {
+    errEl.textContent = '';
+    btn.disabled = true;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errEl.textContent = data.detail || ('오류: ' + res.status);
+        return;
+      }
+      location.href = nextUrl();
+    } catch (e) {
+      errEl.textContent = '네트워크 오류: ' + (e && e.message ? e.message : e);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  forms.login.addEventListener('submit', e => {
+    e.preventDefault();
+    submit('/api/auth/login', {
+      username: forms.login.username.value.trim(),
+      password: forms.login.password.value,
+    }, errs.login, forms.login.querySelector('button'));
+  });
+
+  forms.signup.addEventListener('submit', e => {
+    e.preventDefault();
+    submit('/api/auth/signup', {
+      username: forms.signup.username.value.trim(),
+      password: forms.signup.password.value,
+      code: forms.signup.code.value.trim(),
+      display_name: forms.signup.display_name.value.trim() || null,
+    }, errs.signup, forms.signup.querySelector('button'));
+  });
+})();
+</script>
+</body>
+</html>

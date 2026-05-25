@@ -196,6 +196,7 @@ nav a.active-nav{background:#222;color:#fff}
   <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
   <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
   <a href="naver.html"><span class="badge badge-naver">네이버</span></a>
+  <span id="userInfo"></span>
 </nav>
 
 <div class="page">
@@ -264,6 +265,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="data_daangn.js"></script>
 <script src="data_zigbang.js"></script>
 <script src="data_naver.js"></script>
+<script src="auth.js?v=20260525-auth1"></script>
 <script src="favorites.js?v=20260525-refresh"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script src="listing-info.js?v=20260525-maint2"></script>
@@ -327,6 +329,15 @@ function displayAgency(fav) {
 // esc/typeLabel/buildSection live in web/listing-info.js so the platform
 // pages share the same renderer. Keep thin local aliases for readability.
 const esc = window.ListingInfo.esc;
+function safeUrl(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, window.location.href);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch (_) {}
+  return '';
+}
 const displayType = (d, source) => window.ListingInfo.typeLabel(d, source);
 const buildListingInfoSection = (d, source) => window.ListingInfo.buildSection(d, source);
 
@@ -346,7 +357,7 @@ function freshData(fav) {
 function buildCard(fav) {
   const avail = availability(fav);
   const score = calcScore(fav.rating);
-  const d = fav.data;
+  const d = fav.data || {};
   const sid = safeId(fav);
   const srcColor = SRC_COLOR[fav.source] || '#888';
   const srcName = SRC_NAME[fav.source] || fav.source;
@@ -368,16 +379,16 @@ function buildCard(fav) {
   card.innerHTML = `
     <div class="fav-header">
       <div class="fav-main">
-        <span class="badge" style="background:${srcColor}">${srcName}</span>
-        <span class="fav-title">${d.title || d.address || '제목없음'}</span>
+        <span class="badge" style="background:${srcColor}">${esc(srcName)}</span>
+        <span class="fav-title">${esc(d.title || d.address || '제목없음')}</span>
         ${statusHtml}
         ${scoreHtml}
         <span class="fav-price">보${fmtDep(d.deposit)} / 월${fmtRent(d.rent)}</span>
-        <span class="fav-sub">${d.address || d.region || ''}</span>
+        <span class="fav-sub">${esc(d.address || d.region || '')}</span>
       </div>
       <div class="fav-actions">
-        ${d.url ? `<a href="${d.url}" target="_blank" class="btn" onclick="event.stopPropagation()" style="padding:4px 8px">🔗</a>` : ''}
-        <button class="btn btn-danger" style="padding:4px 8px" onclick="doRemove(event,'${fav.id}','${fav.source}')">제거</button>
+        ${safeUrl(d.url) ? `<a href="${esc(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer" class="btn" style="padding:4px 8px">🔗</a>` : ''}
+        <button class="btn btn-danger fav-remove" type="button" style="padding:4px 8px">제거</button>
       </div>
       <span class="expand-arrow">▼</span>
     </div>
@@ -393,6 +404,9 @@ function buildCard(fav) {
       openFavKeys.delete(fav.key);
     }
   });
+  const link = card.querySelector('.fav-actions a');
+  if (link) link.addEventListener('click', e => e.stopPropagation());
+  card.querySelector('.fav-remove').addEventListener('click', e => doRemove(e, fav.id, fav.source));
   return card;
 }
 
@@ -449,8 +463,8 @@ function renderList() {
       const header = document.createElement('div');
       header.className = 'fav-group-header';
       header.innerHTML =
-        `<span>🏢 ${agency}</span>` +
-        (phones.length ? `<span class="gphone">${phones.join(' · ')}</span>` : '') +
+        `<span>🏢 ${esc(agency)}</span>` +
+        (phones.length ? `<span class="gphone">${esc(phones.join(' · '))}</span>` : '') +
         `<span class="gcnt">${list.length}건</span>`;
       wrap.appendChild(header);
       list.forEach(fav => appendFavCard(wrap, fav));
@@ -507,7 +521,7 @@ function renderDetail(card, fav, sid) {
     </div>
     <div class="sec">
       <div class="sec-title">📝 메모</div>
-      <textarea class="notes-area" id="nt_${sid}" placeholder="방문 후 느낀 점, 특이사항...">${fav.notes || ''}</textarea>
+      <textarea class="notes-area" id="nt_${sid}" placeholder="방문 후 느낀 점, 특이사항...">${esc(fav.notes || '')}</textarea>
     </div>
     <div style="font-size:11px;color:#ccc;margin-top:8px">저장일: ${savedAt}</div>
   `;
@@ -579,9 +593,20 @@ function renderDetail(card, fav, sid) {
 function insertPhotoThumb(grid, photoKey, url, favId, favSource, sid) {
   const wrap = document.createElement('div');
   wrap.className = 'photo-item';
-  wrap.innerHTML = `<img src="${url}" loading="lazy"><button class="photo-del" title="삭제">×</button>`;
-  wrap.querySelector('img').addEventListener('click', () => openGallery(grid, url));
-  wrap.querySelector('.photo-del').addEventListener('click', e => {
+  const safeSrc = safeUrl(url);
+  if (!safeSrc) return;
+  const img = document.createElement('img');
+  img.src = safeSrc;
+  img.loading = 'lazy';
+  const btn = document.createElement('button');
+  btn.className = 'photo-del';
+  btn.type = 'button';
+  btn.title = 'delete';
+  btn.textContent = 'x';
+  wrap.appendChild(img);
+  wrap.appendChild(btn);
+  img.addEventListener('click', () => openGallery(grid, safeSrc));
+  btn.addEventListener('click', e => {
     e.stopPropagation();
     Favorites.deletePhoto(favId, favSource, photoKey).then(() => { wrap.remove(); });
   });
