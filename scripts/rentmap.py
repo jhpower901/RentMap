@@ -15,7 +15,7 @@ import shutil
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
@@ -1927,6 +1927,263 @@ def _reconcile_after_crawl(platform_code: str, rows: list[dict[str, Any]], label
         print(f"[reconcile] {label}: outer guard caught {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
+def finalize_missing(args: argparse.Namespace) -> None:
+    """Finalize the in-schedule missing retry queue for selected platforms."""
+    try:
+        from db import session
+        from reconcile import finalize_missing_queue
+    except ImportError as exc:
+        raise RuntimeError(f"finalize-missing unavailable: {exc}") from exc
+    finalized_at = datetime.now(timezone.utc)
+    with session() as conn:
+        count = finalize_missing_queue(
+            conn,
+            args.platform,
+            finalized_at,
+            dry_run_webhooks=args.dry_run_webhooks,
+            dry_run=args.dry_run,
+        )
+        if args.dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+    print(
+        f"[reconcile] finalize-missing platforms={','.join(args.platform)} "
+        f"removed={count} dry_run={args.dry_run}",
+        flush=True,
+    )
+
+
+def _read_db_missing_candidates(platform_codes: list[str]) -> list[dict[str, Any]]:
+    from db import session  # type: ignore
+
+    with session() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                p.code AS platform_code,
+                l.platform_listing_id, l.source_url, l.current_status, l.miss_count,
+                s.title, s.description, s.room_type_raw, s.address_raw,
+                s.lat, s.lng,
+                s.deposit_won, s.monthly_rent_won, s.maintenance_fee_won,
+                s.expected_monthly_cost_won,
+                s.supply_area_m2, s.exclusive_area_m2, s.area_raw,
+                s.floor_raw, s.room_count, s.bathroom_count,
+                s.direction, s.parking_raw, s.move_in_raw,
+                s.approval_date, s.building_usage, s.structure_type,
+                s.raw_normalized_json
+            FROM listings l
+            JOIN platforms p ON p.id = l.platform_id
+            JOIN LATERAL (
+                SELECT *
+                FROM listing_snapshots
+                WHERE listing_id = l.id
+                ORDER BY captured_at DESC, id DESC
+                LIMIT 1
+            ) s ON TRUE
+            WHERE p.code = ANY(%s)
+              AND l.current_status = 'missing'
+            ORDER BY p.code, l.id
+            """,
+            (platform_codes,),
+        )
+        candidates: list[dict[str, Any]] = []
+        for row in cur.fetchall():
+            csv_row = _db_row_to_csv_shape(row)
+            csv_row["_platform_code"] = row["platform_code"]
+            csv_row["_miss_count"] = row["miss_count"]
+            candidates.append(csv_row)
+        return candidates
+
+
+def _dabang_room_id(row: dict[str, Any]) -> str:
+    url = str(row.get("url") or "")
+    match = re.search(r"/room/([^/?#]+)", url)
+    if match:
+        return match.group(1)
+    return str(row.get("room_id") or row.get("listing_no") or "").strip()
+
+
+def _probe_dabang_missing(session: requests.Session, row: dict[str, Any]) -> bool | None:
+    room_id = _dabang_room_id(row)
+    if not room_id:
+        return False
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "D-Api-Version": "3.0.1",
+        "D-App-Version": "1",
+        "D-Call-Type": "web",
+        "csrf": "token",
+        "Referer": "https://www.dabangapp.com/map/onetwo",
+        "User-Agent": UA,
+        "Origin": "https://www.dabangapp.com",
+    }
+    url = f"https://www.dabangapp.com/api/3/new-room/detail?room_id={quote(room_id)}&api_version=3.0.1&call_type=web&version=1"
+    try:
+        payload = request_json(session, url, headers=headers, timeout=20)
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 0
+        return False if status in {400, 404, 410} else None
+    except Exception:
+        return None
+    result = payload.get("result", payload) if isinstance(payload, dict) else {}
+    return bool(first(result, ["room"], result))
+
+
+def _probe_zigbang_missing(session: requests.Session, row: dict[str, Any]) -> bool | None:
+    item_id = str(row.get("listing_no") or row.get("item_id") or "").strip()
+    if not item_id:
+        return False
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.zigbang.com",
+        "Referer": "https://www.zigbang.com/",
+    }
+    try:
+        payload = request_json(session, f"https://apis.zigbang.com/v3/items/{quote(item_id)}", headers=headers, timeout=20)
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 0
+        return False if status in {400, 404, 410} else None
+    except Exception:
+        return None
+    return bool(isinstance(payload, dict) and payload.get("item"))
+
+
+def _probe_daangn_missing(session: requests.Session, row: dict[str, Any]) -> bool | None:
+    article_id = str(row.get("listing_no") or "").strip()
+    if not article_id:
+        return False
+    try:
+        resp = session.get(
+            f"https://realty.daangn.com/articles/{quote(article_id)}",
+            headers={"User-Agent": UA, "Accept": "text/html,application/xhtml+xml", "Accept-Language": "ko-KR,ko;q=0.9"},
+            timeout=20,
+        )
+    except Exception:
+        return None
+    if resp.status_code in {404, 410}:
+        return False
+    if resp.status_code >= 400:
+        return None
+    resp.encoding = "utf-8"
+    return article_id in resp.text
+
+
+def _probe_naver_missing(session: requests.Session, row: dict[str, Any]) -> bool | None:
+    article_no = str(row.get("listing_no") or row.get("room_id") or "").strip()
+    if not article_no:
+        return False
+    try:
+        resp = session.get(
+            f"https://new.land.naver.com/api/articles/{quote(article_no)}",
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/json, text/plain, */*",
+                "Referer": f"https://new.land.naver.com/rooms?articleNo={quote(article_no)}",
+            },
+            timeout=20,
+        )
+    except Exception:
+        return None
+    if resp.status_code in {400, 404, 410}:
+        return False
+    if resp.status_code >= 400:
+        return None
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    return bool(isinstance(payload, dict) and payload.get("articleDetail"))
+
+
+def _probe_missing_row(session: requests.Session, row: dict[str, Any]) -> bool | None:
+    platform = row.get("_platform_code")
+    if platform == "dabang":
+        return _probe_dabang_missing(session, row)
+    if platform == "zigbang":
+        return _probe_zigbang_missing(session, row)
+    if platform == "daangn":
+        return _probe_daangn_missing(session, row)
+    if platform == "naver_land":
+        return _probe_naver_missing(session, row)
+    return None
+
+
+def retry_missing(args: argparse.Namespace) -> None:
+    """Probe only listings already marked missing and update that retry queue."""
+    try:
+        from db import session
+        from reconcile import reconcile_missing_probe
+    except ImportError as exc:
+        raise RuntimeError(f"retry-missing unavailable: {exc}") from exc
+
+    platform_codes = list(dict.fromkeys(args.platform))
+    candidates = _read_db_missing_candidates(platform_codes)
+    print(
+        f"[reconcile] retry-missing platforms={','.join(platform_codes)} "
+        f"candidates={len(candidates)} dry_run={args.dry_run}",
+        flush=True,
+    )
+    by_platform: dict[str, dict[str, Any]] = {
+        code: {"found": [], "probed": [], "unknown": 0}
+        for code in platform_codes
+    }
+    http = requests.Session()
+    for idx, row in enumerate(candidates, 1):
+        platform = str(row.get("_platform_code") or "")
+        listing_no = str(row.get("listing_no") or "")
+        result = _probe_missing_row(http, row)
+        if result is None:
+            by_platform.setdefault(platform, {"found": [], "probed": [], "unknown": 0})["unknown"] += 1
+            print(f"[reconcile] retry-missing {platform}:{listing_no} probe=unknown", flush=True)
+            continue
+        bucket = by_platform.setdefault(platform, {"found": [], "probed": [], "unknown": 0})
+        bucket["probed"].append(listing_no)
+        if result:
+            bucket["found"].append(row)
+        if idx % 25 == 0:
+            print(f"[reconcile] retry-missing progress={idx}/{len(candidates)}", flush=True)
+
+    retry_at = datetime.now(timezone.utc)
+    total_unknown = 0
+    with session() as conn:
+        for platform_code in platform_codes:
+            bucket = by_platform.get(platform_code) or {"found": [], "probed": [], "unknown": 0}
+            total_unknown += int(bucket["unknown"])
+            if not bucket["probed"]:
+                print(
+                    f"[reconcile] retry-missing {platform_code}: probed=0 "
+                    f"found=0 unknown={bucket['unknown']}",
+                    flush=True,
+                )
+                continue
+            summary = reconcile_missing_probe(
+                conn,
+                platform_code,
+                bucket["found"],
+                bucket["probed"],
+                retry_at,
+                target_area=os.environ.get("RENTMAP_AREA_NAME") or None,
+                dry_run_webhooks=args.dry_run_webhooks,
+            )
+            print(
+                f"[reconcile] retry-missing {platform_code}: "
+                f"probed={len(bucket['probed'])} found={len(bucket['found'])} "
+                f"missing={summary.missing} removed={summary.removed} "
+                f"unchanged={summary.unchanged} price={summary.price_changed} "
+                f"detail={summary.detail_changed} unknown={bucket['unknown']} "
+                f"errors={len(summary.errors)}",
+                flush=True,
+            )
+        if args.dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+    if total_unknown:
+        raise SystemExit(2)
+
+
 def _read_csv_lenient(data_dir: Path, prefix: str, target_date: str, label: str) -> list[dict[str, str]]:
     path = _latest_csv(data_dir, prefix, target_date)
     if path is None:
@@ -2316,6 +2573,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.set_defaults(func=gen_web)
+
+    p = sub.add_parser("finalize-missing")
+    p.add_argument("--platform", action="append", required=True)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--dry-run-webhooks", action="store_true")
+    p.set_defaults(func=finalize_missing)
+
+    p = sub.add_parser("retry-missing")
+    p.add_argument("--platform", action="append", required=True)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--dry-run-webhooks", action="store_true")
+    p.set_defaults(func=retry_missing)
 
     p = sub.add_parser("crawl-all")
     p.add_argument("--date", default=DEFAULT_DATE)

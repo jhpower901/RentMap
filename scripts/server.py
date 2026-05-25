@@ -3,6 +3,7 @@ import re
 import json
 import subprocess
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -21,6 +22,9 @@ import uvicorn
 ROOT = Path(__file__).resolve().parent.parent
 RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
+MAIN_CRAWL_PLATFORM_CODES = ("dabang", "zigbang", "daangn")
+MISSING_RETRY_LIMIT = 2
+CRAWL_LOCK = threading.Lock()
 
 
 def _run_rentmap(args: list[str], label: str, timeout_s: int) -> int | None:
@@ -48,7 +52,38 @@ def _run_rentmap(args: list[str], label: str, timeout_s: int) -> int | None:
         return None
 
 
+def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
+    try:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from db import session  # noqa: WPS433
+        with session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM listings l
+                JOIN platforms p ON p.id = l.platform_id
+                WHERE p.code = ANY(%s)
+                  AND l.current_status = 'missing'
+                """,
+                (list(platform_codes),),
+            )
+            return int(cur.fetchone()["n"] or 0)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[scheduler] missing-retry: queue check failed — {exc}", flush=True)
+        return 0
+
+
 def run_hourly_crawl() -> None:
+    if not CRAWL_LOCK.acquire(blocking=False):
+        print("[scheduler] hourly-crawl: SKIP already running", flush=True)
+        return
+    try:
+        _run_hourly_crawl_locked()
+    finally:
+        CRAWL_LOCK.release()
+
+
+def _run_hourly_crawl_locked() -> None:
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     area = os.environ.get("RENTMAP_AREA_NAME", "")
     center_lat = os.environ.get("RENTMAP_CENTER_LAT", "")
@@ -63,7 +98,44 @@ def run_hourly_crawl() -> None:
         "sources=dabang,zigbang,daangn",
         flush=True,
     )
-    exit_code = _run_rentmap(["crawl-all", "--skip-naver", "--date", today], label="hourly-crawl", timeout_s=50 * 60)
+    exit_code: int | None = None
+    missing_count = 0
+    for attempt in range(MISSING_RETRY_LIMIT + 1):
+        if attempt == 0:
+            label = "hourly-crawl"
+            command = ["crawl-all", "--skip-naver", "--date", today]
+            timeout_s = 50 * 60
+        else:
+            label = f"hourly-crawl-missing-retry-{attempt}"
+            command = ["retry-missing"]
+            for platform_code in MAIN_CRAWL_PLATFORM_CODES:
+                command.extend(["--platform", platform_code])
+            timeout_s = 10 * 60
+        exit_code = _run_rentmap(command, label=label, timeout_s=timeout_s)
+        if exit_code != 0:
+            break
+        missing_count = _missing_queue_count(MAIN_CRAWL_PLATFORM_CODES)
+        if missing_count == 0:
+            break
+        if attempt < MISSING_RETRY_LIMIT:
+            print(
+                f"[scheduler] missing-retry: pending={missing_count}; "
+                f"probing missing listings {attempt + 1}/{MISSING_RETRY_LIMIT}",
+                flush=True,
+            )
+        else:
+            print(
+                f"[scheduler] missing-retry: pending={missing_count} after retries; "
+                "finalizing unresolved listings",
+                flush=True,
+            )
+    if exit_code == 0 and missing_count:
+        finalize_args = ["finalize-missing"]
+        for platform_code in MAIN_CRAWL_PLATFORM_CODES:
+            finalize_args.extend(["--platform", platform_code])
+        finalize_code = _run_rentmap(finalize_args, label="missing-finalize", timeout_s=5 * 60)
+        if finalize_code != 0:
+            exit_code = finalize_code
     if exit_code == 0:
         run_webhook_flush(trigger="hourly-crawl-complete")
 

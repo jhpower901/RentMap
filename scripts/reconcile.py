@@ -356,8 +356,11 @@ def normalize_row(platform_code: str, row: dict[str, Any]) -> dict[str, Any]:
 # Core: per-listing diff
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Configurable via env; the schema doc fixes it at 3.
-MISS_THRESHOLD = 3
+# A missing listing is held in the lightweight retry queue for this many
+# consecutive crawl misses. If it is still absent after the retries, it is
+# marked removed and the single removal event becomes the user-facing alert.
+MISSING_RETRY_LIMIT = 2
+REMOVE_AFTER_MISS_COUNT = MISSING_RETRY_LIMIT + 1
 
 
 def _platform_id(cur: psycopg.Cursor, code: str) -> int:
@@ -415,7 +418,9 @@ def _upsert_listing(
 
     Returns (listing_id, was_new, was_reappeared). ``was_reappeared`` is True
     iff the listing was previously ``removed`` (deleted_at-equivalent) and we
-    just brought it back to ``active``.
+    just brought it back to ``active``. Listings in ``missing`` are just retry
+    queue entries; recovering them is a quiet patch, not a user-facing
+    reappearance.
     """
     # First check if it already exists so we can compute was_new / was_reappeared
     cur.execute(
@@ -440,7 +445,7 @@ def _upsert_listing(
         )
         return cur.fetchone()["id"], True, False
 
-    was_reappeared = existing["current_status"] in ("missing", "removed")
+    was_reappeared = existing["current_status"] == "removed"
     cur.execute(
         """
         UPDATE listings
@@ -568,7 +573,7 @@ def _insert_price_snapshot(
 def _emit_event(
     cur: psycopg.Cursor,
     listing_id: int,
-    crawl_run_id: int,
+    crawl_run_id: int | None,
     event_type: str,
     event_at: datetime,
     prev_snapshot_id: int | None,
@@ -600,6 +605,163 @@ def _emit_event(
     )
 
 
+def finalize_missing_queue(
+    conn: psycopg.Connection,
+    platform_codes: Iterable[str],
+    event_at: datetime,
+    dry_run_webhooks: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Force any remaining missing rows for these platforms to removed.
+
+    The hourly schedulers call this after their in-schedule recrawls are
+    exhausted. At that point a row still in ``missing`` did not recover inside
+    the schedule window, so we emit the single user-facing deletion event.
+    """
+    codes = list(platform_codes)
+    if not codes:
+        return 0
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT l.id, l.miss_count, latest.id AS latest_snapshot_id
+            FROM listings l
+            JOIN platforms p ON p.id = l.platform_id
+            LEFT JOIN LATERAL (
+                SELECT s.id
+                FROM listing_snapshots s
+                WHERE s.listing_id = l.id
+                ORDER BY s.captured_at DESC, s.id DESC
+                LIMIT 1
+            ) latest ON TRUE
+            WHERE p.code = ANY(%s)
+              AND l.current_status = 'missing'
+            ORDER BY l.id
+            """,
+            (codes,),
+        )
+        rows = cur.fetchall()
+        if dry_run:
+            return len(rows)
+        for row in rows:
+            miss_count = max(int(row["miss_count"] or 0), REMOVE_AFTER_MISS_COUNT)
+            cur.execute(
+                """
+                UPDATE listings
+                SET miss_count = %s,
+                    current_status = 'removed',
+                    removed_at = %s,
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (miss_count, event_at, row["id"]),
+            )
+            _emit_event(
+                cur, row["id"], None, "removed", event_at,
+                row["latest_snapshot_id"], None, [],
+                {"miss_count": row["miss_count"]},
+                {"miss_count": miss_count, "finalized_after_retries": True},
+                dry_run_webhooks,
+            )
+    return len(rows)
+
+
+def reconcile_missing_probe(
+    conn: psycopg.Connection,
+    platform_code: str,
+    found_rows: list[dict[str, Any]],
+    probed_platform_listing_ids: Iterable[str],
+    crawled_at: datetime,
+    target_area: str | None = None,
+    dry_run_webhooks: bool = False,
+) -> CrawlSummary:
+    """Reconcile only listings that are already in the missing retry queue.
+
+    ``found_rows`` are the missing listings that an individual URL/API probe
+    proved still exist. ``probed_platform_listing_ids`` is every missing
+    listing whose probe reached a definitive alive/absent answer. Listings
+    outside that set are left untouched, so a network wobble cannot advance a
+    row toward removal.
+    """
+    probed_ids = {str(x).strip() for x in probed_platform_listing_ids if str(x).strip()}
+    with conn.cursor() as cur:
+        platform_id = _platform_id(cur, platform_code)
+        run_id = _start_crawl_run(cur, platform_id, crawled_at, target_area)
+        summary = CrawlSummary(crawl_run_id=run_id)
+        found_ids: set[str] = set()
+        status = "success"
+
+        try:
+            for row in found_rows:
+                summary.rows_seen += 1
+                platform_listing_id = str(row.get("listing_no") or "").strip()
+                if not platform_listing_id:
+                    summary.errors.append("row without listing_no skipped")
+                    continue
+                if platform_listing_id not in probed_ids:
+                    continue
+                found_ids.add(platform_listing_id)
+                _upsert_listing(
+                    cur, platform_id, platform_listing_id,
+                    row.get("url"), crawled_at, run_id,
+                )
+                summary.unchanged += 1
+
+            absent_ids = sorted(probed_ids - found_ids)
+            if absent_ids:
+                cur.execute(
+                    """
+                    SELECT id, platform_listing_id, miss_count
+                    FROM listings
+                    WHERE platform_id = %s
+                      AND current_status = 'missing'
+                      AND platform_listing_id = ANY(%s)
+                    """,
+                    (platform_id, absent_ids),
+                )
+                for row in cur.fetchall():
+                    new_miss = int(row["miss_count"] or 0) + 1
+                    if new_miss >= REMOVE_AFTER_MISS_COUNT:
+                        cur.execute(
+                            """
+                            UPDATE listings
+                            SET miss_count = %s,
+                                current_status = 'removed',
+                                removed_at = %s,
+                                updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (new_miss, crawled_at, row["id"]),
+                        )
+                        _emit_event(
+                            cur, row["id"], run_id, "removed", crawled_at,
+                            None, None, [], {}, {"miss_count": new_miss},
+                            dry_run_webhooks,
+                        )
+                        summary.removed += 1
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE listings
+                            SET miss_count = %s,
+                                updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (new_miss, row["id"]),
+                        )
+                        summary.missing += 1
+        except Exception as exc:
+            status = "failed"
+            summary.errors.append(f"{type(exc).__name__}: {exc}")
+            log.exception("[reconcile] %s missing retry failed", platform_code)
+            _finish_crawl_run(cur, run_id, summary, status)
+            conn.commit()
+            raise
+
+        _finish_crawl_run(cur, run_id, summary, status)
+    return summary
+
+
 def _process_missing(
     cur: psycopg.Cursor,
     platform_id: int,
@@ -611,8 +773,9 @@ def _process_missing(
 ) -> None:
     """Find listings that were active/missing but didn't show up in this run.
 
-    Bumps miss_count, transitions to 'missing' (1+) or 'removed' (>= threshold),
-    and emits the appropriate status events.
+    Bumps miss_count and uses ``current_status = 'missing'`` as a lightweight
+    retry queue. The first two misses stay quiet; the next miss marks the row
+    as removed and emits the only user-facing deletion event.
 
     For backfill (single-run replay) the seen set is the entire CSV — listings
     in the DB but not in the CSV genuinely disappeared since the last replay.
@@ -635,7 +798,7 @@ def _process_missing(
             # Was processed by the main loop already (covered by upsert).
             continue
         new_miss = row["miss_count"] + 1
-        if new_miss >= MISS_THRESHOLD:
+        if new_miss >= REMOVE_AFTER_MISS_COUNT:
             cur.execute(
                 """
                 UPDATE listings
@@ -663,11 +826,6 @@ def _process_missing(
                 WHERE id = %s
                 """,
                 (new_miss, row["id"]),
-            )
-            _emit_event(
-                cur, row["id"], crawl_run_id, "missing", crawled_at,
-                None, None, [], {}, {"miss_count": new_miss},
-                dry_run_webhooks,
             )
             summary.missing += 1
 
