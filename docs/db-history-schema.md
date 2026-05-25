@@ -84,10 +84,12 @@ only fill it for fields with no normalized home.
 3. After the per-row loop, find listings missing from this run for the same
    platform (`active`/`missing` with `last_crawl_run_id` ≠ current run id):
    - Increment `miss_count`.
-   - If `miss_count = 1` → set `current_status = 'missing'`, emit `missing`
-     event.
-   - If `miss_count ≥ 3` and `current_status ≠ 'removed'` → set
-     `current_status = 'removed'`, set `removed_at`, emit `removed` event.
+   - If `miss_count = 1..2` → set `current_status = 'missing'` and keep it
+     as a quiet retry queue entry for the same scheduler run. No webhook event
+     is emitted.
+   - The scheduler immediately reruns the crawler up to two more times. If a
+     listing is still `missing` after those in-schedule retries, it finalizes
+     the row as `removed`, sets `removed_at`, and emits `removed`.
 4. For any `removed`/`missing` listing that reappears in a later run, set
    `current_status = 'active'`, `removed_at = NULL`, `reappeared_at = now()`,
    and emit `reappeared` event. The price/snapshot trail continues seamlessly
@@ -97,10 +99,13 @@ only fill it for fields with no normalized home.
 ## Missing / Removed Policy
 
 - Seen in the current run: `active`, `miss_count = 0`.
-- Missing once: `missing`, `miss_count = 1` (still considered live).
-- Missing three consecutive runs: `removed` (deletion is recorded as
-  `removed_at`, the row is **not** deleted).
-- Previously `removed` listing seen again: `active` plus `reappeared` event.
+- Missing once or twice inside the same scheduler run: `missing`,
+  `miss_count = 1..2` (quiet retry queue; no alert yet).
+- Still missing after the scheduler's two immediate retries: `removed`
+  (deletion is recorded as `removed_at`, the row is **not** deleted).
+- A `missing` listing recovered during those retries is quietly patched back to
+  `active`. A previously `removed` listing seen again becomes `active` plus a
+  `reappeared` event.
 
 ## Deferred Tables
 

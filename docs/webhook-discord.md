@@ -85,12 +85,12 @@ docker exec rentmap-server bash -c "cd /app && python scripts/webhook_worker.py 
 |---|---|---|
 | `discovered` | 🟢 초록 | 새 매물 등장 |
 | `price_changed` | 🟡 노랑 | 가격 (보증금/월세/관리비) 중 하나 이상 변동 |
-| `detail_changed` | 🔵 파랑 | 가격 외 상세 (설명/옵션/주차 등) 변동 |
-| `missing` | 🟠 주황 | 1~2회 연속 누락 (아직 삭제 아님) |
-| `removed` | 🔴 빨강 | 3회 연속 누락으로 삭제 확정 |
+| `detail_changed` | 🔵 파랑 | 가격 외 상세 변동. 현재 Discord 알림은 보내지 않고 처리 완료 |
+| `missing` | 🟠 주황 | 같은 스케줄 안에서 1~2회 누락. 재시도 대기 상태이며 Discord 알림 없음 |
+| `removed` | 🔴 빨강 | 스케줄 내부 2회 재시도 후에도 누락되어 삭제 확정 |
 | `reappeared` | 🔵 파랑 | 누락됐던 매물 재등장 |
 
-각 embed에는 매물 제목 + 주소 + 가격 + (가격 변경의 경우) 이전 가격이 포함됩니다.
+각 embed에는 매물 제목 + 위치 + 가격 + 매물 정보 + 썸네일 이미지가 포함됩니다. 가격 변경은 이전/현재 가격을 함께 표시하고, 삭제 알림은 마지막으로 저장된 원래 매물 정보를 표시합니다.
 
 ## 6. Rate limit / 백오프
 
@@ -109,7 +109,7 @@ WHERE webhook_sent_at IS NULL AND webhook_attempts >= 5;"
 
 ## 7. 시끄러우면 (필터링)
 
-현재 정책은 "**모든 매물의 모든 변동**". 첫 며칠 관찰 후 시끄러우면:
+현재 정책은 신규/가격변경/삭제/재등장 중심입니다. 순수 상세 변경과 일시 누락은 Discord 알림을 보내지 않습니다. 첫 며칠 관찰 후 더 줄이고 싶으면:
 
 ### 7.1 이벤트 타입 필터링
 
@@ -119,7 +119,7 @@ WHERE webhook_sent_at IS NULL AND webhook_attempts >= 5;"
 WHERE e.event_type IN ('price_changed', 'removed', 'reappeared')
 ```
 
-`missing` / `detail_changed`를 빼면 90% 줄어듭니다.
+`missing` / `detail_changed`는 기본적으로 이미 조용히 처리됩니다.
 
 ### 7.2 좋아요 한정
 

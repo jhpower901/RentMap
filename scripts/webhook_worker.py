@@ -52,6 +52,8 @@ INTER_REQUEST_SLEEP_S = 0.0
 # rather than marking it failed makes the bad webhook URL more visible.
 MAX_ATTEMPTS = 5
 
+SUPPRESSED_EVENT_TYPES = {"detail_changed", "missing"}
+
 EVENT_STYLE: dict[str, dict[str, Any]] = {
     "discovered":     {"emoji": "🆕", "color": 0x57F287, "verb": "신규 매물"},
     "price_changed":  {"emoji": "💰", "color": 0xFEE75C, "verb": "가격 변경"},
@@ -84,6 +86,44 @@ def _fmt_price_pair(deposit: int | None, rent: int | None, maint: int | None) ->
     return " / ".join(parts)
 
 
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _fmt_changed_price(row: dict[str, Any]) -> str:
+    old = row.get("_previous_price_snapshot")
+    current = _fmt_price_pair(
+        row.get("deposit_won"), row.get("monthly_rent_won"), row.get("maintenance_fee_won"),
+    )
+    if not old:
+        return current
+    previous = _fmt_price_pair(
+        old.get("deposit_won"), old.get("monthly_rent_won"), old.get("maintenance_fee_won"),
+    )
+    return f"이전: {previous}\n현재: {current}"
+
+
+def _fmt_listing_specs(row: dict[str, Any]) -> str | None:
+    specs: list[str] = []
+    area = row.get("exclusive_area_m2") or row.get("supply_area_m2")
+    if area:
+        specs.append(f"{float(area):g}㎡")
+    floor = row.get("floor_raw")
+    if floor:
+        specs.append(f"층 {floor}")
+    rooms = row.get("room_count")
+    baths = row.get("bathroom_count")
+    if rooms:
+        specs.append(f"방 {rooms}")
+    if baths:
+        specs.append(f"욕실 {baths}")
+    return " · ".join(specs) if specs else None
+
+
 def build_embed(row: dict[str, Any]) -> dict[str, Any]:
     """Turn a joined event+listing+snapshot row into a Discord embed payload.
 
@@ -96,34 +136,37 @@ def build_embed(row: dict[str, Any]) -> dict[str, Any]:
     title = f"{style['emoji']} [{style['verb']}] {title_text}"[:255]
 
     fields: list[dict[str, Any]] = []
+    fields.append({"name": "상태", "value": style["verb"], "inline": True})
+    fields.append({"name": "플랫폼", "value": f"`{row['platform_code']}`", "inline": True})
+
     addr = row.get("address_raw")
     if addr:
-        fields.append({"name": "주소", "value": addr[:1023], "inline": False})
-
-    price_value = _fmt_price_pair(
-        row.get("deposit_won"), row.get("monthly_rent_won"), row.get("maintenance_fee_won"),
-    )
-    fields.append({"name": "가격", "value": price_value, "inline": True})
+        fields.append({"name": "위치", "value": addr[:1023], "inline": False})
 
     if row["event_type"] == "price_changed":
-        # old_values gets populated by the worker side rather than reconcile —
-        # we look it up from the previous snapshot row.
-        old = row.get("_previous_price_snapshot")
-        if old:
-            old_value = _fmt_price_pair(
-                old.get("deposit_won"), old.get("monthly_rent_won"), old.get("maintenance_fee_won"),
-            )
-            fields.append({"name": "이전 가격", "value": old_value, "inline": True})
+        price_value = _fmt_changed_price(row)
+    else:
+        price_value = _fmt_price_pair(
+            row.get("deposit_won"), row.get("monthly_rent_won"), row.get("maintenance_fee_won"),
+        )
+    fields.append({"name": "가격", "value": price_value, "inline": False})
+
+    specs = _fmt_listing_specs(row)
+    if specs:
+        fields.append({"name": "매물 정보", "value": specs[:1023], "inline": False})
 
     embed = {
         "title": title,
         "url": row.get("source_url") or None,
-        "description": f"`{row['platform_code']}` · `{row['platform_listing_id']}`",
+        "description": f"매물번호 `{row['platform_listing_id']}`",
         "color": style["color"],
         "fields": fields,
         "timestamp": row["event_at"].astimezone(timezone.utc).isoformat(),
         "footer": {"text": f"RentMap · event #{row['event_id']}"},
     }
+    image_url = _first_text(row.get("image_1"), row.get("image_2"))
+    if image_url:
+        embed["thumbnail"] = {"url": image_url}
     return embed
 
 
@@ -153,11 +196,26 @@ def _fetch_batch(cur, limit: int) -> list[dict[str, Any]]:
             l.platform_listing_id,
             l.source_url,
             p.code AS platform_code,
-            curr.title,
-            curr.address_raw,
-            curr.deposit_won,
-            curr.monthly_rent_won,
-            curr.maintenance_fee_won,
+            COALESCE(curr.title, prev.title, latest.title) AS title,
+            COALESCE(curr.address_raw, prev.address_raw, latest.address_raw) AS address_raw,
+            COALESCE(curr.deposit_won, prev.deposit_won, latest.deposit_won) AS deposit_won,
+            COALESCE(curr.monthly_rent_won, prev.monthly_rent_won, latest.monthly_rent_won) AS monthly_rent_won,
+            COALESCE(curr.maintenance_fee_won, prev.maintenance_fee_won, latest.maintenance_fee_won) AS maintenance_fee_won,
+            COALESCE(curr.supply_area_m2, prev.supply_area_m2, latest.supply_area_m2) AS supply_area_m2,
+            COALESCE(curr.exclusive_area_m2, prev.exclusive_area_m2, latest.exclusive_area_m2) AS exclusive_area_m2,
+            COALESCE(curr.floor_raw, prev.floor_raw, latest.floor_raw) AS floor_raw,
+            COALESCE(curr.room_count, prev.room_count, latest.room_count) AS room_count,
+            COALESCE(curr.bathroom_count, prev.bathroom_count, latest.bathroom_count) AS bathroom_count,
+            COALESCE(
+                curr.raw_normalized_json->>'image_1',
+                prev.raw_normalized_json->>'image_1',
+                latest.raw_normalized_json->>'image_1'
+            ) AS image_1,
+            COALESCE(
+                curr.raw_normalized_json->>'image_2',
+                prev.raw_normalized_json->>'image_2',
+                latest.raw_normalized_json->>'image_2'
+            ) AS image_2,
             prev.deposit_won AS prev_deposit_won,
             prev.monthly_rent_won AS prev_monthly_rent_won,
             prev.maintenance_fee_won AS prev_maintenance_fee_won
@@ -166,6 +224,13 @@ def _fetch_batch(cur, limit: int) -> list[dict[str, Any]]:
         JOIN platforms p ON p.id = l.platform_id
         LEFT JOIN listing_snapshots curr ON curr.id = e.current_snapshot_id
         LEFT JOIN listing_snapshots prev ON prev.id = e.previous_snapshot_id
+        LEFT JOIN LATERAL (
+            SELECT s.*
+            FROM listing_snapshots s
+            WHERE s.listing_id = e.listing_id
+            ORDER BY s.captured_at DESC, s.id DESC
+            LIMIT 1
+        ) latest ON TRUE
         WHERE e.webhook_sent_at IS NULL
           AND (e.webhook_next_try_at IS NULL OR e.webhook_next_try_at <= now())
           AND e.webhook_attempts < %s
@@ -223,7 +288,14 @@ def flush_once(batch: int = DEFAULT_BATCH, dry_run: bool = False) -> dict[str, i
     events in flight stay locked only for the duration of this call.
     """
     url = os.environ.get(ENV_URL, "").strip()
-    counts = {"sent": 0, "rate_limited": 0, "retried": 0, "skipped_no_url": 0, "dry_run": 0}
+    counts = {
+        "sent": 0,
+        "rate_limited": 0,
+        "retried": 0,
+        "skipped_no_url": 0,
+        "dry_run": 0,
+        "suppressed": 0,
+    }
 
     if not url and not dry_run:
         # No URL configured — pull nothing, exit silently. This is the right
@@ -237,6 +309,10 @@ def flush_once(batch: int = DEFAULT_BATCH, dry_run: bool = False) -> dict[str, i
             return counts
         for row in rows:
             now = datetime.now(timezone.utc)
+            if row["event_type"] in SUPPRESSED_EVENT_TYPES:
+                _mark_sent(cur, row["event_id"], now)
+                counts["suppressed"] += 1
+                continue
             if dry_run:
                 _mark_sent(cur, row["event_id"], now)
                 counts["dry_run"] += 1
