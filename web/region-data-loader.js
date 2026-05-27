@@ -95,11 +95,80 @@
     });
   }
 
+  // Favorites needs to look up listing metadata for *any* region the user
+  // ever favourited from, not just the active region's. ``loadAllRegions``
+  // hits /api/regions for the approved list, then sequentially loads each
+  // region's data files and concatenates them into ``window.DATA_<SOURCE>``.
+  //
+  // Sequential (not parallel) because every data_<source>_<slug>.js file
+  // reassigns the same ``window.DATA_<SOURCE>`` global — running them in
+  // parallel would race and the last writer wins, throwing away the earlier
+  // regions' rows. Serial loads let us capture each contribution before the
+  // next script overwrites the global. Cost is N*S round-trips serial; in
+  // practice N=1–few and the 4 sources are still fetched in parallel within
+  // each region, so total time is roughly N * single-region load time.
+  function loadAllRegions(sources, callback) {
+    fetch('/api/regions', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : { regions: [] }; })
+      .then(function (payload) {
+        var slugs = ((payload && payload.regions) || []).map(function (r) { return r.slug; });
+        if (!slugs.length) slugs = [currentSlug()];
+        var merged = {};
+        sources.forEach(function (s) { merged[s] = []; });
+
+        function loadRegion(i) {
+          if (i >= slugs.length) {
+            // Replace globals with the union so existing listing-data-source
+            // / favorites lookups (which already key off DATA_<SOURCE>)
+            // transparently see every region's rows.
+            sources.forEach(function (s) {
+              window[globalKey(s)] = merged[s];
+            });
+            callback(merged);
+            return;
+          }
+          var slug = slugs[i];
+          var pending = sources.length;
+          sources.forEach(function (source) {
+            var key = globalKey(source);
+            // Null the global before each load so we only capture what this
+            // particular script contributes, not whatever the prior region
+            // left behind.
+            window[key] = null;
+            var s = document.createElement('script');
+            s.src = 'data_' + source + '_' + slug + '.js?v=' + Date.now();
+            s.onload = function () {
+              if (Array.isArray(window[key])) {
+                merged[source] = merged[source].concat(window[key]);
+              }
+              pending -= 1;
+              if (pending === 0) loadRegion(i + 1);
+            };
+            s.onerror = function () {
+              // Missing data file for a region = that region just hasn't
+              // crawled yet. Not an error — keep going.
+              pending -= 1;
+              if (pending === 0) loadRegion(i + 1);
+            };
+            document.head.appendChild(s);
+          });
+        }
+        loadRegion(0);
+      })
+      .catch(function (err) {
+        // /api/regions failed (likely 401 / network blip). Fall back to
+        // the single-region path so the page still renders something.
+        console.warn('RegionData.loadAllRegions: falling back to single region', err);
+        loadAll(sources, callback);
+      });
+  }
+
   window.RegionData = {
     STORAGE_KEY: STORAGE_KEY,
     currentSlug: currentSlug,
     setSlug: setSlug,
     loadOne: loadOne,
     loadAll: loadAll,
+    loadAllRegions: loadAllRegions,
   };
 })();

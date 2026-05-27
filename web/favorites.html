@@ -904,11 +904,12 @@ if (window.AreaFilter) {
   AreaFilter.subscribe(renderList);
 }
 
-// Load the active region's data (window.DATA_DABANG / DAANGN / ZIGBANG /
-// NAVER) before the first render so favorites can look up listing metadata
-// by id. Each ``favoritesSynced`` event after this still re-renders against
-// the already-loaded globals.
-RegionData.loadAll(['dabang', 'daangn', 'zigbang', 'naver'], renderList);
+// Load EVERY approved region's listing data (not just the active region)
+// so favorites cards can show metadata regardless of which region the
+// listing originally came from. A user who favourited a listing in 강남
+// while currently viewing 아주대 still sees its title/deposit/rent without
+// having to switch regions first. See loadAllRegions in region-data-loader.
+RegionData.loadAllRegions(['dabang', 'daangn', 'zigbang', 'naver'], renderList);
 </script>
 </body>
 </html>

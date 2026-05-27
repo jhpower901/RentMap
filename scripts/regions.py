@@ -460,11 +460,18 @@ def merge_cortar_nos(region_id: int, discovered: list[str]) -> int:
     return added
 
 
-def delete_region(region_id: int) -> dict[str, Any]:
-    """Hard-delete a region row. region_schedules cascade automatically.
+def delete_region(region_id: int, *, cleanup_files: bool = True) -> dict[str, Any]:
+    """Hard-delete a region row and (by default) its on-disk artefacts.
 
-    Phase 3 will add an extra "block delete if data/<slug>/ has CSVs" guard
-    at the application layer; for now the DB-level cascade is all we need.
+    region_schedules cascade automatically via FK ON DELETE CASCADE; the file
+    sweep below handles the part the DB doesn't know about — CSVs that
+    crawl_X wrote, raw JSON dumps, naver cortarNo learning state, and the
+    gen-web ``data_<source>_<slug>.js`` bundles. Without this an admin who
+    deletes a typo'd region row leaves orphan files forever.
+
+    File cleanup is opt-out via ``cleanup_files=False`` for the rare case
+    a caller wants the DB row gone but wants to inspect or back up the
+    leftover CSVs first.
     """
     with session() as conn, conn.cursor() as cur:
         cur.execute(
@@ -474,7 +481,66 @@ def delete_region(region_id: int) -> dict[str, Any]:
         row = cur.fetchone()
         if not row:
             raise RegionError("unknown", "Region not found")
-    return {"id": region_id, "slug": row["slug"], "deleted": True}
+    slug = row["slug"]
+    removed = _cleanup_region_files(slug) if cleanup_files else {
+        "csvs": 0, "json": 0, "web_js": 0
+    }
+    return {"id": region_id, "slug": slug, "deleted": True, "filesRemoved": removed}
+
+
+def _cleanup_region_files(slug: str) -> dict[str, int]:
+    """Remove on-disk artefacts for a deleted region's slug.
+
+    Globs are slug-bound and slug is re-validated against ``_SLUG_RE``
+    before any filesystem call — so an empty/garbled slug can't sweep
+    files belonging to other regions, and a malicious slug can't escape
+    the data/ or web/ directories via ``..``. Per-file errors are
+    swallowed: a missing or already-deleted file shouldn't fail the whole
+    DELETE response.
+    """
+    if not slug or not _SLUG_RE.match(slug):
+        return {"csvs": 0, "json": 0, "web_js": 0}
+
+    root = Path(__file__).resolve().parent.parent
+    data_dir = root / "data"
+    web_dir = root / "web"
+    counts = {"csvs": 0, "json": 0, "web_js": 0}
+
+    # CSVs the crawlers wrote: <source>_<slug>_<date>.csv
+    for prefix in ("dabang", "daangn", "zigbang", "naver_land"):
+        for f in data_dir.glob(f"{prefix}_{slug}_*.csv"):
+            try:
+                f.unlink()
+                counts["csvs"] += 1
+            except OSError:
+                pass
+
+    # Naver auxiliary files: raw payload dumps + the cortarNo learning state.
+    for f in data_dir.glob(f"naver_land_{slug}_*.raw.json"):
+        try:
+            f.unlink()
+            counts["json"] += 1
+        except OSError:
+            pass
+    cortarnos_file = data_dir / f"naver_cortarnos_{slug}.json"
+    if cortarnos_file.exists():
+        try:
+            cortarnos_file.unlink()
+            counts["json"] += 1
+        except OSError:
+            pass
+
+    # gen-web output: data_<source>_<slug>.js per platform.
+    for src in ("dabang", "daangn", "zigbang", "naver"):
+        f = web_dir / f"data_{src}_{slug}.js"
+        if f.exists():
+            try:
+                f.unlink()
+                counts["web_js"] += 1
+            except OSError:
+                pass
+
+    return counts
 
 
 # ──────────────────────────────────────────────────────────────────────────────
