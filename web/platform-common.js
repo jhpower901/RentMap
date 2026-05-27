@@ -109,8 +109,21 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
     }).addTo(map);
-    L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
+    const centerMarker = L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
     window.addEventListener('resize', () => map.invalidateSize());
+
+    // Recenter on the active region so switching regions moves the viewport.
+    fetch('/api/regions', { credentials: 'same-origin', cache: 'no-store' })
+      .then(r => r.ok ? r.json() : { regions: [] })
+      .then(payload => {
+        const slug = (window.RegionData && RegionData.currentSlug && RegionData.currentSlug()) || 'ajou';
+        const region = (payload.regions || []).find(r => r.slug === slug);
+        if (!region) return;
+        map.setView([region.centerLat, region.centerLng], 15);
+        centerMarker.setLatLng([region.centerLat, region.centerLng]);
+        centerMarker.setPopupContent('<b>' + (region.name || region.slug).replace(/[<>&"']/g, '') + ' 중심</b>');
+      })
+      .catch(err => console.warn('Failed to fetch region center', err));
 
     const markerMap = new Map();
     RAW.forEach(r => {
