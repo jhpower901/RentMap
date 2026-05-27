@@ -29,6 +29,52 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
+  // ───────── Naver Land URL rewrite ─────────
+  // /rooms?articleNo=N alone gets redirected to a viewport-only URL that
+  // drops articleNo (Naver assumes the visitor wants the map at their last
+  // viewport, not "show me this listing"). Including ms=lat,lng,zoom + the
+  // default listing filter blocks that redirect, so the side panel opens
+  // with the article selected. Mirrors encode_coord() in scripts/rentmap.py.
+  const NAVER_BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const NAVER_LINK_ZOOM = 17;
+  const NAVER_LINK_PARAMS =
+    "a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL" +
+    "&e=RETAIL&aa=SMALLSPCRENT&ae=ONEROOM";
+
+  function encodeNaverCoord(value) {
+    if (value == null || !isFinite(value)) return null;
+    let n = Math.round(value * 10000000) + 2000000000;
+    if (n <= 0) return "0";
+    let out = "";
+    while (n > 0) {
+      out = NAVER_BASE62[n % 62] + out;
+      n = Math.floor(n / 62);
+    }
+    return out || "0";
+  }
+
+  function naverArticleUrl(fallback, listing) {
+    if (!listing) return fallback || "";
+    const id = listing.id != null ? String(listing.id) : "";
+    const lat = Number(listing.lat != null ? listing.lat : listing.latitude);
+    const lon = Number(
+      listing.lon != null ? listing.lon :
+      (listing.lng != null ? listing.lng : listing.longitude)
+    );
+    if (!id || !isFinite(lat) || !isFinite(lon) || lat === 0 || lon === 0) {
+      return fallback || "";
+    }
+    const ms = encodeNaverCoord(lat) + "," + encodeNaverCoord(lon) + "," + NAVER_LINK_ZOOM;
+    return "https://new.land.naver.com/rooms?ms=" + ms +
+           "&" + NAVER_LINK_PARAMS +
+           "&articleNo=" + encodeURIComponent(id);
+  }
+
+  function resolveListingUrl(fallback, source, listing) {
+    if (source === "naver") return naverArticleUrl(fallback, listing);
+    return fallback || "";
+  }
+
   function typeLabel(d, source) {
     const raw = d.type || d.room_type || "";
     if (source === "daangn" && DAANGN_TYPE_LABEL[raw]) return DAANGN_TYPE_LABEL[raw];
@@ -293,5 +339,5 @@
     `;
   }
 
-  window.ListingInfo = { esc, typeLabel, buildSection, attachSparklines };
+  window.ListingInfo = { esc, typeLabel, buildSection, attachSparklines, resolveListingUrl };
 })();

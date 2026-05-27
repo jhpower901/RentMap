@@ -305,7 +305,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="auth.js?v=20260525-auth1"></script>
 <script src="favorites.js?v=20260526-user-guard"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
-<script src="listing-info.js?v=20260525-maint2"></script>
+<script src="listing-info.js?v=20260527-naverurl"></script>
 <script>
 const CRITERIA = [
   { key: 'daylight',    label: '☀️ 채광',     desc: '자연채광·햇빛' },
@@ -430,7 +430,7 @@ function ensureFavoriteMap() {
 }
 
 function mapPopupHtml(fav, d) {
-  const url = safeUrl(d.url);
+  const url = safeUrl(window.ListingInfo.resolveListingUrl(d.url, fav.source, d));
   const srcName = SRC_NAME[fav.source] || fav.source || '';
   return `
     <div class="popup-title">${esc(d.title || d.address || '제목없음')}</div>
@@ -540,7 +540,10 @@ function buildCard(fav) {
         <span class="fav-sub">${esc(d.address || d.region || '')}</span>
       </div>
       <div class="fav-actions">
-        ${safeUrl(d.url) ? `<a href="${esc(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer" class="btn" style="padding:4px 8px">🔗</a>` : ''}
+        ${(() => {
+          const linkUrl = safeUrl(window.ListingInfo.resolveListingUrl(d.url, fav.source, d));
+          return linkUrl ? `<a href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer" class="btn" style="padding:4px 8px">🔗</a>` : '';
+        })()}
         <button class="btn btn-danger fav-remove" type="button" style="padding:4px 8px">제거</button>
       </div>
       <span class="expand-arrow">▼</span>

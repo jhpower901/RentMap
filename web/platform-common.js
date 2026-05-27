@@ -114,7 +114,13 @@
 
     const markerMap = new Map();
     RAW.forEach(r => {
-      r.url = safeUrl(r.url);
+      // Rewrite Naver URLs to include ms= viewport + articleNo so the link
+      // opens the article instead of redirecting to a viewport-only page.
+      // Non-naver sources pass through unchanged.
+      const resolvedUrl = window.ListingInfo
+        ? window.ListingInfo.resolveListingUrl(r.url, source, r)
+        : r.url;
+      r.url = safeUrl(resolvedUrl);
       if (!r.lat || !r.lon) return;
       const m = L.circleMarker([r.lat, r.lon], {
         radius: 7, fillColor: agencyColor(r.agency), color: '#fff', weight: 2, fillOpacity: 0.85,

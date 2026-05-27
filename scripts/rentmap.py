@@ -1825,6 +1825,36 @@ def encode_coord(value: float) -> str:
     return result or "0"
 
 
+# Zoom used when linking to a single article. /rooms?articleNo=N alone
+# redirects to a viewport-only URL that drops articleNo; including an ms=
+# viewport at the building's coordinates blocks that redirect so the side
+# panel opens with the article selected. 17 frames a single building well.
+NAVER_ARTICLE_LINK_ZOOM = 17
+
+
+def naver_article_url(article_no: Any, lat: Any, lon: Any) -> str:
+    """Build a Naver Land URL that opens the given article without redirect.
+
+    Falls back to the legacy articleNo-only URL when coordinates are missing
+    (Naver will redirect that one, but it's the best we can do without coords).
+    Returns "" when there's no article number to link to.
+    """
+    if not article_no:
+        return ""
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (TypeError, ValueError):
+        return f"https://new.land.naver.com/rooms?articleNo={article_no}"
+    if not (math.isfinite(lat_f) and math.isfinite(lon_f)) or lat_f == 0 or lon_f == 0:
+        return f"https://new.land.naver.com/rooms?articleNo={article_no}"
+    ms = f"{encode_coord(lat_f)},{encode_coord(lon_f)},{NAVER_ARTICLE_LINK_ZOOM}"
+    return (
+        f"https://new.land.naver.com/rooms?ms={ms}"
+        f"&{NAVER_DEFAULT_PARAMS}&articleNo={article_no}"
+    )
+
+
 def gen_naver_grid_urls(center_lat: float, center_lng: float, radius_km: float) -> list[str]:
     """Generate a grid of Naver Land ms= viewport URLs covering the given radius.
 
@@ -2087,7 +2117,7 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
         "source": "naver_land",
         "listing_no": article_no,
         "room_id": article_no,
-        "url": f"https://new.land.naver.com/rooms?articleNo={article_no}" if article_no else source_url,
+        "url": naver_article_url(article_no, lat, lon) or source_url,
         "agency": first(article, ["realtorName", "cpName"]),
         "agent_name": "",
         "agent_phone": "",
