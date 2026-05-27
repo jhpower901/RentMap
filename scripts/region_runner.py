@@ -42,6 +42,16 @@ import region_schedules as schedule_store  # noqa: E402
 _SCHEDULE_LOCKS: dict[int, threading.Lock] = {}
 _SCHEDULE_LOCKS_MUTEX = threading.Lock()
 
+# Container-lifetime cache: regions whose daangn_region_ids we've already
+# auto-learned this process. Mirrors how the naver cortarNo set is
+# UNION-merged into the region row each crawl: we want the same accretive
+# behaviour for daangn, but the daangn lookup is an external HTTP sweep
+# (~22s for a 3km radius), so we limit it to once per container lifetime.
+# Re-deploying the container is enough to refresh — daangn's region tree
+# moves slowly enough that this is the right cadence.
+_DAANGN_LEARN_DONE: set[int] = set()
+_DAANGN_LEARN_DONE_LOCK = threading.Lock()
+
 
 def _lock_for(schedule_id: int) -> threading.Lock:
     with _SCHEDULE_LOCKS_MUTEX:
@@ -283,23 +293,31 @@ def _run_schedule_locked(schedule_id: int) -> None:
         schedule_store.record_run(schedule_id, status="failed", log_excerpt=msg)
         return
 
-    # Daangn region_id auto-learning: if the region row has no daangn_region_ids
-    # yet (admin left it blank), call the realty.daangn.com graphql endpoint
-    # to discover them from center+radius BEFORE the env is built. The fresh
-    # values get rolled into the env via build_env's read of region["daangnRegionIds"].
+    # Daangn region_id auto-learning. Same UNION-merge philosophy as the naver
+    # cortarNo learning: every approved region gets its IDs refreshed against
+    # daangn's getRegionByCoordinate graphql, and we UNION the discoveries
+    # back into the row. Whether or not the array already has values, this
+    # picks up new dongs daangn added (or fixes IDs that became stale when
+    # daangn migrated its region tree — the original ajou legacy 10 had 8
+    # such stale IDs when we verified).
     #
-    # Only the lightweight sources actually use the IDs (daangn / all_light),
-    # but we don't restrict learning to those — having the IDs in the row
-    # also benefits the admin UI immediately, and the cost is paid once per
-    # region (subsequent runs see the populated array and skip the call).
+    # Cost is ~22s for a 3km radius (49 graphql calls @ 250ms), so we cap
+    # this at once per container lifetime via _DAANGN_LEARN_DONE. Restart
+    # = refresh, which lines up with the deploy cadence and lets new
+    # daangn region tree changes flow in without operator action.
     daangn_relevant = source in ("daangn", "all_light")
-    if daangn_relevant and not (region.get("daangnRegionIds") or []):
-        _learn_daangn_region_ids(region)
-        # Re-fetch so build_env below sees the merged IDs.
-        try:
-            region = region_store.get_region(region["id"])
-        except region_store.RegionError:
-            pass
+    if daangn_relevant:
+        with _DAANGN_LEARN_DONE_LOCK:
+            need_learn = region["id"] not in _DAANGN_LEARN_DONE
+            if need_learn:
+                _DAANGN_LEARN_DONE.add(region["id"])
+        if need_learn:
+            _learn_daangn_region_ids(region)
+            # Re-fetch so build_env below sees the merged IDs.
+            try:
+                region = region_store.get_region(region["id"])
+            except region_store.RegionError:
+                pass
 
     env = build_env(region)
     label = f"region={region['slug']} source={source}"
