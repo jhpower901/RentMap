@@ -136,9 +136,76 @@
 
     let sortCol = 'total', sortAsc = true;
 
+    const PRICE_FILTER_DEFAULTS = {
+      maxDeposit: '3000',
+      maxRent: '60',
+    };
+    const PLATFORM_FILTER_DEFAULTS = {
+      typeFilter: '',
+      search: '',
+    };
+    const priceFilterPrefs = window.UserFilters
+      ? UserFilters.create('price', PRICE_FILTER_DEFAULTS)
+      : null;
+    const filterPrefs = window.UserFilters
+      ? UserFilters.create('platform.' + source, PLATFORM_FILTER_DEFAULTS)
+      : null;
+
+    function setControlValue(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const next = value === null || value === undefined ? '' : String(value);
+      if (el.value !== next) el.value = next;
+    }
+
+    function applySavedPriceFilterState(saved) {
+      const state = saved || PRICE_FILTER_DEFAULTS;
+      setControlValue('maxDeposit', state.maxDeposit);
+      setControlValue('maxRent', state.maxRent);
+    }
+
+    function applySavedFilterState(saved) {
+      const state = saved || PLATFORM_FILTER_DEFAULTS;
+      setControlValue('typeFilter', state.typeFilter);
+      setControlValue('search', state.search);
+    }
+
+    function currentPriceFilterState() {
+      return {
+        maxDeposit: document.getElementById('maxDeposit').value,
+        maxRent: document.getElementById('maxRent').value,
+      };
+    }
+
+    function currentFilterState() {
+      return {
+        typeFilter: document.getElementById('typeFilter').value,
+        search: document.getElementById('search').value,
+      };
+    }
+
+    if (priceFilterPrefs) {
+      priceFilterPrefs.subscribe(state => {
+        applySavedPriceFilterState(state);
+        render();
+      });
+    }
+
+    if (filterPrefs) {
+      filterPrefs.subscribe(state => {
+        applySavedFilterState(state);
+        render();
+      });
+    }
+
+    function readLimit(id, fallback) {
+      const n = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
     function getFiltered() {
-      const maxDep  = parseFloat(document.getElementById('maxDeposit').value) || 9999;
-      const maxRent = parseFloat(document.getElementById('maxRent').value) || 999;
+      const maxDep  = readLimit('maxDeposit', 9999);
+      const maxRent = readLimit('maxRent', 999);
       const type    = document.getElementById('typeFilter').value;
       const q       = (document.getElementById('search').value || '').toLowerCase();
       return RAW.filter(r => {
@@ -282,7 +349,18 @@
     });
 
     ['maxDeposit', 'maxRent', 'typeFilter', 'search'].forEach(id => {
-      document.getElementById(id).addEventListener('input', render);
+      const onChange = () => {
+        if (id === 'maxDeposit' || id === 'maxRent') {
+          if (priceFilterPrefs) priceFilterPrefs.set(currentPriceFilterState());
+          else render();
+          return;
+        }
+        if (filterPrefs) filterPrefs.set(currentFilterState());
+        else render();
+      };
+      const el = document.getElementById(id);
+      el.addEventListener('change', onChange);
+      if (el.tagName !== 'SELECT') el.addEventListener('input', onChange);
     });
 
     // Shared area filter: overlay polygon on side map, mount chip, re-render on change

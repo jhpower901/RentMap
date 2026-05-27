@@ -111,6 +111,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="listing-data-source.js?v=20260527-zigbang-img1"></script>
 <script src="auth.js?v=20260525-auth1"></script>
 <script src="favorites.js?v=20260526-user-guard"></script>
+<script src="user-filters.js?v=20260527-filter1"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script>
 const COLORS = { dabang: '#FF5C38', daangn: '#FF6F00', zigbang: '#6366F1', naver: '#03C75A' };
@@ -178,6 +179,69 @@ document.getElementById('chk_area').addEventListener('change', e => {
 AreaFilter.subscribe(() => { refreshAreaStatus(); applyFilter(); });
 refreshAreaStatus();
 
+// ------- User filter preferences (shared price + map source toggles) -------
+const PRICE_FILTER_DEFAULTS = {
+  maxDeposit: '3000',
+  maxRent: '60',
+};
+const MAP_FILTER_DEFAULTS = {
+  sources: { dabang: true, daangn: true, zigbang: true, naver: true },
+};
+const priceFilterPrefs = window.UserFilters ? UserFilters.create('price', PRICE_FILTER_DEFAULTS) : null;
+const mapFilterPrefs = window.UserFilters ? UserFilters.create('map', MAP_FILTER_DEFAULTS) : null;
+
+function setControlValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const next = value === null || value === undefined ? '' : String(value);
+  if (el.value !== next) el.value = next;
+}
+
+function applySavedPriceFilterState(saved) {
+  const state = saved || PRICE_FILTER_DEFAULTS;
+  setControlValue('maxDeposit', state.maxDeposit);
+  setControlValue('maxRent', state.maxRent);
+}
+
+function applySavedMapFilterState(saved) {
+  const state = saved || MAP_FILTER_DEFAULTS;
+  const sources = state.sources && typeof state.sources === 'object' ? state.sources : {};
+  Object.keys(MAP_FILTER_DEFAULTS.sources).forEach(src => {
+    const el = document.getElementById('chk_' + src);
+    if (el) el.checked = sources[src] !== false;
+  });
+}
+
+function currentPriceFilterState() {
+  return {
+    maxDeposit: document.getElementById('maxDeposit').value,
+    maxRent: document.getElementById('maxRent').value,
+  };
+}
+
+function currentMapFilterState() {
+  const sources = {};
+  Object.keys(MAP_FILTER_DEFAULTS.sources).forEach(src => {
+    const el = document.getElementById('chk_' + src);
+    sources[src] = !el || el.checked;
+  });
+  return { sources };
+}
+
+if (priceFilterPrefs) {
+  priceFilterPrefs.subscribe(state => {
+    applySavedPriceFilterState(state);
+    applyFilter();
+  });
+}
+
+if (mapFilterPrefs) {
+  mapFilterPrefs.subscribe(state => {
+    applySavedMapFilterState(state);
+    applyFilter();
+  });
+}
+
 const allMarkers = [];
 
 function addMarkersForSource(src, rows) {
@@ -221,8 +285,12 @@ function addMarkersForSource(src, rows) {
 }
 
 function applyFilter() {
-  const maxDep   = parseFloat(document.getElementById('maxDeposit').value) || 9999;
-  const maxRent  = parseFloat(document.getElementById('maxRent').value) || 999;
+  const readLimit = (id, fallback) => {
+    const n = parseFloat(document.getElementById(id).value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const maxDep   = readLimit('maxDeposit', 9999);
+  const maxRent  = readLimit('maxRent', 999);
   const shown    = { dabang: 0, daangn: 0, zigbang: 0, naver: 0 };
 
   allMarkers.forEach(({ marker, src, data }) => {
@@ -260,8 +328,17 @@ function toggleFavFromPopup(id, src, btn) {
 // Wire up filter controls
 ['chk_dabang', 'chk_daangn', 'chk_zigbang', 'chk_naver', 'maxDeposit', 'maxRent'].forEach(id => {
   const el = document.getElementById(id);
-  el.addEventListener('change', applyFilter);
-  el.addEventListener('input',  applyFilter);
+  const onChange = () => {
+    if (id === 'maxDeposit' || id === 'maxRent') {
+      if (priceFilterPrefs) priceFilterPrefs.set(currentPriceFilterState());
+      else applyFilter();
+      return;
+    }
+    if (mapFilterPrefs) mapFilterPrefs.set(currentMapFilterState());
+    else applyFilter();
+  };
+  el.addEventListener('change', onChange);
+  if (el.type !== 'checkbox') el.addEventListener('input', onChange);
 });
 
 // Load all platforms in parallel from CSV after favorites storage is scoped to

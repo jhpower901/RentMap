@@ -291,6 +291,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import auth  # noqa: E402
 import favorites as fav_store  # noqa: E402
 import area_filters as area_store  # noqa: E402
+import filter_preferences as filter_pref_store  # noqa: E402
 import invites as invite_store  # noqa: E402
 import regions as region_store  # noqa: E402
 import region_schedules as schedule_store  # noqa: E402
@@ -1377,6 +1378,45 @@ async def delete_photo(id: str, source: str, photoKey: str,
         os.remove(file_path)
         return {"status": "deleted"}
     raise HTTPException(status_code=404, detail="Photo not found")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-user UI filter preferences
+# ─────────────────────────────────────────────────────────────────────────────
+
+class UserFilterPreferenceBody(BaseModel):
+    state: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/user-filters/{context}")
+async def get_user_filter_preference(context: str,
+                                     user: auth.User = Depends(auth.current_user)):
+    try:
+        return filter_pref_store.load(user.id, context)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error reading user filter preference: {e}")
+        return {
+            "context": context,
+            "state": {},
+            "updated_at": None,
+            "is_default": True,
+            "error": str(e)[:200],
+        }
+
+
+@app.put("/api/user-filters/{context}")
+async def put_user_filter_preference(context: str,
+                                     body: UserFilterPreferenceBody,
+                                     user: auth.User = Depends(auth.current_user)):
+    try:
+        return filter_pref_store.save(user.id, context, body.state)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error saving user filter preference: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
