@@ -1,4 +1,4 @@
-"""Per-user Discord webhook registrations.
+"""Per-user webhook registrations (Discord and Slack).
 
 Each user may register up to MAX_WEBHOOKS_PER_USER webhook URLs and configure
 which events / platforms / price ranges trigger a notification. The webhook
@@ -21,6 +21,9 @@ from db import session  # noqa: E402
 
 _DISCORD_URL_RE = re.compile(
     r'^https://discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$'
+)
+_SLACK_URL_RE = re.compile(
+    r'^https://hooks\.slack\.com/services/[A-Za-z0-9]+/[A-Za-z0-9]+/[A-Za-z0-9]+$'
 )
 
 VALID_EVENT_TYPES = frozenset([
@@ -57,10 +60,19 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def detect_webhook_type(url: str) -> str:
+    """Return 'discord', 'slack', or 'unknown'."""
+    if _DISCORD_URL_RE.match(url):
+        return "discord"
+    if _SLACK_URL_RE.match(url):
+        return "slack"
+    return "unknown"
+
+
 def _validate_url(url: Any) -> str:
     s = str(url or "").strip()
-    if not _DISCORD_URL_RE.match(s):
-        raise WebhookError("invalid", "webhook_url must be a valid Discord webhook URL")
+    if detect_webhook_type(s) == "unknown":
+        raise WebhookError("invalid", "webhook_url must be a valid Discord or Slack webhook URL")
     return s
 
 

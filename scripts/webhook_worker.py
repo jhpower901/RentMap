@@ -1,16 +1,17 @@
-"""Discord webhook dispatcher for listing_status_events.
+"""Multi-platform webhook dispatcher for listing_status_events.
 
 The reconcile module's only job is to write events to ``listing_status_events``.
-This module fans them out to each user's registered Discord webhook URL when
-the event matches the user's filter (event type, platform, price range, area
-polygon). ``flush_once`` is the single entry point called from region_runner.
+This module fans them out to each user's registered webhook URL (Discord or
+Slack) when the event matches the user's filter (event type, platform, price
+range, area polygon). ``flush_once`` is the single entry point called from
+region_runner.
 
 Per-user delivery flow:
   1. fan_out_new_events() — for events without user_webhook_fanned_out_at,
      check every active user_webhook's filters; create webhook_deliveries rows
      for matches; mark events fanned_out_at.
-  2. flush_user_deliveries() — send pending webhook_deliveries rows to Discord,
-     with exponential backoff on failure.
+  2. flush_user_deliveries() — send pending webhook_deliveries rows to Discord
+     or Slack, with exponential backoff on failure.
 
 Concurrency: FOR UPDATE … SKIP LOCKED prevents double-delivery when the main
 and naver containers flush in parallel.
@@ -42,8 +43,8 @@ import user_webhooks as webhook_store  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-# 0 means "drain everything currently deliverable". Discord may still return
-# 429; when it does, we respect Retry-After and leave that row queued.
+# 0 means "drain everything currently deliverable". Discord/Slack may still
+# return 429; when they do, we respect Retry-After and leave the row queued.
 DEFAULT_BATCH = 0
 INTER_REQUEST_SLEEP_S = 0.0
 
@@ -169,6 +170,60 @@ def build_embed(row: dict[str, Any]) -> dict[str, Any]:
     if image_url:
         embed["thumbnail"] = {"url": image_url}
     return embed
+
+
+def build_slack_payload(row: dict[str, Any]) -> dict[str, Any]:
+    """Turn a joined event+listing+snapshot row into a Slack incoming-webhook payload.
+
+    Uses ``attachments`` (legacy) so the color sidebar is rendered; Block Kit
+    blocks are nested inside the attachment to get rich layout.
+    """
+    style = EVENT_STYLE.get(row["event_type"], {"emoji": "•", "color": 0x95A5A6, "verb": row["event_type"]})
+    color_hex = f"#{style['color']:06X}"
+    title_text = row.get("title") or f"({row['platform_code']} {row['platform_listing_id']})"
+    # Slack header block caps at 150 plain-text chars.
+    header_text = f"{style['emoji']} [{style['verb']}] {title_text}"[:150]
+
+    fields: list[dict[str, Any]] = [
+        {"type": "mrkdwn", "text": f"*상태*\n{style['verb']}"},
+        {"type": "mrkdwn", "text": f"*플랫폼*\n`{row['platform_code']}`"},
+    ]
+    addr = row.get("address_raw")
+    if addr:
+        fields.append({"type": "mrkdwn", "text": f"*위치*\n{addr[:200]}"})
+
+    if row["event_type"] == "price_changed":
+        price_value = _fmt_changed_price(row)
+    else:
+        price_value = _fmt_price_pair(
+            row.get("deposit_won"), row.get("monthly_rent_won"), row.get("maintenance_fee_won"),
+        )
+    fields.append({"type": "mrkdwn", "text": f"*가격*\n{price_value}"})
+
+    specs = _fmt_listing_specs(row)
+    if specs:
+        fields.append({"type": "mrkdwn", "text": f"*매물 정보*\n{specs}"})
+
+    blocks: list[dict[str, Any]] = [
+        {"type": "header", "text": {"type": "plain_text", "text": header_text, "emoji": True}},
+        {"type": "section", "fields": fields},
+    ]
+
+    source_url = row.get("source_url")
+    if source_url:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"<{source_url}|매물 보러가기 →>"},
+        })
+
+    ts = row["event_at"].astimezone(timezone.utc)
+    blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn",
+                       "text": f"RentMap · event #{row['event_id']} · {ts.strftime('%Y-%m-%d %H:%M')} UTC"}],
+    })
+
+    return {"attachments": [{"color": color_hex, "blocks": blocks}]}
 
 
 def _fetch_batch(cur, limit: int) -> list[dict[str, Any]]:
@@ -529,8 +584,11 @@ def flush_user_deliveries(dry_run: bool = False) -> dict[str, int]:
                 )
                 counts["dry_run"] += 1
                 continue
-            embed = build_embed(row)
-            payload = {"embeds": [embed]}
+            wh_type = webhook_store.detect_webhook_type(row["webhook_url"])
+            if wh_type == "slack":
+                payload = build_slack_payload(row)
+            else:
+                payload = {"embeds": [build_embed(row)]}
             attempts = row["attempts"] + 1
             try:
                 resp = requests.post(

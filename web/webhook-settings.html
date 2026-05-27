@@ -93,12 +93,13 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
 </nav>
 
 <div class="page">
-  <h2>🔔 Discord 알림 설정</h2>
-  <p class="subtitle">Discord 채널의 Webhook URL을 등록하면 원하는 조건의 매물이 변동될 때마다 알림을 받을 수 있습니다.<br>
+  <h2>🔔 알림 설정</h2>
+  <p class="subtitle">Discord 또는 Slack Webhook URL을 등록하면 원하는 조건의 매물이 변동될 때마다 알림을 받을 수 있습니다.<br>
   최대 5개까지 등록 가능합니다.</p>
 
   <div class="hint">
-    Discord 채널 설정 → 연동 → 웹후크 → 새 웹후크에서 URL을 복사하세요.<br>
+    <strong>Discord</strong>: 채널 설정 → 연동 → 웹후크 → 새 웹후크에서 URL 복사<br>
+    <strong>Slack</strong>: <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener" style="color:#3730a3">Incoming Webhooks</a> 앱에서 채널 추가 후 URL 복사<br>
     <strong>면적 필터 사용</strong>을 체크하면 내 면적 필터 폴리곤 안의 매물만 알림을 보냅니다.
   </div>
 
@@ -113,9 +114,9 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
     </div>
 
     <div class="form-group">
-      <label>Discord Webhook URL *</label>
-      <input type="url" id="fUrl" placeholder="https://discord.com/api/webhooks/…">
-      <small>Discord 채널 → 연동 → 웹후크에서 복사</small>
+      <label>Webhook URL * <span id="fUrlBadge" style="font-weight:400"></span></label>
+      <input type="url" id="fUrl" placeholder="https://discord.com/api/webhooks/… 또는 https://hooks.slack.com/services/…">
+      <small>Discord 또는 Slack Incoming Webhook URL을 입력하세요</small>
     </div>
 
     <div class="form-group">
@@ -183,11 +184,28 @@ function showToast(msg, ms=2800) {
   setTimeout(() => t.classList.remove('show'), ms);
 }
 
+const DISCORD_RE = /^https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/;
+const SLACK_RE   = /^https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9]+\/[A-Za-z0-9]+\/[A-Za-z0-9]+$/;
+
+function detectService(url) {
+  if (DISCORD_RE.test(url)) return 'discord';
+  if (SLACK_RE.test(url))   return 'slack';
+  return null;
+}
+
 function maskUrl(url) {
-  // Show only the start: https://discord.com/api/webhooks/1234567890/xxx...
-  const m = url.match(/^(https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/)(.{6})(.*)$/);
-  if (!m) return url;
-  return m[1] + m[2] + '…';
+  const dm = url.match(/^(https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/)(.{6})(.*)$/);
+  if (dm) return dm[1] + dm[2] + '…';
+  const sm = url.match(/^(https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]+\/[A-Z0-9]+\/)(.{6})(.*)$/i);
+  if (sm) return sm[1] + sm[2] + '…';
+  return url.length > 46 ? url.substring(0, 46) + '…' : url;
+}
+
+function serviceBadgeHtml(url) {
+  const svc = detectService(url);
+  if (svc === 'discord') return '<span class="chip" style="background:#5865f220;color:#5865F2">Discord</span>';
+  if (svc === 'slack')   return '<span class="chip" style="background:#4a154b20;color:#4a154b">Slack</span>';
+  return '';
 }
 
 function renderChips(arr, prefix) {
@@ -207,7 +225,7 @@ function renderCard(wh) {
   <div class="wh-card" data-id="${wh.id}">
     <div class="wh-card-header">
       <div style="flex:1;min-width:0">
-        <div class="wh-label">${wh.label || '(이름 없음)'}</div>
+        <div class="wh-label">${wh.label || '(이름 없음)'} ${serviceBadgeHtml(wh.webhookUrl)}</div>
         <div class="wh-url">${maskUrl(wh.webhookUrl)}</div>
       </div>
       <span class="wh-status ${wh.isActive ? 'on' : 'off'}">${wh.isActive ? '활성' : '비활성'}</span>
@@ -332,6 +350,14 @@ document.getElementById('btnAdd').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
   }
+});
+
+document.getElementById('fUrl').addEventListener('input', function() {
+  const svc = detectService(this.value.trim());
+  const badge = document.getElementById('fUrlBadge');
+  if (svc === 'discord') badge.innerHTML = '<span class="chip" style="background:#5865f220;color:#5865F2;font-size:11px">Discord ✓</span>';
+  else if (svc === 'slack') badge.innerHTML = '<span class="chip" style="background:#4a154b20;color:#4a154b;font-size:11px">Slack ✓</span>';
+  else badge.innerHTML = this.value.trim() ? '<span style="font-size:11px;color:#c00">인식할 수 없는 URL</span>' : '';
 });
 
 // Load userInfo

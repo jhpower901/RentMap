@@ -1555,29 +1555,46 @@ async def test_user_webhook(webhook_id: int,
     except webhook_store.WebhookError as exc:
         raise _webhook_error_to_http(exc)
     import requests as _req
-    payload = {
-        "embeds": [{
-            "title": "🔔 RentMap 알림 테스트",
-            "description": f"**{wh['label'] or '내 알림'}** webhook이 정상 연결됐습니다.",
-            "color": 0x57F287,
-            "fields": [
-                {"name": "이벤트", "value": ", ".join(wh["eventTypes"]), "inline": False},
-                {"name": "플랫폼", "value": ", ".join(wh["platforms"]), "inline": False},
-            ],
-            "footer": {"text": "RentMap"},
-        }]
-    }
+    label = wh["label"] or "내 알림"
+    wh_type = webhook_store.detect_webhook_type(wh["webhookUrl"])
+    if wh_type == "slack":
+        payload = {
+            "attachments": [{
+                "color": "#57F287",
+                "blocks": [
+                    {"type": "header", "text": {"type": "plain_text", "text": "🔔 RentMap 알림 테스트", "emoji": True}},
+                    {"type": "section", "text": {"type": "mrkdwn", "text": f"*{label}* webhook이 정상 연결됐습니다."}},
+                    {"type": "section", "fields": [
+                        {"type": "mrkdwn", "text": f"*이벤트*\n{', '.join(wh['eventTypes'])}"},
+                        {"type": "mrkdwn", "text": f"*플랫폼*\n{', '.join(wh['platforms'])}"},
+                    ]},
+                ],
+            }]
+        }
+    else:
+        payload = {
+            "embeds": [{
+                "title": "🔔 RentMap 알림 테스트",
+                "description": f"**{label}** webhook이 정상 연결됐습니다.",
+                "color": 0x57F287,
+                "fields": [
+                    {"name": "이벤트", "value": ", ".join(wh["eventTypes"]), "inline": False},
+                    {"name": "플랫폼", "value": ", ".join(wh["platforms"]), "inline": False},
+                ],
+                "footer": {"text": "RentMap"},
+            }]
+        }
     try:
         resp = _req.post(
             wh["webhookUrl"], json=payload, timeout=10,
             headers={"User-Agent": "RentMap-Webhook/1.0 (+rentmap)"},
         )
     except _req.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Discord 연결 실패: {exc}")
+        raise HTTPException(status_code=502, detail=f"Webhook 연결 실패: {exc}")
     if resp.status_code not in (200, 204):
         raise HTTPException(
             status_code=502,
-            detail=f"Discord 응답 오류: HTTP {resp.status_code}",
+            detail=f"Webhook 응답 오류: HTTP {resp.status_code}",
         )
     return {"ok": True}
 
