@@ -293,6 +293,7 @@ import favorites as fav_store  # noqa: E402
 import area_filters as area_store  # noqa: E402
 import filter_preferences as filter_pref_store  # noqa: E402
 import invites as invite_store  # noqa: E402
+import user_webhooks as webhook_store  # noqa: E402
 import regions as region_store  # noqa: E402
 import region_schedules as schedule_store  # noqa: E402
 import region_runner  # noqa: E402
@@ -1454,6 +1455,131 @@ async def put_area_filter(body: AreaFilterBody,
     except Exception as e:
         print(f"Error saving area filter: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-user Discord webhook registrations
+# ─────────────────────────────────────────────────────────────────────────────
+
+class WebhookCreateBody(BaseModel):
+    label: str = ""
+    webhookUrl: str
+    eventTypes: list[str] = webhook_store.DEFAULT_EVENT_TYPES
+    platforms: list[str] = webhook_store.DEFAULT_PLATFORMS
+    maxDepositManwon: int | None = None
+    maxRentManwon: int | None = None
+    useAreaFilter: bool = True
+
+
+class WebhookUpdateBody(BaseModel):
+    label: str | None = None
+    webhookUrl: str | None = None
+    isActive: bool | None = None
+    eventTypes: list[str] | None = None
+    platforms: list[str] | None = None
+    maxDepositManwon: int | None = None
+    maxRentManwon: int | None = None
+    useAreaFilter: bool | None = None
+
+
+def _webhook_error_to_http(exc: webhook_store.WebhookError) -> HTTPException:
+    code = {"unknown": 404, "forbidden": 404, "invalid": 400, "limit": 409}.get(
+        exc.reason, 400
+    )
+    return HTTPException(status_code=code, detail=str(exc))
+
+
+@app.get("/api/user/webhooks")
+async def list_user_webhooks(user: auth.User = Depends(auth.current_user)):
+    return webhook_store.list_webhooks(user.id)
+
+
+@app.post("/api/user/webhooks", status_code=201)
+async def create_user_webhook(body: WebhookCreateBody,
+                              user: auth.User = Depends(auth.current_user)):
+    try:
+        return webhook_store.create_webhook(
+            user.id,
+            label=body.label,
+            webhook_url=body.webhookUrl,
+            event_types=body.eventTypes,
+            platforms=body.platforms,
+            max_deposit_manwon=body.maxDepositManwon,
+            max_rent_manwon=body.maxRentManwon,
+            use_area_filter=body.useAreaFilter,
+        )
+    except webhook_store.WebhookError as exc:
+        raise _webhook_error_to_http(exc)
+
+
+@app.patch("/api/user/webhooks/{webhook_id}")
+async def update_user_webhook(webhook_id: int, body: WebhookUpdateBody,
+                              user: auth.User = Depends(auth.current_user)):
+    kwargs: dict[str, Any] = {}
+    if body.label is not None:
+        kwargs["label"] = body.label
+    if body.webhookUrl is not None:
+        kwargs["webhook_url"] = body.webhookUrl
+    if body.isActive is not None:
+        kwargs["is_active"] = body.isActive
+    if body.eventTypes is not None:
+        kwargs["event_types"] = body.eventTypes
+    if body.platforms is not None:
+        kwargs["platforms"] = body.platforms
+    if body.maxDepositManwon is not None or "maxDepositManwon" in body.model_fields_set:
+        kwargs["max_deposit_manwon"] = body.maxDepositManwon
+    if body.maxRentManwon is not None or "maxRentManwon" in body.model_fields_set:
+        kwargs["max_rent_manwon"] = body.maxRentManwon
+    if body.useAreaFilter is not None:
+        kwargs["use_area_filter"] = body.useAreaFilter
+    try:
+        return webhook_store.update_webhook(webhook_id, user.id, **kwargs)
+    except webhook_store.WebhookError as exc:
+        raise _webhook_error_to_http(exc)
+
+
+@app.delete("/api/user/webhooks/{webhook_id}", status_code=204)
+async def delete_user_webhook(webhook_id: int,
+                              user: auth.User = Depends(auth.current_user)):
+    try:
+        webhook_store.delete_webhook(webhook_id, user.id)
+    except webhook_store.WebhookError as exc:
+        raise _webhook_error_to_http(exc)
+
+
+@app.post("/api/user/webhooks/{webhook_id}/test")
+async def test_user_webhook(webhook_id: int,
+                            user: auth.User = Depends(auth.current_user)):
+    try:
+        wh = webhook_store.get_webhook(webhook_id, user.id)
+    except webhook_store.WebhookError as exc:
+        raise _webhook_error_to_http(exc)
+    import requests as _req
+    payload = {
+        "embeds": [{
+            "title": "🔔 RentMap 알림 테스트",
+            "description": f"**{wh['label'] or '내 알림'}** webhook이 정상 연결됐습니다.",
+            "color": 0x57F287,
+            "fields": [
+                {"name": "이벤트", "value": ", ".join(wh["eventTypes"]), "inline": False},
+                {"name": "플랫폼", "value": ", ".join(wh["platforms"]), "inline": False},
+            ],
+            "footer": {"text": "RentMap"},
+        }]
+    }
+    try:
+        resp = _req.post(
+            wh["webhookUrl"], json=payload, timeout=10,
+            headers={"User-Agent": "RentMap-Webhook/1.0 (+rentmap)"},
+        )
+    except _req.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Discord 연결 실패: {exc}")
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Discord 응답 오류: HTTP {resp.status_code}",
+        )
+    return {"ok": True}
 
 
 # Mount data directory for CSV and Photo access. Auth is enforced by the

@@ -1,24 +1,23 @@
 """Discord webhook dispatcher for listing_status_events.
 
 The reconcile module's only job is to write events to ``listing_status_events``.
-This module flushes the unsent ones to Discord after crawl/reconcile completes,
-honoring Discord 429 responses and applying exponential backoff to transient
-failures.
+This module fans them out to each user's registered Discord webhook URL when
+the event matches the user's filter (event type, platform, price range, area
+polygon). ``flush_once`` is the single entry point called from region_runner.
 
-Decoupling matters: a crawl never blocks on Discord, and a Discord outage
-never breaks a crawl. Events queue up and drain when the webhook is back.
+Per-user delivery flow:
+  1. fan_out_new_events() — for events without user_webhook_fanned_out_at,
+     check every active user_webhook's filters; create webhook_deliveries rows
+     for matches; mark events fanned_out_at.
+  2. flush_user_deliveries() — send pending webhook_deliveries rows to Discord,
+     with exponential backoff on failure.
 
-Idempotency: ``webhook_sent_at`` is the single source of truth. A row is
-either NULL (eligible for delivery) or set (done, never retried). We never
-delete events after delivery — they're useful history.
-
-Concurrency: ``FOR UPDATE OF e SKIP LOCKED`` lets the main and naver schedulers
-flush side by side without picking the same event.
+Concurrency: FOR UPDATE … SKIP LOCKED prevents double-delivery when the main
+and naver containers flush in parallel.
 
 CLI:
 
-    python scripts/webhook_worker.py flush           # all pending, then exit
-    python scripts/webhook_worker.py flush --batch 10
+    python scripts/webhook_worker.py flush           # fan-out + dispatch
     python scripts/webhook_worker.py flush --dry-run # mark sent without HTTP
     python scripts/webhook_worker.py pending         # show queue size only
 """
@@ -26,6 +25,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -38,6 +38,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db import session  # noqa: E402
+import user_webhooks as webhook_store  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -281,75 +282,304 @@ def _next_backoff(attempts: int) -> timedelta:
 
 
 def flush_once(batch: int = DEFAULT_BATCH, dry_run: bool = False) -> dict[str, int]:
-    """Process pending events and return per-status counts.
+    """Fan out new events to matching user webhooks, then dispatch pending deliveries.
 
-    Designed to be called after a crawl/reconcile completes or
-    from the CLI for ad-hoc operation. Safe to interrupt at any point —
-    events in flight stay locked only for the duration of this call.
+    Called after each crawl/reconcile from region_runner._maybe_run_webhook_flush.
+    Safe to interrupt — events in flight stay locked only for the duration of
+    each inner call.
     """
-    url = os.environ.get(ENV_URL, "").strip()
-    counts = {
+    counts: dict[str, int] = {
+        "fanned_out": 0,
         "sent": 0,
         "rate_limited": 0,
         "retried": 0,
-        "skipped_no_url": 0,
         "dry_run": 0,
-        "suppressed": 0,
     }
+    try:
+        counts["fanned_out"] = fan_out_new_events()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("fan_out_new_events failed: %s", exc)
 
-    if not url and not dry_run:
-        # No URL configured — pull nothing, exit silently. This is the right
-        # behavior for a fresh deployment that hasn't set the secret yet.
-        counts["skipped_no_url"] = 1
-        return counts
+    try:
+        delivery_counts = flush_user_deliveries(dry_run=dry_run)
+        for k, v in delivery_counts.items():
+            counts[k] = counts.get(k, 0) + v
+    except Exception as exc:  # noqa: BLE001
+        log.warning("flush_user_deliveries failed: %s", exc)
 
+    return counts
+
+
+def _point_in_polygon(lat: float, lng: float, polygon: list[list[float]]) -> bool:
+    """Ray-casting point-in-polygon for [lat, lng] pairs."""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        lat_i, lng_i = polygon[i]
+        lat_j, lng_j = polygon[j]
+        if ((lng_i > lng) != (lng_j > lng)) and (
+            lat < (lat_j - lat_i) * (lng - lng_i) / (lng_j - lng_i) + lat_i
+        ):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _matches_webhook(
+    event: dict[str, Any],
+    webhook: dict[str, Any],
+) -> bool:
+    """Return True if the event passes all of the webhook's filters."""
+    if event["event_type"] not in (webhook["event_types"] or []):
+        return False
+    if event["platform_code"] not in (webhook["platforms"] or []):
+        return False
+    if webhook["max_deposit_manwon"] is not None:
+        dep = event.get("deposit_won")
+        if dep is not None and dep > webhook["max_deposit_manwon"] * 10000:
+            return False
+    if webhook["max_rent_manwon"] is not None:
+        rent = event.get("monthly_rent_won")
+        if rent is not None and rent > webhook["max_rent_manwon"] * 10000:
+            return False
+    if webhook["use_area_filter"] and webhook.get("area_filter_enabled"):
+        raw = webhook.get("points_json")
+        polygon: list[list[float]] | None = None
+        if isinstance(raw, str):
+            try:
+                polygon = json.loads(raw)
+            except (ValueError, TypeError):
+                polygon = None
+        elif isinstance(raw, list):
+            polygon = raw
+        if polygon and len(polygon) >= 3:
+            lat = event.get("lat")
+            lng = event.get("lng")
+            if lat is not None and lng is not None:
+                if not _point_in_polygon(float(lat), float(lng), polygon):
+                    return False
+    return True
+
+
+# Batch cap for fan-out to avoid long-held locks on the events table.
+_FANOUT_BATCH = 200
+# Batch cap for delivery dispatch.
+_DISPATCH_BATCH = 50
+
+
+def fan_out_new_events() -> int:
+    """Create webhook_deliveries rows for events not yet fanned out.
+
+    Returns the number of events processed (not the number of deliveries
+    created — one event may fan out to 0 or N webhooks).
+    """
+    active_webhooks = webhook_store.list_active_for_fanout()
+    if not active_webhooks:
+        return 0
+
+    processed = 0
     with session() as conn, conn.cursor() as cur:
-        rows = _fetch_batch(cur, batch)
+        cur.execute(
+            """
+            SELECT
+                e.id AS event_id,
+                e.event_type,
+                p.code AS platform_code,
+                COALESCE(curr.lat, prev.lat, latest.lat) AS lat,
+                COALESCE(curr.lng, prev.lng, latest.lng) AS lng,
+                COALESCE(curr.deposit_won, prev.deposit_won, latest.deposit_won)
+                    AS deposit_won,
+                COALESCE(curr.monthly_rent_won, prev.monthly_rent_won, latest.monthly_rent_won)
+                    AS monthly_rent_won
+            FROM listing_status_events e
+            JOIN listings l ON l.id = e.listing_id
+            JOIN platforms p ON p.id = l.platform_id
+            LEFT JOIN listing_snapshots curr ON curr.id = e.current_snapshot_id
+            LEFT JOIN listing_snapshots prev ON prev.id = e.previous_snapshot_id
+            LEFT JOIN LATERAL (
+                SELECT s.lat, s.lng, s.deposit_won, s.monthly_rent_won
+                FROM listing_snapshots s
+                WHERE s.listing_id = e.listing_id
+                ORDER BY s.captured_at DESC, s.id DESC
+                LIMIT 1
+            ) latest ON TRUE
+            WHERE e.user_webhook_fanned_out_at IS NULL
+            ORDER BY e.id
+            LIMIT %s
+            FOR UPDATE OF e SKIP LOCKED
+            """,
+            (_FANOUT_BATCH,),
+        )
+        events = [dict(r) for r in cur.fetchall()]
+        if not events:
+            conn.commit()
+            return 0
+
+        for event in events:
+            for wh in active_webhooks:
+                if _matches_webhook(event, wh):
+                    cur.execute(
+                        """
+                        INSERT INTO webhook_deliveries (event_id, webhook_id)
+                        VALUES (%s, %s)
+                        ON CONFLICT (event_id, webhook_id) DO NOTHING
+                        """,
+                        (event["event_id"], wh["id"]),
+                    )
+            cur.execute(
+                "UPDATE listing_status_events SET user_webhook_fanned_out_at = now() WHERE id = %s",
+                (event["event_id"],),
+            )
+            processed += 1
+        conn.commit()
+    return processed
+
+
+def _fetch_pending_deliveries(cur, limit: int) -> list[dict[str, Any]]:
+    limit_clause = "" if limit <= 0 else f"LIMIT {limit}"
+    cur.execute(
+        f"""
+        SELECT
+            d.id AS delivery_id,
+            d.webhook_id,
+            d.attempts,
+            w.webhook_url,
+            e.id AS event_id,
+            e.event_type,
+            e.event_at,
+            e.previous_snapshot_id,
+            e.current_snapshot_id,
+            e.old_values,
+            e.new_values,
+            l.platform_listing_id,
+            l.source_url,
+            p.code AS platform_code,
+            COALESCE(curr.title, prev.title, latest.title) AS title,
+            COALESCE(curr.address_raw, prev.address_raw, latest.address_raw) AS address_raw,
+            COALESCE(curr.deposit_won, prev.deposit_won, latest.deposit_won) AS deposit_won,
+            COALESCE(curr.monthly_rent_won, prev.monthly_rent_won, latest.monthly_rent_won)
+                AS monthly_rent_won,
+            COALESCE(curr.maintenance_fee_won, prev.maintenance_fee_won, latest.maintenance_fee_won)
+                AS maintenance_fee_won,
+            COALESCE(curr.supply_area_m2, prev.supply_area_m2, latest.supply_area_m2) AS supply_area_m2,
+            COALESCE(curr.exclusive_area_m2, prev.exclusive_area_m2, latest.exclusive_area_m2)
+                AS exclusive_area_m2,
+            COALESCE(curr.floor_raw, prev.floor_raw, latest.floor_raw) AS floor_raw,
+            COALESCE(curr.room_count, prev.room_count, latest.room_count) AS room_count,
+            COALESCE(curr.bathroom_count, prev.bathroom_count, latest.bathroom_count) AS bathroom_count,
+            COALESCE(
+                curr.raw_normalized_json->>'image_1',
+                prev.raw_normalized_json->>'image_1',
+                latest.raw_normalized_json->>'image_1'
+            ) AS image_1,
+            prev.deposit_won AS prev_deposit_won,
+            prev.monthly_rent_won AS prev_monthly_rent_won,
+            prev.maintenance_fee_won AS prev_maintenance_fee_won
+        FROM webhook_deliveries d
+        JOIN user_webhooks w ON w.id = d.webhook_id
+        JOIN listing_status_events e ON e.id = d.event_id
+        JOIN listings l ON l.id = e.listing_id
+        JOIN platforms p ON p.id = l.platform_id
+        LEFT JOIN listing_snapshots curr ON curr.id = e.current_snapshot_id
+        LEFT JOIN listing_snapshots prev ON prev.id = e.previous_snapshot_id
+        LEFT JOIN LATERAL (
+            SELECT s.*
+            FROM listing_snapshots s
+            WHERE s.listing_id = e.listing_id
+            ORDER BY s.captured_at DESC, s.id DESC
+            LIMIT 1
+        ) latest ON TRUE
+        WHERE d.status = 'pending'
+          AND (d.next_try_at IS NULL OR d.next_try_at <= now())
+          AND d.attempts < %s
+        ORDER BY d.created_at
+        {limit_clause}
+        FOR UPDATE OF d SKIP LOCKED
+        """,
+        (MAX_ATTEMPTS,),
+    )
+    rows = []
+    for row in cur.fetchall():
+        row = dict(row)
+        if row["prev_deposit_won"] is not None or row["prev_monthly_rent_won"] is not None:
+            row["_previous_price_snapshot"] = {
+                "deposit_won": row["prev_deposit_won"],
+                "monthly_rent_won": row["prev_monthly_rent_won"],
+                "maintenance_fee_won": row["prev_maintenance_fee_won"],
+            }
+        rows.append(row)
+    return rows
+
+
+def flush_user_deliveries(dry_run: bool = False) -> dict[str, int]:
+    """Send pending webhook_deliveries. Returns per-status counts."""
+    counts = {"sent": 0, "rate_limited": 0, "retried": 0, "dry_run": 0}
+    with session() as conn, conn.cursor() as cur:
+        rows = _fetch_pending_deliveries(cur, _DISPATCH_BATCH)
         if not rows:
             return counts
         for row in rows:
             now = datetime.now(timezone.utc)
-            if row["event_type"] in SUPPRESSED_EVENT_TYPES:
-                _mark_sent(cur, row["event_id"], now)
-                counts["suppressed"] += 1
-                continue
+            delivery_id = row["delivery_id"]
             if dry_run:
-                _mark_sent(cur, row["event_id"], now)
+                cur.execute(
+                    "UPDATE webhook_deliveries SET status='sent', sent_at=%s WHERE id=%s",
+                    (now, delivery_id),
+                )
                 counts["dry_run"] += 1
                 continue
             embed = build_embed(row)
             payload = {"embeds": [embed]}
-            attempts = row["webhook_attempts"] + 1
+            attempts = row["attempts"] + 1
             try:
-                # Explicit User-Agent — Discord's Cloudflare front (error 1010)
-                # rejects the python-urllib default and at least some bare
-                # ``python-requests`` versions. requests already defaults to a
-                # workable UA, but pin it so a future libcurl/urllib3 shift
-                # doesn't silently start tripping the same wall.
                 resp = requests.post(
-                    url, json=payload, timeout=10,
+                    row["webhook_url"], json=payload, timeout=10,
                     headers={"User-Agent": "RentMap-Webhook/1.0 (+rentmap)"},
                 )
             except requests.RequestException as exc:
                 next_try = now + _next_backoff(attempts)
-                _mark_retry(cur, row["event_id"], attempts, next_try, f"network: {exc}")
+                cur.execute(
+                    """
+                    UPDATE webhook_deliveries
+                    SET attempts=%s, next_try_at=%s, last_error=%s
+                    WHERE id=%s
+                    """,
+                    (attempts, next_try, f"network: {exc}"[:1000], delivery_id),
+                )
                 counts["retried"] += 1
                 continue
 
             if resp.status_code in (200, 204):
-                _mark_sent(cur, row["event_id"], now)
+                cur.execute(
+                    "UPDATE webhook_deliveries SET status='sent', sent_at=%s, attempts=%s WHERE id=%s",
+                    (now, attempts, delivery_id),
+                )
                 counts["sent"] += 1
             elif resp.status_code == 429:
-                # Discord asks us to wait specifically this long. Honor it.
                 retry_after = float(resp.headers.get("Retry-After", "5"))
                 next_try = now + timedelta(seconds=max(1.0, retry_after))
-                _mark_retry(cur, row["event_id"], attempts, next_try,
-                            f"rate_limited; retry_after={retry_after}s")
+                cur.execute(
+                    """
+                    UPDATE webhook_deliveries
+                    SET attempts=%s, next_try_at=%s, last_error=%s
+                    WHERE id=%s
+                    """,
+                    (attempts, next_try,
+                     f"rate_limited; retry_after={retry_after}s", delivery_id),
+                )
                 counts["rate_limited"] += 1
             else:
                 next_try = now + _next_backoff(attempts)
-                _mark_retry(cur, row["event_id"], attempts, next_try,
-                            f"http_{resp.status_code}: {resp.text[:200]}")
+                cur.execute(
+                    """
+                    UPDATE webhook_deliveries
+                    SET attempts=%s, next_try_at=%s, last_error=%s
+                    WHERE id=%s
+                    """,
+                    (attempts, next_try,
+                     f"http_{resp.status_code}: {resp.text[:200]}", delivery_id),
+                )
                 counts["retried"] += 1
 
             if INTER_REQUEST_SLEEP_S > 0:
@@ -363,10 +593,12 @@ def pending_count() -> dict[str, int]:
         cur.execute(
             """
             SELECT
-                COUNT(*) FILTER (WHERE webhook_sent_at IS NULL AND webhook_attempts < %s) AS deliverable,
-                COUNT(*) FILTER (WHERE webhook_sent_at IS NULL AND webhook_attempts >= %s) AS giving_up,
-                COUNT(*) FILTER (WHERE webhook_sent_at IS NOT NULL) AS sent_total
-            FROM listing_status_events
+                (SELECT COUNT(*) FROM listing_status_events
+                 WHERE user_webhook_fanned_out_at IS NULL) AS unfanned,
+                COUNT(*) FILTER (WHERE status = 'pending' AND attempts < %s) AS deliverable,
+                COUNT(*) FILTER (WHERE status = 'pending' AND attempts >= %s) AS giving_up,
+                COUNT(*) FILTER (WHERE status = 'sent') AS sent_total
+            FROM webhook_deliveries
             """,
             (MAX_ATTEMPTS, MAX_ATTEMPTS),
         )
