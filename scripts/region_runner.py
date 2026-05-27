@@ -58,6 +58,13 @@ _SCHEDULE_LOCKS_MUTEX = threading.Lock()
 _DAANGN_LEARN_DONE: set[int] = set()
 _DAANGN_LEARN_DONE_LOCK = threading.Lock()
 
+# Container-lifetime cache for the naver region-list discovery (same
+# pattern as daangn). The naver finder makes ~5-12 HTTP calls (~3s) so
+# it's even cheaper than daangn's coordinate sweep, but we still cap to
+# once per container lifetime to keep crawl latency predictable.
+_NAVER_LEARN_DONE: set[int] = set()
+_NAVER_LEARN_DONE_LOCK = threading.Lock()
+
 
 def _lock_for(schedule_id: int) -> threading.Lock:
     with _SCHEDULE_LOCKS_MUTEX:
@@ -213,6 +220,57 @@ def _learn_daangn_region_ids(region: dict[str, Any]) -> None:
     )
 
 
+def _learn_naver_cortarnos(region: dict[str, Any]) -> None:
+    """Walk Naver's region hierarchy and persist every leaf cortarNo in bbox.
+
+    The viewport-grid pass that ``crawl-naver`` runs is fundamentally
+    unreliable for cortarNo discovery — Naver's SPA maps each viewport
+    to a single "sticky" cortarNo, so dongs that don't happen to win the
+    SPA's selection logic get silently skipped (we saw 5/16 for ERICA on
+    every grid run). The region-hierarchy walk is deterministic: it
+    enumerates every leaf 읍면동 whose centroid lies within the region's
+    radius, regardless of what the SPA would have picked for any
+    particular viewport.
+
+    Failures are non-fatal — the crawl still runs with whatever's
+    already in ``regions.naver_cortar_nos`` (so the explicit backstop
+    still covers the previously-discovered set). The most common cause
+    of failure is HTTP 429 from a recently-busy IP; in production the
+    auto-learn runs once per container restart, well under any rate
+    limit, so this is mostly a dev-loop concern.
+    """
+    slug = region["slug"]
+    try:
+        # Local import keeps the finder out of region_runner's cold
+        # path on containers/sources that never reach this branch
+        # (e.g. the rentmap-server container only runs all_light).
+        import naver_region_finder as finder  # noqa: WPS433
+        ids, discoveries = finder.discover_cortarnos(
+            float(region["centerLat"]),
+            float(region["centerLng"]),
+            float(region["radiusKm"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"{_ts()} [region-runner] naver auto-learn failed for {slug}: {exc!r}", flush=True)
+        return
+    if not ids:
+        print(f"{_ts()} [region-runner] naver auto-learn: no cortarNos discovered for {slug}", flush=True)
+        return
+    try:
+        added, total = region_store.merge_cortar_nos(region["id"], ids)
+    except Exception as exc:  # noqa: BLE001
+        print(f"{_ts()} [region-runner] naver merge failed for {slug}: {exc!r}", flush=True)
+        return
+    sample = ", ".join(f"{cn}={name}" for cn, name in discoveries[:8])
+    if len(discoveries) > 8:
+        sample += f", … (+{len(discoveries) - 8} more)"
+    print(
+        f"{_ts()} [region-runner] naver auto-learn region={slug}: "
+        f"added {added}/{len(ids)} cortarNo(s) (total in DB now {total}): {sample}",
+        flush=True,
+    )
+
+
 def _merge_naver_cortarnos(region_id: int, slug: str, dump_path: Path) -> None:
     """Merge the cortarNos crawl-naver discovered into the region row.
 
@@ -320,6 +378,26 @@ def _run_schedule_locked(schedule_id: int) -> None:
         if need_learn:
             _learn_daangn_region_ids(region)
             # Re-fetch so build_env below sees the merged IDs.
+            try:
+                region = region_store.get_region(region["id"])
+            except region_store.RegionError:
+                pass
+
+    # Naver cortarNo auto-learning via the region-hierarchy API. Runs
+    # only for the dedicated naver source — all_light skips naver, and
+    # the rentmap-server container that runs all_light shouldn't pay
+    # the discovery cost. Once per container lifetime per region (same
+    # cadence as the daangn learner), so the 5-12 HTTP calls are paid
+    # once per restart, not per crawl. The discovered IDs land in
+    # regions.naver_cortar_nos, which build_env then exports as
+    # RENTMAP_NAVER_CORTARNOS for the crawler's explicit-backstop pass.
+    if source == "naver":
+        with _NAVER_LEARN_DONE_LOCK:
+            need_learn_naver = region["id"] not in _NAVER_LEARN_DONE
+            if need_learn_naver:
+                _NAVER_LEARN_DONE.add(region["id"])
+        if need_learn_naver:
+            _learn_naver_cortarnos(region)
             try:
                 region = region_store.get_region(region["id"])
             except region_store.RegionError:
