@@ -79,7 +79,7 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "gen_web_after": False,  # crawl-all already does it
     },
     "naver": {
-        "cmd": ["crawl-naver", "--max-pages", "20", "--skip-home"],
+        "cmd": ["crawl-naver", "--max-pages", "20"],
         "timeout": 45 * 60,
         "platforms": ("naver_land",),
         "gen_web_after": True,
@@ -222,10 +222,10 @@ def _merge_naver_cortarnos(region_id: int, slug: str, dump_path: Path) -> None:
         if not isinstance(discovered, list):
             print(f"[region-runner] cortarnos dump for {slug} is not a list; skipping", flush=True)
             return
-        added = region_store.merge_cortar_nos(region_id, [str(c) for c in discovered])
+        added, total = region_store.merge_cortar_nos(region_id, [str(c) for c in discovered])
         if added:
             print(f"[region-runner] region={slug} learned {added} new cortarNo(s) "
-                  f"(total now {len(discovered)} in grid pass)", flush=True)
+                  f"(total in DB now {total})", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"[region-runner] cortarNo merge failed for {slug}: {exc}", flush=True)
 

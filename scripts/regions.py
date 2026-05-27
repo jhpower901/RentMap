@@ -410,7 +410,7 @@ def update_region(
         return _serialize(dict(cur.fetchone()))
 
 
-def merge_cortar_nos(region_id: int, discovered: list[str]) -> int:
+def merge_cortar_nos(region_id: int, discovered: list[str]) -> tuple[int, int]:
     """UNION-merge newly discovered Naver cortarNos into a region row.
 
     Called by region_runner after a naver crawl finishes — the crawler dumps
@@ -430,7 +430,7 @@ def merge_cortar_nos(region_id: int, discovered: list[str]) -> int:
     and the crawl that found 51 codes both end up with the full UNION.
     """
     if not discovered:
-        return 0
+        return 0, 0
     cleaned_new: set[str] = set()
     for c in discovered:
         if c is None:
@@ -439,7 +439,7 @@ def merge_cortar_nos(region_id: int, discovered: list[str]) -> int:
         if s and _CORTARNO_RE.match(s):
             cleaned_new.add(s)
     if not cleaned_new:
-        return 0
+        return 0, 0
     with session() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT naver_cortar_nos FROM regions WHERE id = %s FOR UPDATE",
@@ -452,12 +452,12 @@ def merge_cortar_nos(region_id: int, discovered: list[str]) -> int:
         merged = sorted(current | cleaned_new)
         added = len(merged) - len(current)
         if added == 0:
-            return 0
+            return 0, len(current)
         cur.execute(
             "UPDATE regions SET naver_cortar_nos = %s, updated_at = now() WHERE id = %s",
             (merged, region_id),
         )
-    return added
+    return added, len(merged)
 
 
 def merge_daangn_region_ids(region_id: int, discovered: list[int]) -> int:
