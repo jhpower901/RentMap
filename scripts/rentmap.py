@@ -3294,6 +3294,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gen-web", action="store_true")
     p.add_argument("--gen-web-after-each", action="store_true")
     p.set_defaults(func=crawl_all)
+
+    p = sub.add_parser(
+        "merge-cortarnos",
+        help="Seed / extend a region's naver_cortar_nos in the DB (operator tool).",
+    )
+    p.add_argument("--region", required=True, metavar="SLUG",
+                   help="Region slug (e.g. 'erica', 'ajou').")
+    p.add_argument("--cortarnos", required=True, metavar="N1,N2,...",
+                   help="Comma-separated Naver cortarNo codes to UNION-merge.")
+    p.set_defaults(func=merge_cortarnos_cmd)
+
     return parser
 
 
@@ -3341,7 +3352,8 @@ def _naver_args(date: str, bbox: tuple[float, float, float, float]) -> argparse.
         output_csv=_data_csv("naver_land", date),
         raw_json=str(ROOT / "data" / f"naver_land_{DEFAULT_AREA}_{date}.raw.json"),
         max_pages=NAVER_DEFAULT_MAX_PAGES, chrome_path="",
-        headed=False, skip_home=True, skip_detail=False,
+        headed=False, skip_home=False, skip_detail=False,
+        cortarnos_out="",
         **_bbox_kwargs(bbox),
     )
 
@@ -3431,6 +3443,57 @@ def crawl_all(args: argparse.Namespace) -> None:
     if args.gen_web:
         gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=args.date, source="auto"))
     print(f"[crawl-all] DONE elapsed={time.monotonic() - started:.1f}s", flush=True)
+
+
+def merge_cortarnos_cmd(args: argparse.Namespace) -> int:
+    """Seed or extend a region's naver_cortar_nos list in the DB.
+
+    Accepts a slug (``--region``) and a comma-separated list of cortarNos
+    (``--cortarnos``) and UNION-merges them into ``regions.naver_cortar_nos``.
+    Idempotent: re-running with the same codes is a no-op (returns 0 added).
+
+    Intended as a one-shot operator tool for bootstrapping a new region
+    before the auto-learning crawl has had a chance to run, or for
+    correcting a corrupted/incomplete set.
+
+    Example::
+
+        python scripts/rentmap.py merge-cortarnos \\
+            --region erica \\
+            --cortarnos "4113510300,4127110100,4127110200,4127310100"
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import regions as region_store  # noqa: WPS433
+
+    region = region_store.get_region_by_slug(args.region)
+    if region is None:
+        print(f"[merge-cortarnos] ERROR: no region with slug {args.region!r}", file=sys.stderr)
+        return 1
+
+    raw = [c.strip() for c in args.cortarnos.split(",") if c.strip()]
+    if not raw:
+        print("[merge-cortarnos] ERROR: --cortarnos is empty", file=sys.stderr)
+        return 1
+
+    sample = ", ".join(raw[:8])
+    if len(raw) > 8:
+        sample += f", … (+{len(raw) - 8} more)"
+    print(
+        f"[merge-cortarnos] region={args.region} id={region['id']} "
+        f"merging {len(raw)} cortarNo(s): {sample}",
+        flush=True,
+    )
+
+    added, total = region_store.merge_cortar_nos(region["id"], raw)
+    if added:
+        print(f"[merge-cortarnos] DONE: added {added} new, total={total} in DB", flush=True)
+    else:
+        print(
+            f"[merge-cortarnos] DONE: no new cortarNos "
+            f"(all {len(raw)} already present, total={total})",
+            flush=True,
+        )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

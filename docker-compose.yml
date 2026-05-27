@@ -9,6 +9,11 @@ services:
     networks:
       - proxy
       - rentmap-db
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "14"
     volumes:
       - ./data:/app/data
       - ./web:/app/web
@@ -73,6 +78,11 @@ services:
     container_name: rentmap-naver
     networks:
       - rentmap-db
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "14"
     volumes:
       - ./data:/app/data
       - ./web:/app/web

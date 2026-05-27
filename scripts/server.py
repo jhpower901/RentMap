@@ -36,10 +36,14 @@ CRAWL_LOCK = threading.Lock()
 ALLOWED_SOURCES_SERVER: tuple[str, ...] = ("all_light", "dabang", "zigbang", "daangn")
 
 
+def _ts() -> str:
+    return datetime.now(TZ).strftime("%H:%M:%S")
+
+
 def _run_rentmap(args: list[str], label: str, timeout_s: int) -> int | None:
     started = time.monotonic()
     command = " ".join(args)
-    print(f"[scheduler] {label}: START rentmap {command}", flush=True)
+    print(f"{_ts()} [scheduler] {label}: START rentmap {command}", flush=True)
     try:
         result = subprocess.run(
             [sys.executable, str(RENTMAP_CLI), *args],
@@ -49,15 +53,15 @@ def _run_rentmap(args: list[str], label: str, timeout_s: int) -> int | None:
         )
         elapsed = time.monotonic() - started
         status = "OK" if result.returncode == 0 else "FAILED"
-        print(f"[scheduler] {label}: {status} exit={result.returncode} elapsed={elapsed:.1f}s rentmap {command}", flush=True)
+        print(f"{_ts()} [scheduler] {label}: {status} exit={result.returncode} elapsed={elapsed:.1f}s rentmap {command}", flush=True)
         return result.returncode
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started
-        print(f"[scheduler] {label}: TIMEOUT after {elapsed:.1f}s limit={timeout_s}s rentmap {command}: {exc}", flush=True)
+        print(f"{_ts()} [scheduler] {label}: TIMEOUT after {elapsed:.1f}s limit={timeout_s}s rentmap {command}: {exc}", flush=True)
         return None
     except Exception as exc:
         elapsed = time.monotonic() - started
-        print(f"[scheduler] {label}: ERROR after {elapsed:.1f}s rentmap {command}: {exc}", flush=True)
+        print(f"{_ts()} [scheduler] {label}: ERROR after {elapsed:.1f}s rentmap {command}: {exc}", flush=True)
         return None
 
 
@@ -78,7 +82,7 @@ def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
             )
             return int(cur.fetchone()["n"] or 0)
     except Exception as exc:  # noqa: BLE001
-        print(f"[scheduler] missing-retry: queue check failed — {exc}", flush=True)
+        print(f"{_ts()} [scheduler] missing-retry: queue check failed — {exc}", flush=True)
         return 0
 
 
@@ -91,7 +95,7 @@ def run_missing_retry_cycle() -> None:
     drain the missing queue on a predictable hourly cadence.
     """
     if not CRAWL_LOCK.acquire(blocking=False):
-        print("[scheduler] missing-retry: SKIP already running", flush=True)
+        print(f"{_ts()} [scheduler] missing-retry: SKIP already running", flush=True)
         return
     try:
         _run_missing_retry_cycle_locked()
@@ -103,7 +107,7 @@ def _run_missing_retry_cycle_locked() -> None:
     missing_count = _missing_queue_count(MAIN_CRAWL_PLATFORM_CODES)
     if missing_count == 0:
         return
-    print(f"[scheduler] missing-retry: pending={missing_count}", flush=True)
+    print(f"{_ts()} [scheduler] missing-retry: pending={missing_count}", flush=True)
     for attempt in range(1, MISSING_RETRY_LIMIT + 1):
         command = ["retry-missing"]
         for platform_code in MAIN_CRAWL_PLATFORM_CODES:
@@ -118,13 +122,13 @@ def _run_missing_retry_cycle_locked() -> None:
             return
         if attempt < MISSING_RETRY_LIMIT:
             print(
-                f"[scheduler] missing-retry: pending={missing_count}; "
+                f"{_ts()} [scheduler] missing-retry: pending={missing_count}; "
                 f"probing missing listings {attempt + 1}/{MISSING_RETRY_LIMIT}",
                 flush=True,
             )
     # Still pending after retries — finalize the unresolved set.
     print(
-        f"[scheduler] missing-retry: pending={missing_count} after retries; "
+        f"{_ts()} [scheduler] missing-retry: pending={missing_count} after retries; "
         "finalizing unresolved listings",
         flush=True,
     )
@@ -155,7 +159,7 @@ def run_region_sync() -> None:
 def run_gen_web(trigger: str = "scheduled") -> None:
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     # gen_web is fault-tolerant: missing today's CSV falls back to most recent.
-    print(f"[scheduler] gen-web[{trigger}]: target date={today} sources=db-auto-fallback", flush=True)
+    print(f"{_ts()} [scheduler] gen-web[{trigger}]: target date={today} sources=db-auto-fallback", flush=True)
     _run_rentmap(["gen-web", "--date", today], label=f"gen-web[{trigger}]", timeout_s=5 * 60)
 
 
@@ -169,10 +173,10 @@ def run_webhook_flush(trigger: str = "manual") -> None:
         counts = flush_once()
         nonzero = {k: v for k, v in counts.items() if v}
         if nonzero:
-            print(f"[scheduler] webhook-flush[{trigger}]: {nonzero}", flush=True)
+            print(f"{_ts()} [scheduler] webhook-flush[{trigger}]: {nonzero}", flush=True)
     except Exception as exc:
         # Worker failures must never kill the scheduler thread. Log and move on.
-        print(f"[scheduler] webhook-flush: failed — {exc}", flush=True)
+        print(f"{_ts()} [scheduler] webhook-flush: failed — {exc}", flush=True)
 
 
 def run_expired_session_cleanup() -> None:
@@ -189,10 +193,10 @@ def run_expired_session_cleanup() -> None:
             cur.execute("DELETE FROM sessions WHERE expires_at < now()")
             n = cur.rowcount or 0
         if n:
-            print(f"[scheduler] sessions-cleanup: deleted {n} expired rows", flush=True)
+            print(f"{_ts()} [scheduler] sessions-cleanup: deleted {n} expired rows", flush=True)
     except Exception as exc:
         # Cleanup failures must never kill the scheduler thread.
-        print(f"[scheduler] sessions-cleanup: failed — {exc}", flush=True)
+        print(f"{_ts()} [scheduler] sessions-cleanup: failed — {exc}", flush=True)
 
 
 scheduler = BackgroundScheduler(timezone=TZ)
@@ -263,14 +267,14 @@ async def lifespan(_app: FastAPI):
         seeded = invite_store.seed_env_code_if_missing(os.environ.get("RENTMAP_SIGNUP_CODE"))
         if seeded:
             print(
-                f"[startup] invites: seeded env code '{seeded['code']}' as id={seeded['id']}",
+                f"{_ts()} [startup] invites: seeded env code '{seeded['code']}' as id={seeded['id']}",
                 flush=True,
             )
     except Exception as exc:
-        print(f"[startup] invites: env-code seed failed — {exc}", flush=True)
+        print(f"{_ts()} [startup] invites: env-code seed failed — {exc}", flush=True)
     scheduler.start()
     print(
-        "[scheduler] started - region-driven crawl via 30s DB sync, "
+        f"{_ts()} [scheduler] started - region-driven crawl via 30s DB sync, "
         "missing-retry at :30 hourly, sessions-cleanup at :15 hourly, "
         f"allowed sources for this container: {ALLOWED_SOURCES_SERVER}",
         flush=True,
@@ -414,7 +418,7 @@ async def session_guard(request: Request, call_next):
         # (login page, which is static), API/data callers get 503 so the
         # client can degrade to local cache. Logged loudly so the operator
         # notices.
-        print(f"[auth] session lookup failed (DB error): {exc}", flush=True)
+        print(f"{_ts()} [auth] session lookup failed (DB error): {exc}", flush=True)
         if path.startswith("/api/") or path.startswith("/data/"):
             return JSONResponse(
                 {"detail": "Auth service unavailable"}, status_code=503
@@ -1301,7 +1305,7 @@ async def get_favorites_state(user: auth.User = Depends(auth.current_user)):
         return fav_store.load_state(user.id)
     except Exception as e:
         # Don't 500 the client over a DB blip — empty state lets local cache win.
-        print(f"Error reading favorites: {e}")
+        print(f"{_ts()} Error reading favorites: {e}")
         return {"favorites": [], "deleted": {}}
 
 
@@ -1310,7 +1314,7 @@ async def get_favorites(user: auth.User = Depends(auth.current_user)):
     try:
         return fav_store.load_state(user.id)["favorites"]
     except Exception as e:
-        print(f"Error reading favorites: {e}")
+        print(f"{_ts()} Error reading favorites: {e}")
         return []
 
 
@@ -1323,7 +1327,7 @@ async def save_favorites(request: Request, favorites: Any = Body(...),
     try:
         return fav_store.merge_payload(user.id, favorites)
     except Exception as e:
-        print(f"Error saving favorites: {e}")
+        print(f"{_ts()} Error saving favorites: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1397,7 +1401,7 @@ async def get_user_filter_preference(context: str,
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"Error reading user filter preference: {e}")
+        print(f"{_ts()} Error reading user filter preference: {e}")
         return {
             "context": context,
             "state": {},
@@ -1416,7 +1420,7 @@ async def put_user_filter_preference(context: str,
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"Error saving user filter preference: {e}")
+        print(f"{_ts()} Error saving user filter preference: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1434,7 +1438,7 @@ async def get_area_filter(user: auth.User = Depends(auth.current_user)):
     try:
         return area_store.load(user.id)
     except Exception as e:
-        print(f"Error reading area filter: {e}")
+        print(f"{_ts()} Error reading area filter: {e}")
         # Degrade to default rather than 500ing the UI.
         return {
             "points": [p[:] for p in area_store.DEFAULT_POINTS],
@@ -1453,7 +1457,7 @@ async def put_area_filter(body: AreaFilterBody,
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"Error saving area filter: {e}")
+        print(f"{_ts()} Error saving area filter: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1610,5 +1614,5 @@ app.mount("/data", StaticFiles(directory="data"), name="data")
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
 if __name__ == "__main__":
-    print("RentMap Server starting at http://localhost:8000")
+    print(f"{_ts()} RentMap Server starting at http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)

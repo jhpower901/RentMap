@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,6 +31,11 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
+
+
+def _ts() -> str:
+    return datetime.now(TZ).strftime("%H:%M:%S")
+
 
 sys.path.insert(0, str(ROOT / "scripts"))
 import regions as region_store  # noqa: E402
@@ -140,7 +146,7 @@ def _run_rentmap(args: list[str], *, env: dict[str, str], timeout_s: int,
     """Invoke ``rentmap.py`` with merged env + timeout. Returns (exit_code, brief)."""
     started = time.monotonic()
     command = " ".join(args)
-    print(f"[region-runner] {label}: START rentmap {command}", flush=True)
+    print(f"{_ts()} [region-runner] {label}: START rentmap {command}", flush=True)
     try:
         result = subprocess.run(
             [sys.executable, str(RENTMAP_CLI), *args],
@@ -152,17 +158,17 @@ def _run_rentmap(args: list[str], *, env: dict[str, str], timeout_s: int,
         elapsed = time.monotonic() - started
         status = "OK" if result.returncode == 0 else "FAILED"
         msg = f"{status} exit={result.returncode} elapsed={elapsed:.1f}s"
-        print(f"[region-runner] {label}: {msg} rentmap {command}", flush=True)
+        print(f"{_ts()} [region-runner] {label}: {msg} rentmap {command}", flush=True)
         return result.returncode, msg
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started
         msg = f"TIMEOUT after {elapsed:.1f}s limit={timeout_s}s"
-        print(f"[region-runner] {label}: {msg} rentmap {command}: {exc}", flush=True)
+        print(f"{_ts()} [region-runner] {label}: {msg} rentmap {command}: {exc}", flush=True)
         return None, msg
     except Exception as exc:  # noqa: BLE001
         elapsed = time.monotonic() - started
         msg = f"ERROR after {elapsed:.1f}s: {exc!r}"
-        print(f"[region-runner] {label}: {msg} rentmap {command}", flush=True)
+        print(f"{_ts()} [region-runner] {label}: {msg} rentmap {command}", flush=True)
         return None, msg
 
 
@@ -187,21 +193,21 @@ def _learn_daangn_region_ids(region: dict[str, Any]) -> None:
             float(region["radiusKm"]),
         )
     except Exception as exc:  # noqa: BLE001
-        print(f"[region-runner] daangn auto-learn failed for {slug}: {exc!r}", flush=True)
+        print(f"{_ts()} [region-runner] daangn auto-learn failed for {slug}: {exc!r}", flush=True)
         return
     if not ids:
-        print(f"[region-runner] daangn auto-learn: no regions discovered for {slug}", flush=True)
+        print(f"{_ts()} [region-runner] daangn auto-learn: no regions discovered for {slug}", flush=True)
         return
     try:
         added = region_store.merge_daangn_region_ids(region["id"], ids)
     except Exception as exc:  # noqa: BLE001
-        print(f"[region-runner] daangn merge failed for {slug}: {exc!r}", flush=True)
+        print(f"{_ts()} [region-runner] daangn merge failed for {slug}: {exc!r}", flush=True)
         return
     sample = ", ".join(f"{rid}={name}" for rid, name in discoveries[:8])
     if len(discoveries) > 8:
         sample += f", … (+{len(discoveries) - 8} more)"
     print(
-        f"[region-runner] daangn auto-learn region={slug}: "
+        f"{_ts()} [region-runner] daangn auto-learn region={slug}: "
         f"added {added}/{len(ids)} region_id(s): {sample}",
         flush=True,
     )
@@ -220,14 +226,14 @@ def _merge_naver_cortarnos(region_id: int, slug: str, dump_path: Path) -> None:
         with dump_path.open("r", encoding="utf-8") as f:
             discovered = json.load(f)
         if not isinstance(discovered, list):
-            print(f"[region-runner] cortarnos dump for {slug} is not a list; skipping", flush=True)
+            print(f"{_ts()} [region-runner] cortarnos dump for {slug} is not a list; skipping", flush=True)
             return
         added, total = region_store.merge_cortar_nos(region_id, [str(c) for c in discovered])
         if added:
-            print(f"[region-runner] region={slug} learned {added} new cortarNo(s) "
+            print(f"{_ts()} [region-runner] region={slug} learned {added} new cortarNo(s) "
                   f"(total in DB now {total})", flush=True)
     except Exception as exc:  # noqa: BLE001
-        print(f"[region-runner] cortarNo merge failed for {slug}: {exc}", flush=True)
+        print(f"{_ts()} [region-runner] cortarNo merge failed for {slug}: {exc}", flush=True)
 
 
 def _maybe_run_webhook_flush(trigger: str) -> None:
@@ -238,9 +244,9 @@ def _maybe_run_webhook_flush(trigger: str) -> None:
         counts = flush_once()
         nonzero = {k: v for k, v in counts.items() if v}
         if nonzero:
-            print(f"[region-runner] webhook-flush[{trigger}]: {nonzero}", flush=True)
+            print(f"{_ts()} [region-runner] webhook-flush[{trigger}]: {nonzero}", flush=True)
     except Exception as exc:  # noqa: BLE001
-        print(f"[region-runner] webhook-flush[{trigger}] failed: {exc}", flush=True)
+        print(f"{_ts()} [region-runner] webhook-flush[{trigger}] failed: {exc}", flush=True)
 
 
 def run_schedule(schedule_id: int) -> None:
@@ -251,7 +257,7 @@ def run_schedule(schedule_id: int) -> None:
     """
     lock = _lock_for(schedule_id)
     if not lock.acquire(blocking=False):
-        print(f"[region-runner] schedule={schedule_id}: SKIP already running", flush=True)
+        print(f"{_ts()} [region-runner] schedule={schedule_id}: SKIP already running", flush=True)
         return
     try:
         _run_schedule_locked(schedule_id)
@@ -263,14 +269,14 @@ def _run_schedule_locked(schedule_id: int) -> None:
     try:
         schedule = schedule_store.get_schedule(schedule_id)
     except schedule_store.ScheduleError as exc:
-        print(f"[region-runner] schedule={schedule_id} lookup failed: {exc}", flush=True)
+        print(f"{_ts()} [region-runner] schedule={schedule_id} lookup failed: {exc}", flush=True)
         return
 
     region_id = schedule["regionId"]
     try:
         region = region_store.get_region(region_id)
     except region_store.RegionError as exc:
-        print(f"[region-runner] schedule={schedule_id} region={region_id} lookup failed: {exc}", flush=True)
+        print(f"{_ts()} [region-runner] schedule={schedule_id} region={region_id} lookup failed: {exc}", flush=True)
         schedule_store.record_run(schedule_id, status="failed",
                                   log_excerpt=f"region lookup failed: {exc}")
         return
@@ -279,7 +285,7 @@ def _run_schedule_locked(schedule_id: int) -> None:
         # The sync loop only registers jobs for approved regions, but a
         # region may have flipped to 'disabled' between the registration
         # and the fire — guard explicitly.
-        print(f"[region-runner] schedule={schedule_id} region={region['slug']} "
+        print(f"{_ts()} [region-runner] schedule={schedule_id} region={region['slug']} "
               f"skipped — status={region['status']}", flush=True)
         schedule_store.record_run(schedule_id, status="skipped",
                                   log_excerpt=f"region status {region['status']}")
@@ -289,7 +295,7 @@ def _run_schedule_locked(schedule_id: int) -> None:
     profile = SOURCE_PROFILES.get(source)
     if profile is None:
         msg = f"unknown source {source!r}"
-        print(f"[region-runner] schedule={schedule_id}: {msg}", flush=True)
+        print(f"{_ts()} [region-runner] schedule={schedule_id}: {msg}", flush=True)
         schedule_store.record_run(schedule_id, status="failed", log_excerpt=msg)
         return
 
