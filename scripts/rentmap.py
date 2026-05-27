@@ -205,6 +205,20 @@ def bbox_from_center_radius(center_lat: float, center_lng: float, radius_km: flo
     )
 
 
+def center_radius_from_bbox(min_lat: float, max_lat: float, min_lng: float, max_lng: float) -> tuple[float, float, float]:
+    """Derive a grid center/radius from an already-resolved bbox."""
+    center_lat = (min_lat + max_lat) / 2
+    center_lng = (min_lng + max_lng) / 2
+    lat_radius_km = abs(max_lat - min_lat) * 111.0 / 2
+    lng_radius_km = (
+        abs(max_lng - min_lng)
+        * 111.0
+        * max(math.cos(math.radians(center_lat)), COS_LAT_FLOOR)
+        / 2
+    )
+    return center_lat, center_lng, max(lat_radius_km, lng_radius_km)
+
+
 def default_bbox_from_env() -> tuple[float, float, float, float]:
     center_lat = env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT)
     center_lng = env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG)
@@ -1497,7 +1511,7 @@ async def _paginate_naver_cortarno(
 
 async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> None:
     started = time.monotonic()
-    urls = args.urls or default_naver_urls()
+    urls = args.urls or default_naver_urls(args)
     explicit_cortarnos = default_naver_cortarnos()
     _log_crawl_start(
         "naver",
@@ -1881,12 +1895,27 @@ def gen_naver_grid_urls(center_lat: float, center_lng: float, radius_km: float) 
     return urls
 
 
-def default_naver_urls() -> list[str]:
+def _naver_grid_center_radius(args: argparse.Namespace | None = None) -> tuple[float, float, float]:
+    if args is not None:
+        cr = _resolve_center_radius(args)
+        if cr is not None:
+            return cr
+        if all(hasattr(args, name) for name in ("min_lat", "max_lat", "min_lng", "max_lng")):
+            return center_radius_from_bbox(args.min_lat, args.max_lat, args.min_lng, args.max_lng)
+    return (
+        env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT),
+        env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG),
+        env_float("RENTMAP_RADIUS_KM", DEFAULT_RADIUS_KM),
+    )
+
+
+def default_naver_urls(args: argparse.Namespace | None = None) -> list[str]:
     """Return Naver crawl URLs.
 
     Priority:
-    1. RENTMAP_NAVER_URLS env var (comma-separated list of full URLs).
-    2. Auto-generated grid from RENTMAP_CENTER_LAT/LNG + RENTMAP_RADIUS_KM.
+    1. RENTMAP_NAVER_URLS env var (pipe-separated list of full URLs).
+    2. Auto-generated grid from the active CLI bbox/center, falling back to
+       RENTMAP_CENTER_LAT/LNG + RENTMAP_RADIUS_KM.
     """
     raw = os.environ.get("RENTMAP_NAVER_URLS", "").strip()
     if raw:
@@ -1896,9 +1925,7 @@ def default_naver_urls() -> list[str]:
         if urls:
             print(f"[naver] using {len(urls)} URLs from RENTMAP_NAVER_URLS", file=sys.stderr)
             return urls
-    center_lat = env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT)
-    center_lng = env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG)
-    radius_km = env_float("RENTMAP_RADIUS_KM", DEFAULT_RADIUS_KM)
+    center_lat, center_lng, radius_km = _naver_grid_center_radius(args)
     urls = gen_naver_grid_urls(center_lat, center_lng, radius_km)
     print(f"[naver] generated {len(urls)} grid URLs (center={center_lat},{center_lng} r={radius_km}km)", file=sys.stderr)
     return urls

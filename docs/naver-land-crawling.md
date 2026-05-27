@@ -84,6 +84,26 @@ python .\scripts\rentmap.py crawl-naver
 Useful variants:
 
 ```powershell
+# Ajou coordinate smoke test. This must generate a grid centered near
+# 37.280062,127.043688 and return non-zero rows.
+python .\scripts\rentmap.py crawl-naver `
+  --center-lat 37.280062 `
+  --center-lng 127.043688 `
+  --radius-km 3.0 `
+  --skip-detail `
+  --max-pages 2 `
+  --output-csv .\data\naver_land_ajou_smoke.csv
+
+# Hanyang ERICA coordinate smoke test. The ERICA center should generate the
+# Naver ms= grid around 37.299900,126.837600 rather than falling back to Ajou.
+python .\scripts\rentmap.py crawl-naver `
+  --center-lat 37.299900 `
+  --center-lng 126.837600 `
+  --radius-km 3.0 `
+  --skip-detail `
+  --max-pages 2 `
+  --output-csv .\data\naver_land_hanyang-erica_smoke.csv
+
 # Single explicit URL (skips the auto-grid)
 python .\scripts\rentmap.py crawl-naver `
   --url "https://new.land.naver.com/rooms?ms=2AzVQ9,3zkrDJ,17&a=APT:OPST:ABYG:OBYG:GM:OR:DDDGG:JWJT:SGJT:VL&e=RETAIL&aa=SMALLSPCRENT&ae=ONEROOM" `
