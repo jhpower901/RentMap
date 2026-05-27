@@ -156,6 +156,47 @@ def _run_rentmap(args: list[str], *, env: dict[str, str], timeout_s: int,
         return None, msg
 
 
+def _learn_daangn_region_ids(region: dict[str, Any]) -> None:
+    """Sweep the region's bbox via daangn's getRegionByCoordinate and persist.
+
+    Failures here are non-fatal — the crawl still runs (just with empty
+    daangn_region_ids, which means crawl_daangn falls back to its hard-
+    coded ajou IDs; for a non-ajou region that yields zero matching
+    listings rather than wrong ones). We log loudly so the operator
+    notices a hash rotation or network issue and can fix it.
+    """
+    slug = region["slug"]
+    try:
+        # Local import: keeps the daangn-finder dependency out of the
+        # region_runner cold path and lets the rentmap-naver container
+        # (which never reaches this branch) skip importing it.
+        import daangn_region_finder as finder  # noqa: WPS433
+        ids, discoveries = finder.discover_region_ids(
+            float(region["centerLat"]),
+            float(region["centerLng"]),
+            float(region["radiusKm"]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[region-runner] daangn auto-learn failed for {slug}: {exc!r}", flush=True)
+        return
+    if not ids:
+        print(f"[region-runner] daangn auto-learn: no regions discovered for {slug}", flush=True)
+        return
+    try:
+        added = region_store.merge_daangn_region_ids(region["id"], ids)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[region-runner] daangn merge failed for {slug}: {exc!r}", flush=True)
+        return
+    sample = ", ".join(f"{rid}={name}" for rid, name in discoveries[:8])
+    if len(discoveries) > 8:
+        sample += f", … (+{len(discoveries) - 8} more)"
+    print(
+        f"[region-runner] daangn auto-learn region={slug}: "
+        f"added {added}/{len(ids)} region_id(s): {sample}",
+        flush=True,
+    )
+
+
 def _merge_naver_cortarnos(region_id: int, slug: str, dump_path: Path) -> None:
     """Merge the cortarNos crawl-naver discovered into the region row.
 
@@ -241,6 +282,24 @@ def _run_schedule_locked(schedule_id: int) -> None:
         print(f"[region-runner] schedule={schedule_id}: {msg}", flush=True)
         schedule_store.record_run(schedule_id, status="failed", log_excerpt=msg)
         return
+
+    # Daangn region_id auto-learning: if the region row has no daangn_region_ids
+    # yet (admin left it blank), call the realty.daangn.com graphql endpoint
+    # to discover them from center+radius BEFORE the env is built. The fresh
+    # values get rolled into the env via build_env's read of region["daangnRegionIds"].
+    #
+    # Only the lightweight sources actually use the IDs (daangn / all_light),
+    # but we don't restrict learning to those — having the IDs in the row
+    # also benefits the admin UI immediately, and the cost is paid once per
+    # region (subsequent runs see the populated array and skip the call).
+    daangn_relevant = source in ("daangn", "all_light")
+    if daangn_relevant and not (region.get("daangnRegionIds") or []):
+        _learn_daangn_region_ids(region)
+        # Re-fetch so build_env below sees the merged IDs.
+        try:
+            region = region_store.get_region(region["id"])
+        except region_store.RegionError:
+            pass
 
     env = build_env(region)
     label = f"region={region['slug']} source={source}"

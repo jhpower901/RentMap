@@ -1900,6 +1900,115 @@ def default_naver_cortarnos() -> list[str]:
     return cns
 
 
+# ── Zigbang geohash auto-generation ──────────────────────────────────────────
+# Zigbang's list API is geohash-scoped — one query returns the items inside a
+# single geohash cell. For ajou we used to hard-code 6 cells covering a ~3km
+# radius; for multi-region we compute the cell set from the region's
+# center+radius so adding a new region doesn't need an admin to look up
+# geohashes manually.
+_GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+ZIGBANG_GEOHASH_PRECISION = 5           # ~4.9km × 4.9km at our latitudes
+ZIGBANG_GEOHASH_STEP_KM = 1.2           # Aligned with NAVER_TILE_STEP_KM —
+                                         # 1.2km gives enough overlap that a
+                                         # radius bbox reliably picks up the
+                                         # 2 outer cells our legacy 6-cell
+                                         # ajou list had (verified).
+
+
+def encode_geohash(lat: float, lng: float, precision: int = ZIGBANG_GEOHASH_PRECISION) -> str:
+    """Encode (lat, lng) to a base32 geohash of the given precision.
+
+    Pure-Python so we don't need to add a geohash dependency to
+    requirements.txt — the algorithm is small and the API is stable.
+    Bit interleaving is lng-first, matching the public spec / the strings
+    Zigbang's URL uses (verified against the hard-coded ajou cells:
+    37.280062, 127.043688 → "wydk5" with precision 5).
+    """
+    lat_range = [-90.0, 90.0]
+    lng_range = [-180.0, 180.0]
+    bits: list[int] = []
+    is_lng = True
+    while len(bits) < precision * 5:
+        if is_lng:
+            mid = (lng_range[0] + lng_range[1]) / 2
+            if lng >= mid:
+                bits.append(1)
+                lng_range[0] = mid
+            else:
+                bits.append(0)
+                lng_range[1] = mid
+        else:
+            mid = (lat_range[0] + lat_range[1]) / 2
+            if lat >= mid:
+                bits.append(1)
+                lat_range[0] = mid
+            else:
+                bits.append(0)
+                lat_range[1] = mid
+        is_lng = not is_lng
+    out = []
+    for i in range(0, len(bits), 5):
+        chunk = bits[i:i + 5]
+        idx = (chunk[0] << 4) | (chunk[1] << 3) | (chunk[2] << 2) | (chunk[3] << 1) | chunk[4]
+        out.append(_GEOHASH_BASE32[idx])
+    return "".join(out)
+
+
+def gen_zigbang_geohashes(center_lat: float, center_lng: float, radius_km: float,
+                          precision: int = ZIGBANG_GEOHASH_PRECISION,
+                          step_km: float = ZIGBANG_GEOHASH_STEP_KM) -> list[str]:
+    """All distinct precision-N geohashes that cover a center+radius bbox.
+
+    Sweeps a square grid that comfortably overshoots the radius — a
+    precision-5 geohash cell is ~4.9km × 4.9km and a listing can sit
+    near a cell edge that falls just outside the strict radius. We
+    apply a 1.5× radius padding (verified to recover the original ajou
+    "wydkh" / "wyd7u" cells the hand-tuned 6-cell list relied on)
+    before sweeping; the post-fetch bbox filter (``args.min_lat`` etc.)
+    still trims listings that genuinely fall outside the user's radius.
+    """
+    effective_radius = radius_km * 1.5
+    deg_per_km_lat = 1.0 / 111.0
+    deg_per_km_lng = 1.0 / (111.0 * max(0.01, math.cos(math.radians(center_lat))))
+    steps = max(1, math.ceil(effective_radius / step_km))
+    seen: set[str] = set()
+    for i in range(-steps, steps + 1):
+        for j in range(-steps, steps + 1):
+            lat = center_lat + i * step_km * deg_per_km_lat
+            lng = center_lng + j * step_km * deg_per_km_lng
+            seen.add(encode_geohash(lat, lng, precision))
+    return sorted(seen)
+
+
+def default_zigbang_geohashes() -> list[str]:
+    """Return Zigbang geohash cells for the active region.
+
+    Priority:
+    1. ``RENTMAP_ZIGBANG_GEOHASHES`` env (comma-separated). Override for
+       cases where the auto-computed set misses an oddly-shaped area.
+    2. Auto-computed from RENTMAP_CENTER_LAT/LNG + RENTMAP_RADIUS_KM.
+    3. Fall back to the hard-coded Ajou cells so a stray manual CLI
+       invocation (no env, no region) still works.
+    """
+    raw = os.environ.get("RENTMAP_ZIGBANG_GEOHASHES", "").strip()
+    if raw:
+        cells = [x.strip() for x in raw.split(",") if x.strip()]
+        if cells:
+            print(f"[zigbang] using {len(cells)} geohashes from RENTMAP_ZIGBANG_GEOHASHES",
+                  file=sys.stderr)
+            return cells
+    center_lat = env_float("RENTMAP_CENTER_LAT", DEFAULT_CENTER_LAT)
+    center_lng = env_float("RENTMAP_CENTER_LNG", DEFAULT_CENTER_LNG)
+    radius_km = env_float("RENTMAP_RADIUS_KM", DEFAULT_RADIUS_KM)
+    auto = gen_zigbang_geohashes(center_lat, center_lng, radius_km)
+    if auto:
+        print(f"[zigbang] auto-generated {len(auto)} geohash(es) for "
+              f"center=({center_lat:.5f},{center_lng:.5f}) radius={radius_km}km: {','.join(auto)}",
+              file=sys.stderr)
+        return auto
+    return list(DEFAULT_ZIGBANG_GEOHASHES)
+
+
 def default_daangn_region_ids() -> list[int]:
     """Return Daangn region IDs.
 
@@ -3043,7 +3152,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("crawl-zigbang")
     add_common_bbox(p)
-    p.add_argument("--geohashes", nargs="+", default=DEFAULT_ZIGBANG_GEOHASHES)
+    # default_zigbang_geohashes auto-computes from RENTMAP_CENTER_* env when
+    # no explicit override is set, so a new region with no zigbang config
+    # still gets the correct cell coverage.
+    p.add_argument("--geohashes", nargs="+", default=default_zigbang_geohashes())
     p.add_argument("--max-deposit-manwon", type=int, default=default_max_deposit())
     p.add_argument("--max-rent-manwon", type=int, default=default_max_rent())
     p.add_argument("--output-csv", default=str(ROOT / "data" / f"zigbang_{DEFAULT_AREA}_{DEFAULT_DATE}.csv"))
@@ -3147,7 +3259,7 @@ def _dabang_args(date: str, bbox: tuple[float, float, float, float], max_deposit
 
 def _zigbang_args(date: str, bbox: tuple[float, float, float, float], max_deposit: int, max_rent: int) -> argparse.Namespace:
     return argparse.Namespace(
-        geohashes=DEFAULT_ZIGBANG_GEOHASHES,
+        geohashes=default_zigbang_geohashes(),
         max_deposit_manwon=max_deposit, max_rent_manwon=max_rent,
         output_csv=_data_csv("zigbang", date),
         **_bbox_kwargs(bbox),

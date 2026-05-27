@@ -735,7 +735,7 @@ function renderRegionDetail(r) {
         <div><label>최대 월세 (만원, 비우면 기본)<input name="max_rent_manwon" type="number" min="0" value="${r.maxRentManwon ?? ''}"></label></div>
         <div><!-- spacer --></div>
         <div class="wide"><label>네이버 cortarNo (비워두세요 — 매 crawl 후 자동 학습됩니다)<textarea name="naver_cortar_nos" placeholder="naver 크롤러가 좌표 grid로 발견한 cortarNo를 자동으로 누적합니다. 처음에는 빈 상태가 정상.">${escapeHtml(r.naverCortarNos.join('\n'))}</textarea></label></div>
-        <div class="wide"><label>당근 region_id (한 줄에 하나, 정수, 비워두면 당근 크롤 정확도 ↓)<textarea name="daangn_region_ids" placeholder="daangn.com/kr/realty/?in=x-XXXX URL에서 XXXX 부분 (현재는 수동 입력)">${escapeHtml(r.daangnRegionIds.join('\n'))}</textarea></label></div>
+        <div class="wide"><label>당근 region_id (비워두세요 — 첫 crawl 시 자동 학습됩니다)<textarea name="daangn_region_ids" placeholder="daangn graphql API(getRegionByCoordinate)로 좌표 기반 region_id를 자동 매핑합니다. 처음에는 빈 상태가 정상.">${escapeHtml(r.daangnRegionIds.join('\n'))}</textarea></label></div>
         <div class="wide"><label>네이버 ms= URL 오버라이드 (보통 비워두면 됨)<textarea name="naver_urls" placeholder="좌표+반경에서 자동 grid 생성됨. ms= URL 직접 지정이 필요할 때만 한 줄에 하나씩.">${escapeHtml(r.naverUrls.join('\n'))}</textarea></label></div>
         <div class="wide"><label>메모<textarea name="note">${escapeHtml(r.note || '')}</textarea></label></div>
         <div class="wide region-actions">

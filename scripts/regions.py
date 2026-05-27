@@ -460,6 +460,50 @@ def merge_cortar_nos(region_id: int, discovered: list[str]) -> int:
     return added
 
 
+def merge_daangn_region_ids(region_id: int, discovered: list[int]) -> int:
+    """UNION-merge newly discovered Daangn region_ids into a region row.
+
+    Same shape as :func:`merge_cortar_nos` but for Daangn's
+    ``regions.daangn_region_ids`` column. ``region_runner`` calls this
+    after auto-learning via the realty.daangn.com graphql endpoint
+    (see :mod:`daangn_region_finder`).
+
+    Idempotent + race-safe via ``SELECT FOR UPDATE``. Garbage values
+    (non-int, negatives, zero) are dropped silently so a future bug in
+    the finder can't write nonsense into the array.
+    """
+    if not discovered:
+        return 0
+    cleaned_new: set[int] = set()
+    for v in discovered:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            cleaned_new.add(n)
+    if not cleaned_new:
+        return 0
+    with session() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT daangn_region_ids FROM regions WHERE id = %s FOR UPDATE",
+            (region_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise RegionError("unknown", "Region not found")
+        current = set(row["daangn_region_ids"] or [])
+        merged = sorted(current | cleaned_new)
+        added = len(merged) - len(current)
+        if added == 0:
+            return 0
+        cur.execute(
+            "UPDATE regions SET daangn_region_ids = %s, updated_at = now() WHERE id = %s",
+            (merged, region_id),
+        )
+    return added
+
+
 def delete_region(region_id: int, *, cleanup_files: bool = True) -> dict[str, Any]:
     """Hard-delete a region row and (by default) its on-disk artefacts.
 
