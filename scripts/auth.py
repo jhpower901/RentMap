@@ -214,14 +214,19 @@ def clear_session_cookie(response: Response, request: Request | None = None) -> 
 # ──────────────────────────────────────────────────────────────────────────────
 
 def current_user(
+    request: Request,
     rentmap_session: str | None = Cookie(default=None, alias=COOKIE_NAME),
 ) -> User:
     """Required-auth dependency for API endpoints.
 
-    The middleware in server.py already 401s un-authenticated API requests
-    before they get here, but using this dependency is what wires user_id
-    into the call sites without each handler re-reading the cookie.
+    Fast path: ``session_guard`` middleware already validated the session and
+    stashed the user on ``request.state.user`` — reuse it instead of issuing
+    a second DB round-trip. Endpoints reachable without the middleware (none
+    today, but defensive) fall back to a direct ``lookup_session``.
     """
+    cached = getattr(request.state, "user", None)
+    if isinstance(cached, User):
+        return cached
     user = lookup_session(rentmap_session) if rentmap_session else None
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -229,15 +234,20 @@ def current_user(
 
 
 def current_user_optional(
+    request: Request,
     rentmap_session: str | None = Cookie(default=None, alias=COOKIE_NAME),
 ) -> Optional[User]:
+    cached = getattr(request.state, "user", None)
+    if isinstance(cached, User):
+        return cached
     return lookup_session(rentmap_session) if rentmap_session else None
 
 
 def current_admin(
+    request: Request,
     rentmap_session: str | None = Cookie(default=None, alias=COOKIE_NAME),
 ) -> User:
-    user = current_user(rentmap_session)
+    user = current_user(request, rentmap_session)
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
     return user

@@ -61,12 +61,19 @@
   </div>
 </div>
 <script src="auth.js?v=20260525-auth1"></script>
-<script src="favorites.js?v=20260525-refresh"></script>
+<script src="favorites.js?v=20260526-user-guard"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script src="listing-info.js?v=20260525-maint2"></script>
 <script src="platform-common.js?v=20260525-visibility"></script>
+<script src="region-data-loader.js?v=20260526-region1"></script>
 <script>
-PlatformPage.init({ source: '__SOURCE__', accent: '__ACCENT__', raw: __DATA__ });
+// Region data is loaded dynamically based on the active region (localStorage
+// 'rentmap.region.v1') so a single platform page can serve any approved
+// region. Falls back to "ajou" when nothing's selected. See
+// region-data-loader.js for the file-name convention.
+RegionData.loadOne('__SOURCE__', function (rows) {
+  PlatformPage.init({ source: '__SOURCE__', accent: '__ACCENT__', raw: rows });
+});
 </script>
 </body>
 </html>

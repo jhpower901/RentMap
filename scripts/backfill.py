@@ -43,9 +43,16 @@ KST = ZoneInfo("Asia/Seoul")
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = ROOT / "data"
 
-# Filename → (platform_code, date). naver's prefix is two tokens so handle it
-# specifically rather than splitting on underscores.
-FILENAME_RE = re.compile(r"^(?P<src>[a-z_]+?)_ajou_(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
+# Filename → (platform_code, area_slug, date). naver's prefix is two tokens
+# so we anchor on the known platform set rather than letting the regex split
+# on underscores. The area slug matches the regions.slug constraint
+# (^[a-z0-9][a-z0-9_-]+$) plus the legacy "ajou" default — see
+# region-architecture for how slug propagates from regions.slug through
+# RENTMAP_AREA_NAME into the CSV filename.
+FILENAME_RE = re.compile(
+    r"^(?P<src>dabang|zigbang|daangn|naver_land)_(?P<area>[a-z0-9][a-z0-9_-]*)_"
+    r"(?P<date>\d{4}-\d{2}-\d{2})\.csv$"
+)
 PLATFORM_ALIASES = {
     # CSV prefix → platforms.code
     "dabang": "dabang",
@@ -55,14 +62,20 @@ PLATFORM_ALIASES = {
 }
 
 
-def discover_csvs(data_dir: Path, only_date: str | None) -> list[tuple[Path, str, datetime]]:
-    """Find ``<src>_ajou_<DATE>.csv`` files in data_dir.
+def discover_csvs(data_dir: Path, only_date: str | None) -> list[tuple[Path, str, datetime, str]]:
+    """Find ``<src>_<area>_<DATE>.csv`` files in data_dir.
 
-    Returns a list of (path, platform_code, crawled_at) tuples, sorted by
-    (date, platform_code) so the diff against a prior day is meaningful.
+    Returns a list of (path, platform_code, crawled_at, area_slug) tuples,
+    sorted by (date, area_slug, platform_code) so the diff against a prior
+    day for the same region is meaningful — without the area_slug in the
+    sort key, two regions' crawls of the same date would interleave and
+    confuse missing-detection.
     """
-    found: list[tuple[Path, str, datetime]] = []
-    for path in sorted(data_dir.glob("*_ajou_*.csv")):
+    found: list[tuple[Path, str, datetime, str]] = []
+    # Glob matches files for every region. Pre-region filenames had only
+    # one underscore-separated middle segment ("ajou"); the new regex
+    # accepts that as well as multi-segment slugs ("r-3a7b9c2d").
+    for path in sorted(data_dir.glob("*_*_*.csv")):
         m = FILENAME_RE.match(path.name)
         if not m:
             log.warning("skipping unparseable filename: %s", path.name)
@@ -81,10 +94,10 @@ def discover_csvs(data_dir: Path, only_date: str | None) -> list[tuple[Path, str
             time(12, 0),
             tzinfo=KST,
         )
-        found.append((path, PLATFORM_ALIASES[src], crawled_at))
-    # Sort by (date, platform) — same date all together so missing detection
-    # has the right peer comparison.
-    found.sort(key=lambda t: (t[2], t[1]))
+        found.append((path, PLATFORM_ALIASES[src], crawled_at, m.group("area")))
+    # Sort by (date, area, platform) — same (date, area) all together so
+    # missing detection compares region-to-region matched pairs.
+    found.sort(key=lambda t: (t[2], t[3], t[1]))
     return found
 
 
@@ -150,11 +163,12 @@ def main(argv: list[str] | None = None) -> None:
     if not targets:
         raise SystemExit("no CSVs matched. nothing to backfill.")
     log.info("[backfill] %d file(s) to replay", len(targets))
-    for path, platform, crawled_at in targets:
+    for path, platform, crawled_at, area in targets:
         try:
             backfill_one(path, platform, crawled_at, dry_run=not args.live)
         except Exception:
-            log.exception("[backfill] %s failed; continuing with next file", path.name)
+            log.exception("[backfill] %s (area=%s) failed; continuing with next file",
+                          path.name, area)
 
 
 if __name__ == "__main__":

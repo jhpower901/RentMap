@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>사용자 관리 - RentMap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f6f7f9;color:#1f2937}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f3f4f6}
+nav a.active-nav{background:#222;color:#fff}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.badge-dabang{background:#FF5C38}.badge-daangn{background:#FF6F00}.badge-zigbang{background:#6366F1}.badge-naver{background:#03C75A}
+.page{max-width:1180px;margin:0 auto;padding:18px}
+.topbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+h1{font-size:20px;line-height:1.3}
+.muted{color:#6b7280;font-size:12px}
+.notice{margin-left:auto;color:#b91c1c;font-size:12px;font-weight:700}
+.layout{display:grid;grid-template-columns:minmax(320px,440px) 1fr;gap:14px;align-items:start}
+.section{background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid #e5e7eb}
+.section-head h2{font-size:15px}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+input,select,textarea{font-family:inherit;font-size:13px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#111827}
+input,select{height:32px;padding:5px 8px}
+textarea{width:100%;min-height:108px;padding:8px;resize:vertical}
+.search{flex:1;min-width:160px}
+.btn{height:32px;padding:5px 11px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#111827;font-family:inherit;font-size:13px;cursor:pointer}
+.btn:hover{background:#f3f4f6}
+.btn.primary{background:#111827;color:#fff;border-color:#111827}
+.btn.primary:hover{background:#374151}
+.btn.danger{border-color:#fecaca;color:#b91c1c}
+.btn.danger:hover{background:#fef2f2}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.user-list{display:flex;flex-direction:column;max-height:calc(100vh - 210px);overflow:auto}
+.user-row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:11px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer}
+.user-row:hover,.user-row.active{background:#f9fafb}
+.user-name{font-weight:700;word-break:break-all}
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:10px;background:#eef2ff;color:#3730a3;font-size:11px;font-weight:700}
+.chip.off{background:#fee2e2;color:#991b1b}
+.chip.gray{background:#f3f4f6;color:#4b5563}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid #e5e7eb}
+.metric{padding:12px 14px;border-right:1px solid #f3f4f6}
+.metric:last-child{border-right:none}
+.metric b{display:block;font-size:20px;color:#111827}
+.metric span{font-size:12px;color:#6b7280}
+.detail-body{padding:14px}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.field label{display:block;font-size:12px;font-weight:700;color:#4b5563;margin-bottom:4px}
+.field input{width:100%}
+.checks{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.checks label{display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.tabs{display:flex;gap:4px;margin:14px 0 10px;border-bottom:1px solid #e5e7eb}
+.tab{border:none;background:transparent;padding:8px 10px;font-family:inherit;font-size:13px;cursor:pointer;color:#6b7280;border-bottom:2px solid transparent}
+.tab.active{color:#111827;border-color:#111827;font-weight:700}
+.pane{display:none}
+.pane.active{display:block}
+.data-list{display:flex;flex-direction:column;gap:8px}
+.data-item{border:1px solid #e5e7eb;border-radius:8px;padding:10px;background:#fff}
+.data-title{font-weight:700;margin-bottom:4px;word-break:break-word}
+.data-meta{font-size:12px;color:#6b7280;line-height:1.6;word-break:break-word}
+.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.photo{border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff}
+.photo img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#f3f4f6}
+.photo div{font-size:11px;color:#6b7280;padding:6px;word-break:break-all}
+.empty{padding:28px;text-align:center;color:#9ca3af}
+.create-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:14px;border-bottom:1px solid #e5e7eb;background:#fafafa}
+.create-form .wide{grid-column:1/-1}
+.create-form label{font-size:12px;font-weight:700;color:#4b5563}
+.create-form input{width:100%;margin-top:4px}
+.status{min-height:20px;margin-top:10px;font-size:12px;color:#2563eb}
+/* Invite codes table */
+.invite-section{margin-bottom:14px}
+.invite-table{width:100%;border-collapse:collapse;font-size:13px}
+.invite-table th,.invite-table td{padding:9px 10px;text-align:left;border-bottom:1px solid #f3f4f6;vertical-align:top}
+.invite-table th{font-size:11px;color:#6b7280;font-weight:700;background:#fafafa;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e5e7eb}
+.invite-table tr:hover td{background:#fafafa}
+.invite-code{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:13px;color:#111827}
+.copy-btn{margin-left:4px;border:none;background:transparent;cursor:pointer;color:#6b7280;font-size:12px;padding:0 2px}
+.copy-btn:hover{color:#111827}
+.status-chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:10px;font-size:11px;font-weight:700;background:#dcfce7;color:#166534}
+.status-chip.exhausted{background:#fef3c7;color:#92400e}
+.status-chip.expired{background:#fee2e2;color:#991b1b}
+.status-chip.revoked{background:#f3f4f6;color:#4b5563}
+.invite-signups{font-size:12px;color:#374151;margin-top:4px;line-height:1.6;word-break:break-word}
+.invite-signups .none{color:#9ca3af}
+.invite-actions{display:flex;gap:4px;flex-wrap:wrap}
+.btn.xs{height:26px;padding:2px 8px;font-size:11px}
+.usage-bar{display:flex;align-items:center;gap:6px}
+.usage-bar .bar{flex:1;height:6px;background:#f3f4f6;border-radius:3px;overflow:hidden;min-width:40px}
+.usage-bar .fill{height:100%;background:#6366F1}
+.usage-bar .fill.full{background:#dc2626}
+.usage-num{font-size:11px;color:#6b7280;white-space:nowrap;font-variant-numeric:tabular-nums}
+/* Region rows mirror invite-table styling so the admin page reads consistently. */
+.region-chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:10px;font-size:11px;font-weight:700}
+.region-chip.pending{background:#fef3c7;color:#92400e}
+.region-chip.approved{background:#dcfce7;color:#166534}
+.region-chip.disabled{background:#f3f4f6;color:#4b5563}
+.region-detail-row > td{padding:0;background:#fafafa}
+.region-detail{padding:14px}
+.region-detail-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.region-detail-form .wide{grid-column:1/-1}
+.region-detail-form label{font-size:12px;font-weight:700;color:#4b5563;display:block}
+.region-detail-form input,.region-detail-form textarea{width:100%;margin-top:4px}
+.region-detail-form textarea{min-height:60px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.region-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.region-status-msg{margin-top:8px;font-size:12px;color:#2563eb;min-height:16px}
+.region-status-msg.err{color:#b91c1c}
+.region-schedules{margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px}
+.region-schedules h3{font-size:13px;margin-bottom:8px}
+.schedule-row{display:grid;grid-template-columns:90px 1fr auto auto auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed #f3f4f6}
+.schedule-row code{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.schedule-row .muted{font-size:11px}
+.schedule-add{display:grid;grid-template-columns:90px 1fr 1fr auto;gap:8px;align-items:center;padding-top:8px}
+.schedule-add select,.schedule-add input{height:30px}
+@media(max-width:860px){
+  .schedule-row,.schedule-add{grid-template-columns:1fr}
+  .region-detail-form{grid-template-columns:1fr}
+}
+.invite-create{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px;border-bottom:1px solid #e5e7eb;background:#fafafa;align-items:end}
+.invite-create .wide{grid-column:1/-1}
+.invite-create label{font-size:12px;font-weight:700;color:#4b5563}
+.invite-create input,.invite-create textarea{width:100%;margin-top:4px}
+.invite-create .btn{height:32px}
+.invite-create-row{display:flex;gap:8px;align-items:center}
+.invite-create-row input{flex:1}
+@media(max-width:860px){.invite-create{grid-template-columns:1fr}}
+@media(max-width:860px){
+  nav{flex-wrap:nowrap;overflow-x:auto}
+  .layout{grid-template-columns:1fr}
+  .user-list{max-height:360px}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .form-grid,.create-form{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">RentMap</span>
+  <a href="index.html">지도</a>
+  <a href="favorites.html">찜 목록</a>
+  <a href="dabang.html"><span class="badge badge-dabang">다방</span></a>
+  <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
+  <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
+  <a href="naver.html"><span class="badge badge-naver">네이버</span></a>
+  <a href="admin.html" class="active-nav">관리</a>
+  <span id="userInfo"></span>
+</nav>
+
+<main class="page">
+  <div class="topbar">
+    <div>
+      <h1>사용자 관리</h1>
+      <div class="muted">관리자만 접근할 수 있습니다.</div>
+    </div>
+    <div class="notice" id="notice"></div>
+  </div>
+
+  <section class="section invite-section">
+    <div class="section-head">
+      <h2>초대 코드</h2>
+      <span class="muted" id="inviteCount">0개</span>
+    </div>
+    <form class="invite-create" id="inviteCreateForm">
+      <div>
+        <label>코드 (비워두면 자동 생성)
+          <div class="invite-create-row">
+            <input name="code" maxlength="64" placeholder="예: AJOU-FAM-2026">
+            <button type="button" class="btn xs" id="invGenBtn">랜덤</button>
+          </div>
+        </label>
+      </div>
+      <div><label>메모<input name="note" maxlength="200" placeholder="예: 박씨 가족"></label></div>
+      <div><label>최대 가입자 수 (비우면 무제한)<input name="max_uses" type="number" min="1" max="10000" placeholder="-"></label></div>
+      <div><label>만료일 (선택)<input name="expires_at" type="datetime-local"></label></div>
+      <div class="wide">
+        <button class="btn primary" type="submit">코드 발급</button>
+        <span class="muted" id="inviteCreateStatus" style="margin-left:8px"></span>
+      </div>
+    </form>
+    <div style="overflow-x:auto">
+      <table class="invite-table" id="inviteTable">
+        <thead>
+          <tr>
+            <th>코드</th>
+            <th>메모</th>
+            <th>사용/한도</th>
+            <th>만료</th>
+            <th>상태</th>
+            <th>가입자</th>
+            <th>발급자</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="inviteRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section invite-section">
+    <div class="section-head">
+      <h2>크롤링 지역</h2>
+      <span class="muted" id="regionCount">0개</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="invite-table" id="regionTable">
+        <thead>
+          <tr>
+            <th>슬러그 / 이름</th>
+            <th>중심 / 반경</th>
+            <th>상태</th>
+            <th>플랫폼 데이터</th>
+            <th>신청자</th>
+            <th>승인자</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="regionRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="layout">
+    <section class="section">
+      <div class="section-head">
+        <h2>계정</h2>
+        <button class="btn" id="refreshBtn">새로고침</button>
+      </div>
+      <form class="create-form" id="createForm">
+        <div><label>아이디<input name="username" required minlength="2" maxlength="64"></label></div>
+        <div><label>표시 이름<input name="display_name" maxlength="80"></label></div>
+        <div><label>초기 비밀번호<input name="password" type="password" autocomplete="new-password" required minlength="6"></label></div>
+        <div class="checks">
+          <label><input name="is_admin" type="checkbox"> 관리자</label>
+          <button class="btn primary" type="submit">생성</button>
+        </div>
+        <div class="wide muted">비밀번호는 해시로 저장되며 생성 후에는 다시 표시되지 않습니다.</div>
+      </form>
+      <div class="section-head">
+        <input class="search" id="search" placeholder="아이디 또는 표시 이름 검색">
+        <span class="muted" id="userCount">0명</span>
+      </div>
+      <div class="user-list" id="userList"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2 id="detailTitle">사용자를 선택하세요</h2>
+        <span class="muted" id="detailSub"></span>
+      </div>
+      <div id="detailEmpty" class="empty">왼쪽 목록에서 계정을 선택하면 상세 데이터가 표시됩니다.</div>
+      <div id="detail" style="display:none">
+        <div class="metrics">
+          <div class="metric"><b id="mFavs">0</b><span>찜</span></div>
+          <div class="metric"><b id="mPhotos">0</b><span>사진</span></div>
+          <div class="metric"><b id="mSessions">0</b><span>세션</span></div>
+          <div class="metric"><b id="mArea">-</b><span>영역 필터</span></div>
+        </div>
+        <div class="detail-body">
+          <div class="form-grid">
+            <div class="field"><label>아이디</label><input id="dUsername" disabled></div>
+            <div class="field"><label>표시 이름</label><input id="dDisplay"></div>
+          </div>
+          <div class="checks">
+            <label><input id="dAdmin" type="checkbox"> 관리자 권한</label>
+            <label><input id="dActive" type="checkbox"> 활성 계정</label>
+          </div>
+          <div class="actions">
+            <button class="btn primary" id="saveBtn">변경 저장</button>
+            <button class="btn" id="resetBtn">비밀번호 재설정</button>
+            <button class="btn danger" id="deleteBtn">계정 삭제</button>
+          </div>
+          <div class="status" id="status"></div>
+
+          <div class="tabs">
+            <button class="tab active" data-tab="favorites">찜 데이터</button>
+            <button class="tab" data-tab="photos">사진</button>
+            <button class="tab" data-tab="sessions">세션</button>
+            <button class="tab" data-tab="area">영역 필터</button>
+          </div>
+          <div class="pane active" id="pane-favorites"><div class="data-list" id="favData"></div></div>
+          <div class="pane" id="pane-photos"><div class="photo-grid" id="photoData"></div></div>
+          <div class="pane" id="pane-sessions"><div class="data-list" id="sessionData"></div></div>
+          <div class="pane" id="pane-area"><textarea id="areaData" readonly></textarea></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script src="auth.js?v=20260526-admin1"></script>
+<script>
+const state = { me: null, users: [], selectedId: null, detail: null };
+const $ = id => document.getElementById(id);
+
+function api(path, opts = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  return fetch(path, Object.assign({ credentials: 'same-origin', cache: 'no-store', headers }, opts))
+    .then(async r => {
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || body.error || r.statusText);
+      return body;
+    });
+}
+
+function fmtTime(v) {
+  if (!v) return '-';
+  try { return new Date(v).toLocaleString('ko-KR'); } catch (_) { return v; }
+}
+
+function setStatus(text, isError = false) {
+  $('status').textContent = text || '';
+  $('status').style.color = isError ? '#b91c1c' : '#2563eb';
+}
+
+function userChips(u) {
+  const chips = [];
+  if (u.isAdmin) chips.push('<span class="chip">관리자</span>');
+  chips.push(u.isActive ? '<span class="chip gray">활성</span>' : '<span class="chip off">비활성</span>');
+  chips.push(`<span class="chip gray">찜 ${u.favorites}</span>`);
+  chips.push(`<span class="chip gray">사진 ${u.photoCount}</span>`);
+  return chips.join('');
+}
+
+function renderUsers() {
+  const q = $('search').value.trim().toLowerCase();
+  const users = state.users.filter(u =>
+    !q || u.username.toLowerCase().includes(q) || (u.displayName || '').toLowerCase().includes(q)
+  );
+  $('userCount').textContent = `${users.length}명`;
+  $('userList').innerHTML = users.map(u => `
+    <div class="user-row ${u.id === state.selectedId ? 'active' : ''}" data-id="${u.id}">
+      <div>
+        <div class="user-name">#${u.id} ${u.username}</div>
+        <div class="muted">${u.displayName || u.username} · 마지막 로그인 ${fmtTime(u.lastLoginAt)}</div>
+        <div class="chips">${userChips(u)}</div>
+      </div>
+    </div>
+  `).join('') || '<div class="empty">계정이 없습니다.</div>';
+}
+
+async function loadUsers() {
+  const res = await api('/api/admin/users');
+  state.users = res.users || [];
+  renderUsers();
+  if (!state.selectedId && state.users.length) selectUser(state.users[0].id);
+}
+
+async function selectUser(id) {
+  state.selectedId = Number(id);
+  renderUsers();
+  setStatus('불러오는 중...');
+  const res = await api(`/api/admin/users/${state.selectedId}`);
+  state.detail = res;
+  renderDetail();
+  setStatus('');
+}
+
+function renderDetail() {
+  const d = state.detail;
+  if (!d) return;
+  const u = d.user;
+  $('detailEmpty').style.display = 'none';
+  $('detail').style.display = '';
+  $('detailTitle').textContent = `${u.username}`;
+  $('detailSub').textContent = `생성 ${fmtTime(u.createdAt)} · 마지막 로그인 ${fmtTime(u.lastLoginAt)}`;
+  $('mFavs').textContent = u.favorites;
+  $('mPhotos').textContent = u.photoCount;
+  $('mSessions').textContent = u.sessions;
+  $('mArea').textContent = u.hasAreaFilter ? '있음' : '기본';
+  $('dUsername').value = u.username;
+  $('dDisplay').value = u.displayName || '';
+  $('dAdmin').checked = !!u.isAdmin;
+  $('dActive').checked = !!u.isActive;
+  $('deleteBtn').disabled = state.me && state.me.id === u.id;
+
+  const favs = (d.favoritesState && d.favoritesState.favorites) || [];
+  $('favData').innerHTML = favs.map(f => `
+    <div class="data-item">
+      <div class="data-title">${escapeHtml((f.data && f.data.title) || f.title || f.key || '(제목 없음)')}</div>
+      <div class="data-meta">
+        ${escapeHtml(f.source || '')} · ${escapeHtml(String(f.id || ''))}<br>
+        저장 ${escapeHtml(f.savedAt || '-')} · 메모 ${escapeHtml(f.notes || '-')}<br>
+        주소 ${escapeHtml((f.data && f.data.address) || '-')}
+      </div>
+    </div>
+  `).join('') || '<div class="empty">찜 데이터가 없습니다.</div>';
+
+  $('photoData').innerHTML = (d.photos || []).map(p => `
+    <a class="photo" href="${p.url}" target="_blank" rel="noopener">
+      <img src="${p.url}" alt="">
+      <div>${escapeHtml(p.folder)}<br>${escapeHtml(p.name)}</div>
+    </a>
+  `).join('') || '<div class="empty">사진이 없습니다.</div>';
+
+  $('sessionData').innerHTML = (d.sessions || []).map(s => `
+    <div class="data-item">
+      <div class="data-title">${escapeHtml(s.ip || 'IP 없음')}</div>
+      <div class="data-meta">
+        마지막 활동 ${fmtTime(s.lastSeenAt)} · 만료 ${fmtTime(s.expiresAt)}<br>
+        ${escapeHtml(s.userAgent || '-')}
+      </div>
+    </div>
+  `).join('') || '<div class="empty">활성 세션이 없습니다.</div>';
+
+  $('areaData').value = JSON.stringify(d.areaFilter || {}, null, 2);
+}
+
+function escapeHtml(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+async function saveSelected() {
+  if (!state.selectedId) return;
+  setStatus('저장 중...');
+  await api(`/api/admin/users/${state.selectedId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      display_name: $('dDisplay').value,
+      is_admin: $('dAdmin').checked,
+      is_active: $('dActive').checked
+    })
+  });
+  await loadUsers();
+  await selectUser(state.selectedId);
+  setStatus('저장했습니다.');
+}
+
+async function resetPassword() {
+  if (!state.selectedId) return;
+  const pw = prompt('새 비밀번호를 입력하세요. 6자 이상이어야 합니다.');
+  if (!pw) return;
+  setStatus('비밀번호 재설정 중...');
+  await api(`/api/admin/users/${state.selectedId}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ password: pw })
+  });
+  await selectUser(state.selectedId);
+  setStatus('비밀번호를 재설정했고 기존 세션을 모두 해제했습니다.');
+}
+
+async function deleteSelected() {
+  if (!state.selectedId || !state.detail) return;
+  const name = state.detail.user.username;
+  if (!confirm(`${name} 계정과 해당 사용자의 찜, 세션, 영역 필터, 사진을 삭제할까요?`)) return;
+  await api(`/api/admin/users/${state.selectedId}`, { method: 'DELETE' });
+  state.selectedId = null;
+  state.detail = null;
+  $('detail').style.display = 'none';
+  $('detailEmpty').style.display = '';
+  await loadUsers();
+}
+
+document.addEventListener('click', e => {
+  const row = e.target.closest('.user-row');
+  if (row) selectUser(row.dataset.id).catch(err => setStatus(err.message, true));
+  const tab = e.target.closest('.tab');
+  if (tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === `pane-${tab.dataset.tab}`));
+  }
+});
+
+$('search').addEventListener('input', renderUsers);
+$('refreshBtn').addEventListener('click', () => loadUsers().catch(err => $('notice').textContent = err.message));
+$('saveBtn').addEventListener('click', () => saveSelected().catch(err => setStatus(err.message, true)));
+$('resetBtn').addEventListener('click', () => resetPassword().catch(err => setStatus(err.message, true)));
+$('deleteBtn').addEventListener('click', () => deleteSelected().catch(err => setStatus(err.message, true)));
+$('createForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  // Same fix as createInvite — capture the form before awaiting, because
+  // e.currentTarget is cleared the moment the synchronous handler returns.
+  const form = e.currentTarget || e.target;
+  const fd = new FormData(form);
+  $('notice').textContent = '';
+  try {
+    await api('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: fd.get('username'),
+        display_name: fd.get('display_name'),
+        password: fd.get('password'),
+        is_admin: fd.has('is_admin')
+      })
+    });
+  } catch (err) {
+    $('notice').textContent = err.message;
+    return;
+  }
+  if (form && typeof form.reset === 'function') form.reset();
+  await loadUsers();
+});
+
+// ── Invite codes ───────────────────────────────────────────────────────────
+state.invites = [];
+
+const STATUS_LABEL = {
+  active: '활성',
+  exhausted: '소진',
+  expired: '만료',
+  revoked: '폐기',
+};
+
+function fmtUsage(used, max) {
+  const u = Number(used) || 0;
+  const cap = (max == null) ? null : Number(max);
+  if (cap == null) {
+    return `<div class="usage-bar"><div class="bar"></div><span class="usage-num">${u} / ∞</span></div>`;
+  }
+  const pct = cap > 0 ? Math.min(100, Math.round((u / cap) * 100)) : 0;
+  const full = u >= cap;
+  return `<div class="usage-bar">
+    <div class="bar"><div class="fill ${full ? 'full' : ''}" style="width:${pct}%"></div></div>
+    <span class="usage-num">${u} / ${cap}</span>
+  </div>`;
+}
+
+function fmtSignups(signups) {
+  if (!signups || !signups.length) return '<span class="none">없음</span>';
+  return signups.map(s => `<span title="${escapeHtml(fmtTime(s.joinedAt))}">${escapeHtml(s.username)}</span>`).join(', ');
+}
+
+function renderInvites() {
+  $('inviteCount').textContent = `${state.invites.length}개`;
+  $('inviteRows').innerHTML = state.invites.map(inv => `
+    <tr data-id="${inv.id}">
+      <td>
+        <span class="invite-code">${escapeHtml(inv.code)}</span>
+        <button class="copy-btn" data-copy="${escapeHtml(inv.code)}" title="복사">⧉</button>
+      </td>
+      <td>${escapeHtml(inv.note || '-')}</td>
+      <td>${fmtUsage(inv.usedCount, inv.maxUses)}</td>
+      <td>${inv.expiresAt ? escapeHtml(fmtTime(inv.expiresAt)) : '<span class="muted">없음</span>'}</td>
+      <td><span class="status-chip ${inv.status}">${STATUS_LABEL[inv.status] || inv.status}</span></td>
+      <td><div class="invite-signups">${fmtSignups(inv.signups)}</div></td>
+      <td>${escapeHtml(inv.createdByUsername || '-')}<br><span class="muted">${escapeHtml(fmtTime(inv.createdAt))}</span></td>
+      <td>
+        <div class="invite-actions">
+          ${inv.status === 'revoked'
+            ? `<button class="btn xs" data-act="reactivate" data-id="${inv.id}">재활성</button>`
+            : `<button class="btn xs danger" data-act="revoke" data-id="${inv.id}">폐기</button>`}
+          ${!inv.signups.length
+            ? `<button class="btn xs danger" data-act="delete" data-id="${inv.id}">삭제</button>`
+            : ''}
+        </div>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="8" class="empty">초대 코드가 없습니다.</td></tr>';
+}
+
+async function loadInvites() {
+  const res = await api('/api/admin/invites');
+  state.invites = res.invites || [];
+  renderInvites();
+}
+
+function localIsoToUtcIso(value) {
+  // <input type="datetime-local"> gives a naive local-time string; coerce to UTC ISO.
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+async function createInvite(e) {
+  e.preventDefault();
+  // Capture the form node up front. ``e.currentTarget`` is null once the
+  // synchronous handler returns, and our await below crosses that boundary.
+  const form = e.currentTarget || e.target;
+  const fd = new FormData(form);
+  const status = $('inviteCreateStatus');
+  status.textContent = '발급 중...';
+  status.style.color = '#2563eb';
+  const body = {
+    code: (fd.get('code') || '').trim() || null,
+    note: (fd.get('note') || '').trim() || null,
+    max_uses: fd.get('max_uses') ? Number(fd.get('max_uses')) : null,
+    expires_at: localIsoToUtcIso(fd.get('expires_at')),
+  };
+  try {
+    const res = await api('/api/admin/invites', { method: 'POST', body: JSON.stringify(body) });
+    if (form && typeof form.reset === 'function') form.reset();
+    status.textContent = `발급됨: ${res.invite.code}`;
+    await loadInvites();
+  } catch (err) {
+    status.textContent = err.message;
+    status.style.color = '#b91c1c';
+  }
+}
+
+async function revokeInvite(id) {
+  await api(`/api/admin/invites/${id}`, { method: 'PATCH', body: JSON.stringify({ revoked: true }) });
+  await loadInvites();
+}
+
+async function reactivateInvite(id) {
+  await api(`/api/admin/invites/${id}`, { method: 'PATCH', body: JSON.stringify({ revoked: false }) });
+  await loadInvites();
+}
+
+async function deleteInvite(id) {
+  if (!confirm('이 초대 코드를 영구 삭제할까요? (가입자가 있으면 거부됩니다)')) return;
+  await api(`/api/admin/invites/${id}`, { method: 'DELETE' });
+  await loadInvites();
+}
+
+document.addEventListener('click', e => {
+  const copy = e.target.closest('.copy-btn');
+  if (copy) {
+    navigator.clipboard?.writeText(copy.dataset.copy).then(() => {
+      const old = copy.textContent;
+      copy.textContent = '✓';
+      setTimeout(() => { copy.textContent = old; }, 800);
+    });
+    return;
+  }
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const act = btn.dataset.act;
+  const run = act === 'revoke' ? revokeInvite(id)
+    : act === 'reactivate' ? reactivateInvite(id)
+    : act === 'delete' ? deleteInvite(id)
+    : null;
+  if (run) run.catch(err => $('notice').textContent = err.message);
+});
+
+$('inviteCreateForm').addEventListener('submit', createInvite);
+$('invGenBtn').addEventListener('click', () => {
+  // Match the server's autogen charset so a hand-typed code resembles an
+  // auto-generated one when an admin combines them.
+  const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const out = Array.from({ length: 10 }, () => CHARS[Math.floor(Math.random() * CHARS.length)]).join('');
+  $('inviteCreateForm').code.value = out;
+});
+
+// ── Regions + region schedules ────────────────────────────────────────────
+state.regions = [];
+state.regionSchedules = [];
+state.expandedRegionId = null;
+
+const REGION_STATUS_LABEL = { pending: '대기', approved: '활성', disabled: '비활성' };
+const SOURCE_LABEL = {
+  all_light: 'all_light (다방+직방+당근)',
+  naver: 'naver',
+  dabang: 'dabang',
+  zigbang: 'zigbang',
+  daangn: 'daangn',
+};
+
+function fmtCoord(lat, lng) {
+  const f = v => (Number(v) || 0).toFixed(5);
+  return `${f(lat)}, ${f(lng)}`;
+}
+
+function regionSchedulesFor(regionId) {
+  return state.regionSchedules.filter(s => s.regionId === regionId);
+}
+
+function renderRegions() {
+  $('regionCount').textContent = `${state.regions.length}개`;
+  const rows = state.regions.map(r => {
+    const expanded = r.id === state.expandedRegionId;
+    return `
+      <tr data-region-id="${r.id}" class="region-row">
+        <td>
+          <span class="invite-code">${escapeHtml(r.slug)}</span><br>
+          <span class="muted">${escapeHtml(r.name)}</span>
+        </td>
+        <td>
+          <div>${escapeHtml(fmtCoord(r.centerLat, r.centerLng))}</div>
+          <div class="muted">${escapeHtml(String(r.radiusKm))} km</div>
+        </td>
+        <td><span class="region-chip ${r.status}">${REGION_STATUS_LABEL[r.status] || r.status}</span></td>
+        <td>
+          <div class="muted">cortarNo ${r.naverCortarNos.length}</div>
+          <div class="muted">daangn ${r.daangnRegionIds.length}</div>
+          <div class="muted">URL ${r.naverUrls.length}</div>
+        </td>
+        <td>${escapeHtml(r.requestedByUsername || '-')}</td>
+        <td>${escapeHtml(r.approvedByUsername || '-')}<br>
+          <span class="muted">${r.approvedAt ? escapeHtml(fmtTime(r.approvedAt)) : ''}</span></td>
+        <td>
+          <button class="btn xs" data-act="region-toggle" data-id="${r.id}">
+            ${expanded ? '닫기' : '편집'}
+          </button>
+        </td>
+      </tr>
+      ${expanded ? `<tr class="region-detail-row"><td colspan="7">${renderRegionDetail(r)}</td></tr>` : ''}
+    `;
+  });
+  $('regionRows').innerHTML = rows.join('')
+    || '<tr><td colspan="7" class="empty">등록된 지역이 없습니다.</td></tr>';
+}
+
+function renderRegionDetail(r) {
+  // ``form`` is the editable copy; submitting issues PATCH /api/admin/regions/{id}.
+  // Arrays go through textareas (one entry per line) — admin-friendlier than a
+  // JSON blob and matches how cortarNos/daangn_region_ids are pasted from
+  // browser DevTools.
+  const schedules = regionSchedulesFor(r.id);
+  const scheduleRows = schedules.length ? schedules.map(s => `
+    <div class="schedule-row" data-schedule-id="${s.id}">
+      <code>${escapeHtml(s.source)}</code>
+      <code>${escapeHtml(s.cronExpr)}</code>
+      <label style="font-size:12px"><input type="checkbox" data-act="schedule-toggle" data-id="${s.id}" ${s.enabled ? 'checked' : ''}> 활성</label>
+      <span class="muted">${s.lastRunAt ? `최근 ${escapeHtml(fmtTime(s.lastRunAt))} · ${escapeHtml(s.lastStatus || '-')}` : '미실행'}</span>
+      <button class="btn xs danger" data-act="schedule-delete" data-id="${s.id}">삭제</button>
+    </div>
+  `).join('') : '<div class="muted" style="padding:6px 0">등록된 스케줄이 없습니다.</div>';
+
+  const sourceOptions = Object.keys(SOURCE_LABEL).map(k =>
+    `<option value="${k}">${escapeHtml(SOURCE_LABEL[k])}</option>`
+  ).join('');
+
+  return `
+    <div class="region-detail" data-region-id="${r.id}">
+      <form class="region-detail-form" data-region-form="${r.id}">
+        <div><label>이름<input name="name" value="${escapeHtml(r.name)}" maxlength="80"></label></div>
+        <div><label>슬러그 (URL 식별자)<input name="slug" value="${escapeHtml(r.slug)}" maxlength="63" pattern="[a-z0-9][a-z0-9_-]{1,62}"></label></div>
+        <div><label>중심 위도<input name="center_lat" type="number" step="0.000001" min="-90" max="90" value="${r.centerLat}"></label></div>
+        <div><label>중심 경도<input name="center_lng" type="number" step="0.000001" min="-180" max="180" value="${r.centerLng}"></label></div>
+        <div><label>반경 (km)<input name="radius_km" type="number" step="0.1" min="0.1" max="50" value="${r.radiusKm}"></label></div>
+        <div><label>최대 보증금 (만원, 비우면 기본)<input name="max_deposit_manwon" type="number" min="0" value="${r.maxDepositManwon ?? ''}"></label></div>
+        <div><label>최대 월세 (만원, 비우면 기본)<input name="max_rent_manwon" type="number" min="0" value="${r.maxRentManwon ?? ''}"></label></div>
+        <div><!-- spacer --></div>
+        <div class="wide"><label>네이버 cortarNo (비워두세요 — 매 crawl 후 자동 학습됩니다)<textarea name="naver_cortar_nos" placeholder="naver 크롤러가 좌표 grid로 발견한 cortarNo를 자동으로 누적합니다. 처음에는 빈 상태가 정상.">${escapeHtml(r.naverCortarNos.join('\n'))}</textarea></label></div>
+        <div class="wide"><label>당근 region_id (한 줄에 하나, 정수, 비워두면 당근 크롤 정확도 ↓)<textarea name="daangn_region_ids" placeholder="daangn.com/kr/realty/?in=x-XXXX URL에서 XXXX 부분 (현재는 수동 입력)">${escapeHtml(r.daangnRegionIds.join('\n'))}</textarea></label></div>
+        <div class="wide"><label>네이버 ms= URL 오버라이드 (보통 비워두면 됨)<textarea name="naver_urls" placeholder="좌표+반경에서 자동 grid 생성됨. ms= URL 직접 지정이 필요할 때만 한 줄에 하나씩.">${escapeHtml(r.naverUrls.join('\n'))}</textarea></label></div>
+        <div class="wide"><label>메모<textarea name="note">${escapeHtml(r.note || '')}</textarea></label></div>
+        <div class="wide region-actions">
+          <button class="btn primary" type="submit">변경 저장</button>
+          ${r.status !== 'approved' ? `<button class="btn" type="button" data-act="region-approve" data-id="${r.id}">승인</button>` : ''}
+          ${r.status === 'approved' ? `<button class="btn" type="button" data-act="region-disable" data-id="${r.id}">비활성화</button>` : ''}
+          ${r.status === 'disabled' ? `<button class="btn" type="button" data-act="region-approve" data-id="${r.id}">재활성</button>` : ''}
+          <button class="btn danger" type="button" data-act="region-delete" data-id="${r.id}">삭제</button>
+        </div>
+        <div class="wide region-status-msg" data-region-msg="${r.id}"></div>
+      </form>
+
+      <div class="region-schedules">
+        <h3>크롤 스케줄 (cron, 5필드)</h3>
+        ${scheduleRows}
+        <form class="schedule-add" data-schedule-form="${r.id}">
+          <select name="source">${sourceOptions}</select>
+          <input name="cron_expr" placeholder="0 6,9,12,15,18 * * *" required>
+          <label style="font-size:12px"><input type="checkbox" name="enabled" checked> 활성</label>
+          <button class="btn xs primary" type="submit">추가</button>
+        </form>
+        <div class="muted" style="margin-top:6px;font-size:11px">
+          예시 — 매시간 정각: <code>0 * * * *</code> / 매일 06·09·12시: <code>0 6,9,12 * * *</code>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function loadRegions() {
+  const [regions, schedules] = await Promise.all([
+    api('/api/admin/regions').then(r => r.regions || []),
+    api('/api/admin/region-schedules').then(r => r.schedules || []),
+  ]);
+  state.regions = regions;
+  state.regionSchedules = schedules;
+  renderRegions();
+}
+
+function parseLines(value) {
+  return (value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+}
+
+function setRegionMsg(regionId, text, isErr = false) {
+  const el = document.querySelector(`[data-region-msg="${regionId}"]`);
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('err', !!isErr);
+}
+
+async function saveRegionForm(regionId, form) {
+  const fd = new FormData(form);
+  const body = {
+    name: fd.get('name'),
+    slug: fd.get('slug'),
+    center_lat: Number(fd.get('center_lat')),
+    center_lng: Number(fd.get('center_lng')),
+    radius_km: Number(fd.get('radius_km')),
+    naver_cortar_nos: parseLines(fd.get('naver_cortar_nos')),
+    daangn_region_ids: parseLines(fd.get('daangn_region_ids')).map(s => Number(s)),
+    naver_urls: parseLines(fd.get('naver_urls')),
+    max_deposit_manwon: fd.get('max_deposit_manwon') ? Number(fd.get('max_deposit_manwon')) : null,
+    max_rent_manwon: fd.get('max_rent_manwon') ? Number(fd.get('max_rent_manwon')) : null,
+    note: fd.get('note') || null,
+  };
+  setRegionMsg(regionId, '저장 중...');
+  await api(`/api/admin/regions/${regionId}`, { method: 'PATCH', body: JSON.stringify(body) });
+  await loadRegions();
+  setRegionMsg(regionId, '저장했습니다.');
+}
+
+async function setRegionStatus(regionId, status) {
+  setRegionMsg(regionId, '적용 중...');
+  await api(`/api/admin/regions/${regionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+  await loadRegions();
+}
+
+async function deleteRegionRow(regionId) {
+  const r = state.regions.find(x => x.id === regionId);
+  if (!r) return;
+  if (!confirm(`'${r.slug}' 지역을 삭제할까요? 등록된 스케줄도 함께 사라집니다.`)) return;
+  await api(`/api/admin/regions/${regionId}`, { method: 'DELETE' });
+  if (state.expandedRegionId === regionId) state.expandedRegionId = null;
+  await loadRegions();
+}
+
+async function addScheduleForm(regionId, form) {
+  const fd = new FormData(form);
+  const body = {
+    region_id: regionId,
+    source: fd.get('source'),
+    cron_expr: (fd.get('cron_expr') || '').trim(),
+    enabled: fd.get('enabled') !== null,
+  };
+  await api('/api/admin/region-schedules', { method: 'POST', body: JSON.stringify(body) });
+  if (form && typeof form.reset === 'function') form.reset();
+  await loadRegions();
+}
+
+async function toggleScheduleEnabled(scheduleId, enabled) {
+  await api(`/api/admin/region-schedules/${scheduleId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
+  await loadRegions();
+}
+
+async function deleteScheduleRow(scheduleId) {
+  if (!confirm('이 스케줄을 삭제할까요?')) return;
+  await api(`/api/admin/region-schedules/${scheduleId}`, { method: 'DELETE' });
+  await loadRegions();
+}
+
+// Wire all region/schedule actions through one delegated click handler so
+// the markup we render inside renderRegionDetail (which is replaced on
+// every loadRegions) doesn't need to rebind anything per call.
+document.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = Number(btn.dataset.id);
+  const act = btn.dataset.act;
+  let promise = null;
+  if (act === 'region-toggle') {
+    state.expandedRegionId = state.expandedRegionId === id ? null : id;
+    renderRegions();
+  } else if (act === 'region-approve') {
+    promise = setRegionStatus(id, 'approved');
+  } else if (act === 'region-disable') {
+    promise = setRegionStatus(id, 'disabled');
+  } else if (act === 'region-delete') {
+    promise = deleteRegionRow(id);
+  } else if (act === 'schedule-delete') {
+    promise = deleteScheduleRow(id);
+  }
+  if (promise) promise.catch(err => $('notice').textContent = err.message);
+});
+
+document.addEventListener('change', e => {
+  const cb = e.target.closest('input[type="checkbox"][data-act="schedule-toggle"]');
+  if (!cb) return;
+  toggleScheduleEnabled(Number(cb.dataset.id), cb.checked)
+    .catch(err => $('notice').textContent = err.message);
+});
+
+document.addEventListener('submit', e => {
+  const regionForm = e.target.closest('form[data-region-form]');
+  if (regionForm) {
+    e.preventDefault();
+    const id = Number(regionForm.dataset.regionForm);
+    saveRegionForm(id, regionForm)
+      .catch(err => setRegionMsg(id, err.message, true));
+    return;
+  }
+  const schedForm = e.target.closest('form[data-schedule-form]');
+  if (schedForm) {
+    e.preventDefault();
+    const id = Number(schedForm.dataset.scheduleForm);
+    addScheduleForm(id, schedForm)
+      .catch(err => $('notice').textContent = err.message);
+  }
+});
+
+Auth.me().then(user => {
+  state.me = user;
+  if (!user || !user.isAdmin) {
+    $('notice').textContent = '관리자 권한이 필요합니다.';
+    return;
+  }
+  loadUsers().catch(err => $('notice').textContent = err.message);
+  loadInvites().catch(err => $('notice').textContent = err.message);
+  loadRegions().catch(err => $('notice').textContent = err.message);
+});
+</script>
+</body>
+</html>

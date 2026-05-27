@@ -107,13 +107,10 @@ nav a.active-nav{background:#222;color:#fff}
     </div>
   </div>
 </div>
-<script src="data_dabang.js"></script>
-<script src="data_daangn.js"></script>
-<script src="data_zigbang.js"></script>
-<script src="data_naver.js"></script>
-<script src="listing-data-source.js"></script>
+<script src="region-data-loader.js?v=20260526-region1"></script>
+<script src="listing-data-source.js?v=20260527-zigbang-img1"></script>
 <script src="auth.js?v=20260525-auth1"></script>
-<script src="favorites.js?v=20260525-refresh"></script>
+<script src="favorites.js?v=20260526-user-guard"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script>
 const COLORS = { dabang: '#FF5C38', daangn: '#FF6F00', zigbang: '#6366F1', naver: '#03C75A' };
@@ -130,11 +127,31 @@ function fmtRent(v) {
 }
 
 // Map setup
+// Default to Ajou bbox so the map is interactive even before the region
+// metadata arrives (or if the fetch fails). The setView call below recentres
+// once the current region's coords are known.
 const map = L.map('map').setView([37.2779, 127.0438], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
 }).addTo(map);
-L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>').openPopup();
+const centerMarker = L.marker([37.280062, 127.043688])
+  .addTo(map)
+  .bindPopup('<b>아주대학교 정문</b>')
+  .openPopup();
+
+// Recenter on the active region. Without this, switching to a region whose
+// data is far away would leave the user looking at an empty Ajou viewport.
+fetch('/api/regions', { credentials: 'same-origin', cache: 'no-store' })
+  .then(r => r.ok ? r.json() : { regions: [] })
+  .then(payload => {
+    const slug = (window.RegionData && RegionData.currentSlug && RegionData.currentSlug()) || 'ajou';
+    const region = (payload.regions || []).find(r => r.slug === slug);
+    if (!region) return;
+    map.setView([region.centerLat, region.centerLng], 15);
+    centerMarker.setLatLng([region.centerLat, region.centerLng]);
+    centerMarker.setPopupContent('<b>' + (region.name || region.slug).replace(/[<>&"']/g, '') + ' 중심</b>');
+  })
+  .catch(err => console.warn('Failed to fetch region center', err));
 
 // ------- Area (polygon) filter — backed by shared AreaFilter -------
 const areaOverlay = AreaFilter.mountMapOverlay(map, { drawing: true });
@@ -247,31 +264,43 @@ function toggleFavFromPopup(id, src, btn) {
   el.addEventListener('input',  applyFilter);
 });
 
-// Load all platforms in parallel from CSV
+// Load all platforms in parallel from CSV after favorites storage is scoped to
+// the current user; popup heart state is baked into each marker's HTML.
 const SOURCES = ['dabang', 'daangn', 'zigbang', 'naver'];
 const loadStatus = document.getElementById('loadStatus');
 
-let loadedCount = 0;
-SOURCES.forEach(src => {
-  loadPlatformListings(src)
-    .then(rows => {
-      addMarkersForSource(src, rows);
-      loadedCount++;
-      if (loadedCount === SOURCES.length) {
-        loadStatus.style.display = 'none';
-        applyFilter();
-      }
-    })
-    .catch(err => {
-      console.error('Failed to load', src, err);
-      document.getElementById('cnt_' + src).textContent = '!';
-      loadedCount++;
-      if (loadedCount === SOURCES.length) {
-        loadStatus.style.display = 'none';
-        applyFilter();
-      }
-    });
-});
+function loadAllSources() {
+  let loadedCount = 0;
+  SOURCES.forEach(src => {
+    loadPlatformListings(src)
+      .then(rows => {
+        addMarkersForSource(src, rows);
+        loadedCount++;
+        if (loadedCount === SOURCES.length) {
+          loadStatus.style.display = 'none';
+          applyFilter();
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load', src, err);
+        document.getElementById('cnt_' + src).textContent = '!';
+        loadedCount++;
+        if (loadedCount === SOURCES.length) {
+          loadStatus.style.display = 'none';
+          applyFilter();
+        }
+      });
+  });
+}
+
+// Prefetch every source's data via the region-aware loader so the existing
+// loadPlatformListings (which checks window.DATA_* first) returns synchronously
+// once the region's data files are loaded. Without this prefetch the old
+// listing-data-source.js would fall back to its stale CSV paths.
+(window.Favorites && window.Favorites.ready ? window.Favorites.ready : Promise.resolve())
+  .finally(function () {
+    RegionData.loadAll(['dabang', 'daangn', 'zigbang', 'naver'], loadAllSources);
+  });
 </script>
 </body>
 </html>

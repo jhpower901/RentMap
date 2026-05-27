@@ -1,13 +1,45 @@
 (function () {
   'use strict';
 
-  const KEY = 'rentmap_favorites';
-  const DELETED_KEY = 'rentmap_favorites_deleted';
+  const LEGACY_KEY = 'rentmap_favorites';
+  const LEGACY_DELETED_KEY = 'rentmap_favorites_deleted';
+  let storageKeys = null;
+  let currentUserScope = null;
 
   function fk(id, source) { return String(source) + '::' + String(id); }
-  function load() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { return []; } }
-  function loadDeleted() { try { return JSON.parse(localStorage.getItem(DELETED_KEY) || '{}'); } catch (_) { return {}; } }
-  function saveDeleted(deleted) { localStorage.setItem(DELETED_KEY, JSON.stringify(deleted || {})); }
+  function scopedKey(base, user) {
+    if (user && user.id !== undefined && user.id !== null) return base + ':user:' + String(user.id);
+    return base + ':anonymous';
+  }
+  function configureStorage(user) {
+    const nextScope = user && user.id !== undefined && user.id !== null ? String(user.id) : 'anonymous';
+    const changed = currentUserScope !== null && currentUserScope !== nextScope;
+    currentUserScope = nextScope;
+    storageKeys = {
+      favorites: scopedKey(LEGACY_KEY, user),
+      deleted: scopedKey(LEGACY_DELETED_KEY, user),
+    };
+    return changed;
+  }
+  function ensureStorageFresh() {
+    if (!window.Auth || !window.Auth.me) {
+      if (!storageKeys) configureStorage(null);
+      return Promise.resolve(false);
+    }
+    return window.Auth.me().then(user => configureStorage(user));
+  }
+  function load() {
+    if (!storageKeys) return [];
+    try { return JSON.parse(localStorage.getItem(storageKeys.favorites) || '[]'); } catch (_) { return []; }
+  }
+  function loadDeleted() {
+    if (!storageKeys) return {};
+    try { return JSON.parse(localStorage.getItem(storageKeys.deleted) || '{}'); } catch (_) { return {}; }
+  }
+  function saveDeleted(deleted) {
+    if (!storageKeys) return;
+    localStorage.setItem(storageKeys.deleted, JSON.stringify(deleted || {}));
+  }
   function entryTime(entry) {
     const t = Date.parse(entry && entry.savedAt);
     return Number.isFinite(t) ? t : 0;
@@ -47,24 +79,33 @@
     const serverState = normalizePayload(payload);
     const deleted = mergeDeleted(loadDeleted(), serverState.deleted);
     const merged = mergeFavorites(load(), serverState.favorites, deleted);
-    localStorage.setItem(KEY, JSON.stringify(merged));
+    if (storageKeys) localStorage.setItem(storageKeys.favorites, JSON.stringify(merged));
     saveDeleted(deleted);
     window.dispatchEvent(new CustomEvent('favoritesSynced'));
     return { favorites: merged, deleted };
   }
   
   function save(favs, deleted = loadDeleted()) { 
-    localStorage.setItem(KEY, JSON.stringify(favs)); 
+    if (storageKeys) localStorage.setItem(storageKeys.favorites, JSON.stringify(favs));
     saveDeleted(deleted);
     syncToServer(favs, deleted);
   }
 
   function syncToServer(favs, deleted = loadDeleted()) {
-    return fetch('/api/favorites', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ favorites: favs, deleted })
-    })
+    return ensureStorageFresh()
+      .then(changed => {
+        const payloadFavs = changed ? load() : favs;
+        const payloadDeleted = changed ? loadDeleted() : deleted;
+        return fetch('/api/favorites', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Rentmap-User-Id': currentUserScope || '',
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ favorites: payloadFavs, deleted: payloadDeleted })
+        });
+      })
       .then(r => r.ok ? r.json() : null)
       .then(payload => {
         if (payload) applyServerState(payload);
@@ -73,10 +114,10 @@
   }
 
   function fetchServerState() {
-    return fetch('/api/favorites/state', { cache: 'no-store' })
+    return fetch('/api/favorites/state', { cache: 'no-store', credentials: 'same-origin' })
       .then(r => {
         if (r.ok) return r.json();
-        return fetch('/api/favorites', { cache: 'no-store' }).then(fallback => fallback.ok ? fallback.json() : []);
+        return fetch('/api/favorites', { cache: 'no-store', credentials: 'same-origin' }).then(fallback => fallback.ok ? fallback.json() : []);
       });
   }
 
@@ -85,7 +126,8 @@
   // pages on visibilitychange so a tab that's been backgrounded for hours
   // catches up to changes another device made in the meantime.
   function refresh() {
-    return fetchServerState()
+    return ensureStorageFresh()
+      .then(() => fetchServerState())
       .then(payload => applyServerState(payload))
       .catch(err => {
         console.warn('Favorites refresh failed:', err);
@@ -93,7 +135,8 @@
       });
   }
 
-  const ready = fetchServerState()
+  const ready = ensureStorageFresh()
+    .then(() => fetchServerState())
     .then(serverPayload => {
       const before = normalizePayload(serverPayload);
       const serverJson = JSON.stringify(before);

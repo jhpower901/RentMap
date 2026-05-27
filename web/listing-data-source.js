@@ -80,6 +80,14 @@
     }
   }
 
+  function normalizePreloadedListing(source, record) {
+    return {
+      ...record,
+      img1: normalizeImageUrl(source, firstValue(record, ["img1", "image_1"])),
+      img2: normalizeImageUrl(source, firstValue(record, ["img2", "image_2"])),
+    };
+  }
+
   function normalizeListing(source, record) {
     const listingId = firstValue(record, ["listing_no", "room_id", "item_id"]);
     const region = source === "daangn"
@@ -120,7 +128,9 @@
     if (!csvPaths) throw new Error(`Unknown listing source: ${source}`);
 
     const globalKey = 'DATA_' + source.toUpperCase();
-    if (Array.isArray(window[globalKey])) return window[globalKey];
+    if (Array.isArray(window[globalKey])) {
+      return window[globalKey].map((record) => normalizePreloadedListing(source, record));
+    }
 
     let response = null;
     let loadedPath = "";

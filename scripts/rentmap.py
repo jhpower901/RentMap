@@ -14,8 +14,10 @@ import re
 import shutil
 import sys
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
@@ -28,6 +30,11 @@ ROOT = Path(__file__).resolve().parents[1]
 # sets TZ=Asia/Seoul). Schedulers always pass --date explicitly, so this only
 # affects manual CLI invocations — and there "today" is the expected default.
 DEFAULT_DATE = datetime.now().strftime("%Y-%m-%d")
+# CSV / web file names include the area slug so different regions don't
+# overwrite each other. ``RENTMAP_AREA_NAME`` is set by region_runner to the
+# region's slug for every scheduled crawl; manual CLI invocations fall back
+# to "ajou" so existing operator habits keep working.
+DEFAULT_AREA = (os.environ.get("RENTMAP_AREA_NAME") or "ajou").strip() or "ajou"
 # Legacy hardcoded Ajou bbox — kept as documentation of the original area;
 # only DEFAULT_CENTER_LAT/LNG/RADIUS_KM are still used by the runtime.
 DEFAULT_MIN_LAT = 37.260
@@ -54,12 +61,30 @@ NAVER_DETAIL_DELAY_MS = 250        # gap between detail-API requests
 NAVER_DETAIL_RETRIES = 2           # retry count for 429/503
 NAVER_PROGRESS_EVERY = 50          # how often to log "detail: i/N"
 NAVER_DEFAULT_MAX_PAGES = 20       # list-API pages per cortarNo (100 articles/page)
+NAVER_LIST_RETRIES = 2
+NAVER_RATE_LIMIT_STATUS = 429
+NAVER_TRANSIENT_STATUS_CODES = {429, 503}
+NAVER_LIST_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+NAVER_DETAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+NAVER_RATE_POLICY_STREAK_THRESHOLD = 3
 DABANG_DEFAULT_DELAY_MS = 120      # gap between Dabang detail requests
 DABANG_DEFAULT_ZOOM = 18
 CRAWL_DETAIL_PROGRESS_EVERY = 20
+# Missing confirmation policy: a listing can recover on any successful probe.
+# If the retry probe cannot get usable data after these attempts, that probe is
+# treated as absent and the DB miss counter decides whether to remove it.
+MISSING_PROBE_ATTEMPTS = 3
+MISSING_PROBE_DELAY_SECONDS = 2.0
+NAVER_MISSING_PROBE_DELAY_SECONDS = 15.0
+NAVER_MISSING_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+RETRY_DEFERRED_EXIT = 75
 # Trig clamp so cos(lat) for the longitude conversion never hits 0 near the poles.
 COS_LAT_FLOOR = 0.01
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+DAANGN_BASE_URL = "https://realty.daangn.com"
+DAANGN_GRAPHQL_URL = "https://realty.kr.karrotmarket.com/graphql"
+DAANGN_ARTICLE_DETAIL_QUERY_HASH = "a6ca947b00f51b71850abb5757a9bf66e73dd50524352b78aed4138bc82b9ae0"
+_daangn_article_detail_query_hash_cache = ""
 
 DABANG_COLUMNS = [
     "source", "listing_no", "room_id", "url", "agency", "agent_name", "agent_phone",
@@ -1016,6 +1041,123 @@ def find_daangn_article_node(store: dict[str, Any], article_id: str) -> dict[str
     return {}
 
 
+def find_daangn_article_detail_query_hash(session: requests.Session, detail_html: str) -> str:
+    global _daangn_article_detail_query_hash_cache
+    if _daangn_article_detail_query_hash_cache:
+        return _daangn_article_detail_query_hash_cache
+
+    scan_text = detail_html.replace("\\/", "/")
+    asset_paths = sorted(set(re.findall(
+        r'(?:https://realty\.daangn\.com)?/?assets/ArticleDetail-[^"\'<>]+\.js',
+        scan_text,
+    )))
+    for asset_path in asset_paths:
+        url = asset_path if asset_path.startswith("http") else f"{DAANGN_BASE_URL}/{asset_path.lstrip('/')}"
+        try:
+            resp = session.get(
+                url,
+                headers={
+                    "User-Agent": UA,
+                    "Accept": "application/javascript,*/*",
+                    "Accept-Language": "ko-KR,ko;q=0.9",
+                    "Referer": f"{DAANGN_BASE_URL}/",
+                },
+                timeout=20,
+            )
+            resp.raise_for_status()
+            resp.encoding = "utf-8"
+        except Exception:
+            continue
+        match = re.search(
+            r'id:[`"]([0-9a-f]{64})[`"].{0,240}?name:[`"]ArticleDetailQuery[`"]',
+            resp.text,
+            re.S,
+        )
+        if match:
+            _daangn_article_detail_query_hash_cache = match.group(1)
+            return _daangn_article_detail_query_hash_cache
+
+    _daangn_article_detail_query_hash_cache = DAANGN_ARTICLE_DETAIL_QUERY_HASH
+    return _daangn_article_detail_query_hash_cache
+
+
+def get_daangn_graphql_article_detail(
+    session: requests.Session,
+    article_id: str,
+    detail_html: str,
+) -> dict[str, Any]:
+    query_hash = find_daangn_article_detail_query_hash(session, detail_html)
+    payload = {
+        "operationName": "ArticleDetailQuery",
+        "variables": {"articleId": article_id},
+        "extensions": {
+            "persistedQuery": {
+                "version": 1,
+                "sha256Hash": query_hash,
+            },
+        },
+    }
+    try:
+        resp = session.post(
+            DAANGN_GRAPHQL_URL,
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/graphql-response+json, application/json",
+                "Accept-Language": "ko-KR,ko;q=0.9",
+                "Content-Type": "application/json",
+                "Origin": DAANGN_BASE_URL,
+                "Referer": f"{DAANGN_BASE_URL}/articles/{article_id}",
+            },
+            json=payload,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        print(f"WARNING: Article {article_id} GraphQL detail failed: {exc}", file=sys.stderr)
+        return {}
+
+    article = nested(data, ["data", "articleByOriginalArticleId"], {})
+    if isinstance(article, dict) and article:
+        return article
+    errors = data.get("errors") if isinstance(data, dict) else None
+    if errors:
+        first_error = errors[0] if isinstance(errors, list) and errors else {}
+        message = to_text(first(first_error, ["message"], "unknown error"))
+        print(f"WARNING: Article {article_id} GraphQL detail returned no article: {message}", file=sys.stderr)
+    return {}
+
+
+def apply_daangn_graphql_article_detail(detail: dict[str, str], article: dict[str, Any]) -> None:
+    coord = article.get("publicCoordinate") if isinstance(article.get("publicCoordinate"), dict) else {}
+    updates = {
+        "lat": coord.get("lat", ""),
+        "lon": coord.get("lon", ""),
+        "publicAddress": article.get("publicAddress", ""),
+        "roomCnt": article.get("roomCnt", ""),
+        "bathroomCnt": article.get("bathroomCnt", ""),
+        "approvalDate": article.get("buildingApprovalDate", ""),
+        "writerType": article.get("writerTypeV2", ""),
+        "publishedAt": article.get("publishedAt", ""),
+        "updatedAt": article.get("updatedAt", ""),
+        "description": article.get("content", ""),
+    }
+    for key, value in updates.items():
+        text = to_text(value).strip()
+        if text:
+            detail[key] = text
+
+    biz_profile = article.get("bizProfile") if isinstance(article.get("bizProfile"), dict) else {}
+    agency_name = to_text(first(biz_profile, ["name", "businessCompanyName"])).strip()
+    if agency_name:
+        detail["agencyName"] = agency_name
+
+    if detail["description"] and not detail["options"]:
+        facs = [fac for fac in DAANGN_FACILITY_KEYWORDS if fac in detail["description"]]
+        if facs:
+            detail["options"] = "; ".join(facs)
+
+
 def get_daangn_article_detail(session: requests.Session, article_id: str) -> dict[str, str]:
     try:
         text = get_utf8(session, f"https://realty.daangn.com/articles/{article_id}", delay_ms=80)
@@ -1089,6 +1231,10 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
             facs = [fac for fac in DAANGN_FACILITY_KEYWORDS if fac in desc]
             if facs:
                 detail["options"] = "; ".join(facs)
+    if not detail["agencyName"] and detail.get("writerType") != "DIRECT_USER":
+        api_article = get_daangn_graphql_article_detail(session, article_id, text)
+        if api_article:
+            apply_daangn_graphql_article_detail(detail, api_article)
     body = detail["description"]
     if body:
         if text_has_any(body, ["주차 가능", "주차가능", "주차 가능합니다", "주차공간"]):
@@ -1126,7 +1272,7 @@ def get_daangn_article_detail(session: requests.Session, article_id: str) -> dic
     elif m2:
         meta = html.unescape(m2.group(1))
     parts = meta.split("\u2014", 1)
-    if len(parts) == 2:
+    if not detail["agencyName"] and len(parts) == 2:
         after = parts[1].strip()
         phone = re.search(r"\s[0-9]{2,3}-[0-9]", after)
         candidate = after[: phone.start()] if phone else after[:35]
@@ -1166,7 +1312,147 @@ def crawl_naver(args: argparse.Namespace) -> None:
     asyncio.run(crawl_naver_async(args, async_playwright))
 
 
-async def _paginate_naver_cortarno(context: Any, template_url: str, cortarno: str, headers: dict[str, str] | None, args: argparse.Namespace) -> list[Any]:
+def _retry_after_seconds(value: str | None, default_s: float) -> float:
+    if not value:
+        return max(0.0, default_s)
+    raw = value.strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    try:
+        parsed = parsedate_to_datetime(raw)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0.0, (parsed - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return max(0.0, default_s)
+
+
+def _new_naver_rate_stats() -> dict[str, Any]:
+    return {
+        "requests": Counter(),
+        "http_errors": Counter(),
+        "rate_limit_events": [],
+        "consecutive_rate_limit": 0,
+        "max_consecutive_rate_limit": 0,
+        "cooldowns": 0,
+    }
+
+
+def _naver_record_response(stats: dict[str, Any] | None, phase: str, status: int, item: str = "") -> None:
+    if stats is None:
+        return
+    stats["requests"][phase] += 1
+    if status >= 400:
+        stats["http_errors"][(phase, status)] += 1
+    if status == NAVER_RATE_LIMIT_STATUS:
+        stats["consecutive_rate_limit"] += 1
+        stats["max_consecutive_rate_limit"] = max(
+            stats["max_consecutive_rate_limit"],
+            stats["consecutive_rate_limit"],
+        )
+        events = stats["rate_limit_events"]
+        if len(events) < 12:
+            events.append({"phase": phase, "item": item})
+    else:
+        stats["consecutive_rate_limit"] = 0
+
+
+def _format_naver_counter(counter: Counter) -> str:
+    if not counter:
+        return "{}"
+    parts = []
+    for key, value in sorted(counter.items(), key=lambda kv: str(kv[0])):
+        if isinstance(key, tuple):
+            parts.append(f"{key[0]}:{key[1]}={value}")
+        else:
+            parts.append(f"{key}={value}")
+    return "{" + ", ".join(parts) + "}"
+
+
+def _naver_rate_policy(stats: dict[str, Any]) -> tuple[str, str]:
+    requests = sum(stats["requests"].values())
+    rate_limited = sum(
+        count
+        for (phase, status), count in stats["http_errors"].items()
+        if status == NAVER_RATE_LIMIT_STATUS
+    )
+    max_streak = int(stats["max_consecutive_rate_limit"] or 0)
+    if rate_limited == 0:
+        return "normal", "429 not observed during this crawl"
+    ratio = rate_limited / max(1, requests)
+    if max_streak >= NAVER_RATE_POLICY_STREAK_THRESHOLD:
+        return "cool_down_on_429", f"consecutive_429={max_streak}"
+    if ratio >= 0.05:
+        return "slow_request_rate", f"429_ratio={ratio:.1%}"
+    return "batch_retry_later", f"429_ratio={ratio:.1%} max_streak={max_streak}"
+
+
+def _log_naver_rate_summary(stats: dict[str, Any]) -> None:
+    policy, reason = _naver_rate_policy(stats)
+    rate_limited = sum(
+        count
+        for (_phase, status), count in stats["http_errors"].items()
+        if status == NAVER_RATE_LIMIT_STATUS
+    )
+    print(
+        "[naver-rate] summary "
+        f"requests={_format_naver_counter(stats['requests'])} "
+        f"http_errors={_format_naver_counter(stats['http_errors'])} "
+        f"429={rate_limited} max_consecutive_429={stats['max_consecutive_rate_limit']} "
+        f"cooldowns={stats['cooldowns']} policy={policy} reason={reason}",
+        flush=True,
+    )
+    events = stats["rate_limit_events"]
+    if events:
+        print(f"[naver-rate] first_429_events={events}", flush=True)
+
+
+def _naver_retry_wait_seconds(response: Any, attempt: int, default_s: float) -> float:
+    header = None
+    try:
+        headers = response.headers
+        header = headers.get("retry-after") or headers.get("Retry-After")
+    except Exception:
+        header = None
+    fallback = default_s if response.status == NAVER_RATE_LIMIT_STATUS else 1.5 * (attempt + 1)
+    return _retry_after_seconds(header, fallback)
+
+
+async def _naver_wait_for_retry(
+    response: Any,
+    *,
+    phase: str,
+    item: str,
+    attempt: int,
+    retries: int,
+    default_cooldown_s: float,
+    stats: dict[str, Any] | None,
+) -> bool:
+    if response.status not in NAVER_TRANSIENT_STATUS_CODES or attempt >= retries:
+        return False
+    wait_s = _naver_retry_wait_seconds(response, attempt, default_cooldown_s)
+    if stats is not None:
+        stats["cooldowns"] += 1
+    print(
+        f"[naver-rate] phase={phase} item={item} status={response.status} "
+        f"attempt={attempt + 1}/{retries + 1} wait={wait_s:.1f}s",
+        flush=True,
+    )
+    if wait_s:
+        await asyncio.sleep(wait_s)
+    return True
+
+
+async def _paginate_naver_cortarno(
+    context: Any,
+    template_url: str,
+    cortarno: str,
+    headers: dict[str, str] | None,
+    args: argparse.Namespace,
+    stats: dict[str, Any] | None = None,
+) -> list[Any]:
     """Walk pages 1..max_pages for an explicit cortarNo via direct list-API calls.
 
     Used when the env-driven cortarNo list (RENTMAP_NAVER_CORTARNOS) contains a
@@ -1179,7 +1465,25 @@ async def _paginate_naver_cortarno(context: Any, template_url: str, cortarno: st
     url_with_cn = set_query_param(template_url, "cortarNo", cortarno)
     for pg in range(1, args.max_pages + 1):
         next_url = set_query_param(url_with_cn, "page", str(pg))
-        response = await context.request.get(next_url, headers=cleaned, timeout=30000)
+        response = None
+        for attempt in range(NAVER_LIST_RETRIES + 1):
+            response = await context.request.get(next_url, headers=cleaned, timeout=30000)
+            _naver_record_response(stats, "direct-list", response.status, f"cortarNo={cortarno} page={pg}")
+            if response.ok:
+                break
+            if await _naver_wait_for_retry(
+                response,
+                phase="direct-list",
+                item=f"cortarNo={cortarno} page={pg}",
+                attempt=attempt,
+                retries=NAVER_LIST_RETRIES,
+                default_cooldown_s=NAVER_LIST_RATE_LIMIT_COOLDOWN_SECONDS,
+                stats=stats,
+            ):
+                continue
+            break
+        if response is None:
+            break
         if not response.ok:
             print(f"  [direct cortarNo={cortarno}] page {pg}: HTTP {response.status}", file=sys.stderr)
             break
@@ -1212,10 +1516,11 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
         if chrome:
             launch_options["executable_path"] = chrome
         browser = await p.chromium.launch(**launch_options)
-        context = await browser.new_context(locale="ko-KR", user_agent=UA)
+        context = await browser.new_context(locale="ko-KR", user_agent=UA, ignore_https_errors=True)
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
         article_headers: dict[str, str] | None = None
+        naver_rate_stats = _new_naver_rate_stats()
         # Captured list-API URL from the first successful navigation — used as
         # a template for direct cortarNo paginate calls (we only swap cortarNo).
         first_list_url: str | None = None
@@ -1246,7 +1551,15 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
             raw_payloads: list[Any] = []
             for idx, url in enumerate(urls, 1):
                 print(f"[crawl:naver] url_progress={idx}/{len(urls)} url={url}", flush=True)
-                one_records, payloads, cortarno = await crawl_naver_one(page, context, url, article_headers, args, seen_cortarnos)
+                one_records, payloads, cortarno = await crawl_naver_one(
+                    page,
+                    context,
+                    url,
+                    article_headers,
+                    args,
+                    seen_cortarnos,
+                    naver_rate_stats,
+                )
                 raw_payloads.extend(payloads)
                 new_count = 0
                 for record in one_records:
@@ -1271,7 +1584,7 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                 center = get_map_center(urls[0]) if urls else {"latitude": 0, "longitude": 0, "zoom": "16"}
                 print(f"[crawl:naver] direct_pass missing_cortarnos={len(missing_cortarnos)} cortarNos={missing_cortarnos}", flush=True)
                 for cn in missing_cortarnos:
-                    payloads = await _paginate_naver_cortarno(context, template, cn, article_headers, args)
+                    payloads = await _paginate_naver_cortarno(context, template, cn, article_headers, args, naver_rate_stats)
                     raw_payloads.extend(payloads)
                     seen_cortarnos.add(cn)
                     new_count = 0
@@ -1311,13 +1624,21 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                             continue
                         if i % NAVER_PROGRESS_EVERY == 0:
                             print(f"[crawl:naver] detail_progress={i}/{len(records)} enriched={detail_ok}", flush=True)
-                        detail = await fetch_naver_article_detail(context, article_no, detail_source)
+                        detail = await fetch_naver_article_detail(
+                            context,
+                            article_no,
+                            detail_source,
+                            stats=naver_rate_stats,
+                            position=i,
+                            total=len(records),
+                        )
                         if detail:
                             enrich_from_naver_detail(record, detail)
                             detail_ok += 1
                     print(f"[crawl:naver] detail_done={len(records)}/{len(records)} enriched={detail_ok}", flush=True)
             elif skip_detail:
                 print("[naver-detail] --skip-detail set; leaving list-API placeholders in place")
+            _log_naver_rate_summary(naver_rate_stats)
 
             records.sort(key=lambda r: (to_text(r["agency"]), float_or_inf(r["total_monthly_manwon"])))
             write_csv(Path(args.output_csv), records, NAVER_COLUMNS)
@@ -1325,6 +1646,18 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
             if args.raw_json:
                 Path(args.raw_json).parent.mkdir(parents=True, exist_ok=True)
                 Path(args.raw_json).write_text(json.dumps(raw_payloads, ensure_ascii=False, indent=2), encoding="utf-8")
+            # Dump discovered cortarNos so region_runner can UNION-merge them
+            # back into the region row. Written even when empty so the caller
+            # can distinguish "crawl skipped writing" from "crawl found nothing".
+            cortarnos_out = getattr(args, "cortarnos_out", "") or ""
+            if cortarnos_out:
+                try:
+                    Path(cortarnos_out).parent.mkdir(parents=True, exist_ok=True)
+                    Path(cortarnos_out).write_text(
+                        json.dumps(sorted(seen_cortarnos)), encoding="utf-8"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[crawl:naver] cortarnos-out write failed: {exc}", file=sys.stderr)
             _log_crawl_done("naver", len(records), args.output_csv, time.monotonic() - started)
         finally:
             await browser.close()
@@ -1347,11 +1680,37 @@ def find_chrome(explicit: str = "") -> str | None:
     return None
 
 
-async def crawl_naver_one(page: Any, context: Any, target_url: str, article_headers: dict[str, str] | None, args: argparse.Namespace, seen_cortarnos: set[str]) -> tuple[list[dict[str, Any]], list[Any], str]:
+async def crawl_naver_one(
+    page: Any,
+    context: Any,
+    target_url: str,
+    article_headers: dict[str, str] | None,
+    args: argparse.Namespace,
+    seen_cortarnos: set[str],
+    stats: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[Any], str]:
     center = get_map_center(target_url)
-    async with page.expect_response(lambda r: "/api/articles?" in r.url and r.status == 200, timeout=45000) as response_info:
-        await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
-    first_response = await response_info.value
+    first_response = None
+    for attempt in range(NAVER_LIST_RETRIES + 1):
+        async with page.expect_response(lambda r: "/api/articles?" in r.url, timeout=45000) as response_info:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
+        first_response = await response_info.value
+        _naver_record_response(stats, "grid-list", first_response.status, target_url)
+        if first_response.ok:
+            break
+        if await _naver_wait_for_retry(
+            first_response,
+            phase="grid-list",
+            item=target_url,
+            attempt=attempt,
+            retries=NAVER_LIST_RETRIES,
+            default_cooldown_s=NAVER_LIST_RATE_LIMIT_COOLDOWN_SECONDS,
+            stats=stats,
+        ):
+            continue
+        raise RuntimeError(f"Naver article API request failed: {first_response.status}")
+    if first_response is None:
+        raise RuntimeError("Naver article API request failed: no response captured")
     first_url = first_response.url
     request_headers = await first_response.request.all_headers()
     print(f"  captured: {first_url}")
@@ -1359,6 +1718,7 @@ async def crawl_naver_one(page: Any, context: Any, target_url: str, article_head
         first_json = await first_response.json()
     except Exception:
         response = await context.request.get(first_url, headers=clean_headers(request_headers or article_headers), timeout=30000)
+        _naver_record_response(stats, "grid-list-json-retry", response.status, first_url)
         if not response.ok:
             raise RuntimeError(f"Naver article API request failed: {response.status}")
         first_json = await response.json()
@@ -1377,7 +1737,25 @@ async def crawl_naver_one(page: Any, context: Any, target_url: str, article_head
         page_no = 2
         while page_no <= args.max_pages and first_json.get("isMoreData"):
             next_url = set_query_param(first_url, "page", str(page_no))
-            response = await context.request.get(next_url, headers=clean_headers(request_headers or article_headers), timeout=30000)
+            response = None
+            for attempt in range(NAVER_LIST_RETRIES + 1):
+                response = await context.request.get(next_url, headers=clean_headers(request_headers or article_headers), timeout=30000)
+                _naver_record_response(stats, "grid-list-page", response.status, f"cortarNo={cortarno} page={page_no}")
+                if response.ok:
+                    break
+                if await _naver_wait_for_retry(
+                    response,
+                    phase="grid-list-page",
+                    item=f"cortarNo={cortarno} page={page_no}",
+                    attempt=attempt,
+                    retries=NAVER_LIST_RETRIES,
+                    default_cooldown_s=NAVER_LIST_RATE_LIMIT_COOLDOWN_SECONDS,
+                    stats=stats,
+                ):
+                    continue
+                break
+            if response is None:
+                break
             if not response.ok:
                 break
             payload = await response.json()
@@ -1643,7 +2021,16 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
     }
 
 
-async def fetch_naver_article_detail(context: Any, article_no: str, headers: dict[str, str] | None, delay_ms: int = NAVER_DETAIL_DELAY_MS, retries: int = NAVER_DETAIL_RETRIES) -> dict[str, Any]:
+async def fetch_naver_article_detail(
+    context: Any,
+    article_no: str,
+    headers: dict[str, str] | None,
+    delay_ms: int = NAVER_DETAIL_DELAY_MS,
+    retries: int = NAVER_DETAIL_RETRIES,
+    stats: dict[str, Any] | None = None,
+    position: int | None = None,
+    total: int | None = None,
+) -> dict[str, Any]:
     """Fetch one Naver Land article's detail-API payload, with light retry.
 
     Naver returns the full ``articleDetail``/``articleOneroom``/``articleFacility``/
@@ -1653,15 +2040,24 @@ async def fetch_naver_article_detail(context: Any, article_no: str, headers: dic
     """
     url = f"https://new.land.naver.com/api/articles/{article_no}"
     cleaned = clean_headers(headers)
+    item = f"{article_no} {position}/{total}" if position and total else article_no
     for attempt in range(retries + 1):
         try:
             response = await context.request.get(url, headers=cleaned, timeout=20000)
+            _naver_record_response(stats, "detail", response.status, item)
             if delay_ms:
                 await asyncio.sleep(delay_ms / 1000)
             if response.ok:
                 return await response.json()
-            if response.status in (429, 503) and attempt < retries:
-                await asyncio.sleep(1.5 * (attempt + 1))
+            if await _naver_wait_for_retry(
+                response,
+                phase="detail",
+                item=item,
+                attempt=attempt,
+                retries=retries,
+                default_cooldown_s=NAVER_DETAIL_RATE_LIMIT_COOLDOWN_SECONDS,
+                stats=stats,
+            ):
                 continue
             print(f"  [naver-detail] {article_no}: HTTP {response.status}", file=sys.stderr)
             return {}
@@ -2070,6 +2466,15 @@ def _probe_daangn_missing(session: requests.Session, row: dict[str, Any]) -> boo
     return article_id in resp.text
 
 
+class ProbeRateLimited(RuntimeError):
+    def __init__(self, platform: str, listing_no: str, status: int, retry_after_s: float | None = None):
+        self.platform = platform
+        self.listing_no = listing_no
+        self.status = status
+        self.retry_after_s = retry_after_s
+        super().__init__(f"{platform}:{listing_no} rate limited with HTTP {status}")
+
+
 def _probe_naver_missing(session: requests.Session, row: dict[str, Any]) -> bool | None:
     article_no = str(row.get("listing_no") or row.get("room_id") or "").strip()
     if not article_no:
@@ -2084,20 +2489,46 @@ def _probe_naver_missing(session: requests.Session, row: dict[str, Any]) -> bool
             },
             timeout=20,
         )
-    except Exception:
+    except Exception as exc:
+        print(f"[reconcile] retry-missing naver_land:{article_no} api_error={exc}", flush=True)
         return None
     if resp.status_code in {400, 404, 410}:
         return False
+    if resp.status_code == NAVER_RATE_LIMIT_STATUS:
+        retry_after = resp.headers.get("Retry-After")
+        retry_after_s = _retry_after_seconds(retry_after, NAVER_MISSING_RATE_LIMIT_COOLDOWN_SECONDS) if retry_after else None
+        cooldown_text = f"{retry_after_s:.1f}s" if retry_after_s is not None else "default"
+        print(
+            f"[reconcile] retry-missing naver_land:{article_no} "
+            f"api_status={resp.status_code} retry_after={retry_after or '-'} cooldown={cooldown_text}",
+            flush=True,
+        )
+        raise ProbeRateLimited("naver_land", article_no, resp.status_code, retry_after_s)
+    if resp.status_code in {500, 502, 503, 504}:
+        retry_after = resp.headers.get("Retry-After")
+        suffix = f" retry_after={retry_after}s" if retry_after else ""
+        print(
+            f"[reconcile] retry-missing naver_land:{article_no} "
+            f"api_status={resp.status_code}{suffix}",
+            flush=True,
+        )
+        return None
     if resp.status_code >= 400:
+        print(
+            f"[reconcile] retry-missing naver_land:{article_no} "
+            f"api_status={resp.status_code}",
+            flush=True,
+        )
         return None
     try:
         payload = resp.json()
-    except ValueError:
+    except ValueError as exc:
+        print(f"[reconcile] retry-missing naver_land:{article_no} bad_json={exc}", flush=True)
         return None
     return bool(isinstance(payload, dict) and payload.get("articleDetail"))
 
 
-def _probe_missing_row(session: requests.Session, row: dict[str, Any]) -> bool | None:
+def _probe_missing_row_once(session: requests.Session, row: dict[str, Any]) -> bool | None:
     platform = row.get("_platform_code")
     if platform == "dabang":
         return _probe_dabang_missing(session, row)
@@ -2110,7 +2541,62 @@ def _probe_missing_row(session: requests.Session, row: dict[str, Any]) -> bool |
     return None
 
 
-def retry_missing(args: argparse.Namespace) -> None:
+def _missing_probe_delay(platform: str, attempt: int, default_delay_s: float, naver_delay_s: float) -> float:
+    base = naver_delay_s if platform == "naver_land" else default_delay_s
+    return max(0.0, base * attempt)
+
+
+def _probe_missing_row(
+    session: requests.Session,
+    row: dict[str, Any],
+    attempts: int,
+    default_delay_s: float,
+    naver_delay_s: float,
+    rate_limit_cooldown_s: float,
+) -> bool:
+    platform = str(row.get("_platform_code") or "")
+    listing_no = str(row.get("listing_no") or row.get("room_id") or "").strip()
+    max_attempts = max(1, attempts)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = _probe_missing_row_once(session, row)
+        except ProbeRateLimited as exc:
+            wait_s = exc.retry_after_s if exc.retry_after_s is not None else rate_limit_cooldown_s
+            if attempt < max_attempts:
+                print(
+                    f"[reconcile] retry-missing {platform}:{listing_no} "
+                    f"probe=rate-limited attempt={attempt}/{max_attempts} wait={wait_s:.1f}s",
+                    flush=True,
+                )
+                if wait_s:
+                    time.sleep(wait_s)
+                continue
+            print(
+                f"[reconcile] retry-missing {platform}:{listing_no} "
+                f"probe=rate-limited attempts={max_attempts}; deferring batch",
+                flush=True,
+            )
+            raise
+        if result is not None:
+            return result
+        if attempt < max_attempts:
+            wait_s = _missing_probe_delay(platform, attempt, default_delay_s, naver_delay_s)
+            print(
+                f"[reconcile] retry-missing {platform}:{listing_no} "
+                f"probe=unknown attempt={attempt}/{max_attempts} wait={wait_s:.1f}s",
+                flush=True,
+            )
+            if wait_s:
+                time.sleep(wait_s)
+    print(
+        f"[reconcile] retry-missing {platform}:{listing_no} "
+        f"probe=no-data attempts={max_attempts}; treating as absent",
+        flush=True,
+    )
+    return False
+
+
+def retry_missing(args: argparse.Namespace) -> int:
     """Probe only listings already marked missing and update that retry queue."""
     try:
         from db import session
@@ -2126,19 +2612,38 @@ def retry_missing(args: argparse.Namespace) -> None:
         flush=True,
     )
     by_platform: dict[str, dict[str, Any]] = {
-        code: {"found": [], "probed": [], "unknown": 0}
+        code: {"found": [], "probed": [], "unknown": 0, "rate_limited": 0}
         for code in platform_codes
     }
     http = requests.Session()
+    probe_attempts = max(1, int(args.probe_attempts))
+    probe_delay_s = max(0.0, float(args.probe_delay_seconds))
+    naver_probe_delay_s = max(0.0, float(args.naver_probe_delay_seconds))
+    naver_rate_limit_cooldown_s = max(0.0, float(args.naver_rate_limit_cooldown_seconds))
+    deferred_by_rate_limit = False
     for idx, row in enumerate(candidates, 1):
         platform = str(row.get("_platform_code") or "")
         listing_no = str(row.get("listing_no") or "")
-        result = _probe_missing_row(http, row)
-        if result is None:
-            by_platform.setdefault(platform, {"found": [], "probed": [], "unknown": 0})["unknown"] += 1
-            print(f"[reconcile] retry-missing {platform}:{listing_no} probe=unknown", flush=True)
-            continue
-        bucket = by_platform.setdefault(platform, {"found": [], "probed": [], "unknown": 0})
+        bucket = by_platform.setdefault(platform, {"found": [], "probed": [], "unknown": 0, "rate_limited": 0})
+        try:
+            result = _probe_missing_row(
+                http,
+                row,
+                attempts=probe_attempts,
+                default_delay_s=probe_delay_s,
+                naver_delay_s=naver_probe_delay_s,
+                rate_limit_cooldown_s=naver_rate_limit_cooldown_s,
+            )
+        except ProbeRateLimited:
+            bucket["unknown"] += 1
+            bucket["rate_limited"] += 1
+            deferred_by_rate_limit = True
+            print(
+                f"[reconcile] retry-missing {platform}:{listing_no} "
+                "batch_deferred=rate_limited; leaving unresolved missing rows queued",
+                flush=True,
+            )
+            break
         bucket["probed"].append(listing_no)
         if result:
             bucket["found"].append(row)
@@ -2146,15 +2651,13 @@ def retry_missing(args: argparse.Namespace) -> None:
             print(f"[reconcile] retry-missing progress={idx}/{len(candidates)}", flush=True)
 
     retry_at = datetime.now(timezone.utc)
-    total_unknown = 0
     with session() as conn:
         for platform_code in platform_codes:
-            bucket = by_platform.get(platform_code) or {"found": [], "probed": [], "unknown": 0}
-            total_unknown += int(bucket["unknown"])
+            bucket = by_platform.get(platform_code) or {"found": [], "probed": [], "unknown": 0, "rate_limited": 0}
             if not bucket["probed"]:
                 print(
                     f"[reconcile] retry-missing {platform_code}: probed=0 "
-                    f"found=0 unknown={bucket['unknown']}",
+                    f"found=0 unknown={bucket['unknown']} rate_limited={bucket['rate_limited']}",
                     flush=True,
                 )
                 continue
@@ -2173,6 +2676,7 @@ def retry_missing(args: argparse.Namespace) -> None:
                 f"missing={summary.missing} removed={summary.removed} "
                 f"unchanged={summary.unchanged} price={summary.price_changed} "
                 f"detail={summary.detail_changed} unknown={bucket['unknown']} "
+                f"rate_limited={bucket['rate_limited']} "
                 f"errors={len(summary.errors)}",
                 flush=True,
             )
@@ -2180,8 +2684,7 @@ def retry_missing(args: argparse.Namespace) -> None:
             conn.rollback()
         else:
             conn.commit()
-    if total_unknown:
-        raise SystemExit(2)
+    return RETRY_DEFERRED_EXIT if deferred_by_rate_limit else 0
 
 
 def _read_csv_lenient(data_dir: Path, prefix: str, target_date: str, label: str) -> list[dict[str, str]]:
@@ -2339,10 +2842,14 @@ def gen_web(args: argparse.Namespace) -> None:
     tpl_index = (tpl_dir / "_tpl_index.html").read_text(encoding="utf-8")
 
     src = args.source
-    dabang = _read_for_gen_web(src, data_dir, "dabang_ajou", args.date, "dabang", "dabang")
-    daangn = _read_for_gen_web(src, data_dir, "daangn_ajou", args.date, "daangn", "daangn")
-    zigbang = _read_for_gen_web(src, data_dir, "zigbang_ajou", args.date, "zigbang", "zigbang")
-    naver = _read_for_gen_web(src, data_dir, "naver_land_ajou", args.date, "naver", "naver_land")
+    # Prefix tracks the same DEFAULT_AREA the crawlers wrote to so a region
+    # crawl + gen-web in the same env (region_runner injects RENTMAP_AREA_NAME)
+    # round-trips through the right files. Manual CLI invocations still get
+    # "ajou" so legacy operator habits keep working.
+    dabang = _read_for_gen_web(src, data_dir, f"dabang_{DEFAULT_AREA}", args.date, "dabang", "dabang")
+    daangn = _read_for_gen_web(src, data_dir, f"daangn_{DEFAULT_AREA}", args.date, "daangn", "daangn")
+    zigbang = _read_for_gen_web(src, data_dir, f"zigbang_{DEFAULT_AREA}", args.date, "zigbang", "zigbang")
+    naver = _read_for_gen_web(src, data_dir, f"naver_land_{DEFAULT_AREA}", args.date, "naver", "naver_land")
     print(f"Loaded ({src}): dabang={len(dabang)} daangn={len(daangn)} zigbang={len(zigbang)} naver={len(naver)}")
 
     js_dabang = js_array([normal_common(r, "dabang") for r in dabang])
@@ -2350,17 +2857,28 @@ def gen_web(args: argparse.Namespace) -> None:
     js_zigbang = js_array([normal_common(r, "zigbang") for r in zigbang])
     js_naver = js_array([normal_common(r, "naver") for r in naver])
 
-    write_platform(out_dir / "dabang.html", tpl_platform, "dabang", "#FF5C38", js_dabang)
-    write_platform(out_dir / "daangn.html", tpl_platform, "daangn", "#FF6F00", js_daangn)
-    write_platform(out_dir / "zigbang.html", tpl_platform, "zigbang", "#6366F1", js_zigbang)
-    write_platform(out_dir / "naver.html", tpl_platform, "naver", "#03C75A", js_naver)
+    # Platform templates no longer bake the data inline — they load
+    # ``data_<source>_<slug>.js`` at boot via region-data-loader.js so a
+    # single HTML page can render any approved region. We still pass "[]"
+    # to write_platform for backward compatibility with the legacy
+    # __DATA__ placeholder (template doesn't reference it anymore, so this
+    # is a no-op string replace).
+    write_platform(out_dir / "dabang.html", tpl_platform, "dabang", "#FF5C38", "[]")
+    write_platform(out_dir / "daangn.html", tpl_platform, "daangn", "#FF6F00", "[]")
+    write_platform(out_dir / "zigbang.html", tpl_platform, "zigbang", "#6366F1", "[]")
+    write_platform(out_dir / "naver.html", tpl_platform, "naver", "#03C75A", "[]")
 
-    (out_dir / "data_dabang.js").write_text(f"window.DATA_DABANG = {js_dabang};", encoding="utf-8")
-    (out_dir / "data_daangn.js").write_text(f"window.DATA_DAANGN = {js_daangn};", encoding="utf-8")
-    (out_dir / "data_zigbang.js").write_text(f"window.DATA_ZIGBANG = {js_zigbang};", encoding="utf-8")
-    (out_dir / "data_naver.js").write_text(f"window.DATA_NAVER = {js_naver};", encoding="utf-8")
+    # Data files are per-region; the slug suffix matches the one
+    # region-data-loader.js asks for at runtime. region_runner sets
+    # RENTMAP_AREA_NAME to the region's slug before invoking gen-web, so
+    # one gen-web call per region writes one set of data files.
+    slug = DEFAULT_AREA
+    (out_dir / f"data_dabang_{slug}.js").write_text(f"window.DATA_DABANG = {js_dabang};", encoding="utf-8")
+    (out_dir / f"data_daangn_{slug}.js").write_text(f"window.DATA_DAANGN = {js_daangn};", encoding="utf-8")
+    (out_dir / f"data_zigbang_{slug}.js").write_text(f"window.DATA_ZIGBANG = {js_zigbang};", encoding="utf-8")
+    (out_dir / f"data_naver_{slug}.js").write_text(f"window.DATA_NAVER = {js_naver};", encoding="utf-8")
     (out_dir / "index.html").write_text(tpl_index, encoding="utf-8")
-    print(f"Wrote web files to {out_dir}")
+    print(f"Wrote web files to {out_dir} (region={slug})")
 
 
 def normal_common(r: dict[str, str], source: str) -> dict[str, Any]:
@@ -2518,7 +3036,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--zoom", type=int, default=DABANG_DEFAULT_ZOOM)
     p.add_argument("--max-deposit", type=int, default=default_max_deposit())
     p.add_argument("--max-rent", type=int, default=default_max_rent())
-    p.add_argument("--output-csv", default=str(ROOT / "data" / f"dabang_ajou_{DEFAULT_DATE}.csv"))
+    p.add_argument("--output-csv", default=str(ROOT / "data" / f"dabang_{DEFAULT_AREA}_{DEFAULT_DATE}.csv"))
     p.add_argument("--raw-json", default="")
     p.add_argument("--delay-ms", type=int, default=DABANG_DEFAULT_DELAY_MS)
     p.set_defaults(func=crawl_dabang)
@@ -2528,14 +3046,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--geohashes", nargs="+", default=DEFAULT_ZIGBANG_GEOHASHES)
     p.add_argument("--max-deposit-manwon", type=int, default=default_max_deposit())
     p.add_argument("--max-rent-manwon", type=int, default=default_max_rent())
-    p.add_argument("--output-csv", default=str(ROOT / "data" / f"zigbang_ajou_{DEFAULT_DATE}.csv"))
+    p.add_argument("--output-csv", default=str(ROOT / "data" / f"zigbang_{DEFAULT_AREA}_{DEFAULT_DATE}.csv"))
     p.set_defaults(func=crawl_zigbang)
 
     p = sub.add_parser("crawl-daangn")
     p.add_argument("--region-ids", nargs="+", type=int, default=default_daangn_region_ids())
     p.add_argument("--max-deposit", type=int, default=default_max_deposit())
     p.add_argument("--max-rent", type=int, default=default_max_rent())
-    p.add_argument("--output-csv", default=str(ROOT / "data" / f"daangn_ajou_{DEFAULT_DATE}.csv"))
+    p.add_argument("--output-csv", default=str(ROOT / "data" / f"daangn_{DEFAULT_AREA}_{DEFAULT_DATE}.csv"))
     p.add_argument("--skip-detail", action="store_true")
     add_common_bbox(p)  # bbox filter applied post-fetch; defaults to env-based centre/radius
     p.set_defaults(func=crawl_daangn)
@@ -2543,7 +3061,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("crawl-naver")
     add_common_bbox(p)
     p.add_argument("--url", dest="urls", action="append", default=[])
-    p.add_argument("--output-csv", default=str(ROOT / "data" / f"naver_land_ajou_{DEFAULT_DATE}.csv"))
+    p.add_argument("--output-csv", default=str(ROOT / "data" / f"naver_land_{DEFAULT_AREA}_{DEFAULT_DATE}.csv"))
     p.add_argument("--raw-json", default="")
     # See NAVER_DEFAULT_MAX_PAGES — covers ~2000 articles per cortarNo. 5
     # (the old default) left isMoreData=True on 91% of payloads at this radius.
@@ -2551,6 +3069,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--chrome-path", default="")
     p.add_argument("--headed", action="store_true")
     p.add_argument("--skip-home", action="store_true")
+    # If set, dump the set of cortarNos the grid pass actually resolved to as
+    # a JSON array at this path. region_runner reads it after the crawl and
+    # UNION-merges into regions.naver_cortar_nos so subsequent runs benefit
+    # from the cortarNo backstop without an admin having to look them up
+    # by hand. Empty file ("[]") is fine — caller treats that as "first
+    # crawl found nothing new", not an error.
+    p.add_argument("--cortarnos-out", default="",
+                   help="Dump discovered cortarNos as JSON to this path.")
     # --skip-detail: skip the per-article detail-API enrichment pass. Useful for
     # fast smoke tests; production crawls should leave it off so address/phone/
     # parking/move-in/room/structure/description fields get populated.
@@ -2584,6 +3110,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--platform", action="append", required=True)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--dry-run-webhooks", action="store_true")
+    p.add_argument("--probe-attempts", type=int, default=env_int("RENTMAP_MISSING_PROBE_ATTEMPTS", MISSING_PROBE_ATTEMPTS))
+    p.add_argument("--probe-delay-seconds", type=float, default=env_float("RENTMAP_MISSING_PROBE_DELAY_SECONDS", MISSING_PROBE_DELAY_SECONDS))
+    p.add_argument("--naver-probe-delay-seconds", type=float, default=env_float("RENTMAP_NAVER_MISSING_PROBE_DELAY_SECONDS", NAVER_MISSING_PROBE_DELAY_SECONDS))
+    p.add_argument("--naver-rate-limit-cooldown-seconds", type=float, default=env_float("RENTMAP_NAVER_RATE_LIMIT_COOLDOWN_SECONDS", NAVER_MISSING_RATE_LIMIT_COOLDOWN_SECONDS))
     p.set_defaults(func=retry_missing)
 
     p = sub.add_parser("crawl-all")
@@ -2593,12 +3123,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--radius-km", type=float, default=None)
     p.add_argument("--skip-naver", action="store_true")
     p.add_argument("--gen-web", action="store_true")
+    p.add_argument("--gen-web-after-each", action="store_true")
     p.set_defaults(func=crawl_all)
     return parser
 
 
 def _data_csv(prefix: str, date: str) -> str:
-    return str(ROOT / "data" / f"{prefix}_ajou_{date}.csv")
+    return str(ROOT / "data" / f"{prefix}_{DEFAULT_AREA}_{date}.csv")
 
 
 def _bbox_kwargs(bbox: tuple[float, float, float, float]) -> dict[str, Any]:
@@ -2639,14 +3170,19 @@ def _naver_args(date: str, bbox: tuple[float, float, float, float]) -> argparse.
     return argparse.Namespace(
         urls=[],
         output_csv=_data_csv("naver_land", date),
-        raw_json=str(ROOT / "data" / f"naver_land_ajou_{date}.raw.json"),
+        raw_json=str(ROOT / "data" / f"naver_land_{DEFAULT_AREA}_{date}.raw.json"),
         max_pages=NAVER_DEFAULT_MAX_PAGES, chrome_path="",
         headed=False, skip_home=True, skip_detail=False,
         **_bbox_kwargs(bbox),
     )
 
 
-def _run_parallel_crawlers(jobs: list[tuple[str, Any, argparse.Namespace]]) -> dict[str, BaseException | None]:
+def _run_parallel_crawlers(
+    jobs: list[tuple[str, Any, argparse.Namespace]],
+    *,
+    gen_web_after_each: bool = False,
+    date_for_gen_web: str = DEFAULT_DATE,
+) -> dict[str, BaseException | None]:
     """Run each (label, fn, ns) job on its own thread and return per-job result.
 
     - Each crawler creates its own ``requests.Session()`` inside its body, so
@@ -2669,6 +3205,12 @@ def _run_parallel_crawlers(jobs: list[tuple[str, Any, argparse.Namespace]]) -> d
             try:
                 fut.result()
                 print(f"[crawl-all] [{label}] done at +{elapsed:.1f}s", flush=True)
+                if gen_web_after_each:
+                    print(f"[crawl-all] [{label}] gen-web refresh after crawler completion", flush=True)
+                    try:
+                        gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=date_for_gen_web, source="auto"))
+                    except Exception as exc:
+                        print(f"[crawl-all] [{label}] gen-web refresh failed: {exc}", file=sys.stderr, flush=True)
             except BaseException as exc:
                 errors[label] = exc
                 print(f"[crawl-all] [{label}] FAILED at +{elapsed:.1f}s: {exc}", file=sys.stderr, flush=True)
@@ -2690,7 +3232,8 @@ def crawl_all(args: argparse.Namespace) -> None:
         f"date={args.date} area={_target_area()} "
         f"bbox=(lat={min_lat:.6f}..{max_lat:.6f} lng={min_lng:.6f}..{max_lng:.6f}) "
         f"max_deposit={_fmt_limit(max_deposit)} max_rent={_fmt_limit(max_rent)} "
-        f"skip_naver={args.skip_naver} gen_web={args.gen_web}",
+        f"skip_naver={args.skip_naver} gen_web={args.gen_web} "
+        f"gen_web_after_each={args.gen_web_after_each}",
         flush=True,
     )
 
@@ -2706,14 +3249,18 @@ def crawl_all(args: argparse.Namespace) -> None:
         # by Daangn region-ID are excluded post-fetch.
         ("daangn",  crawl_daangn,  _daangn_args(args.date, bbox, max_deposit, max_rent)),
     ]
-    errors = _run_parallel_crawlers(jobs)
+    errors = _run_parallel_crawlers(
+        jobs,
+        gen_web_after_each=args.gen_web_after_each,
+        date_for_gen_web=args.date,
+    )
     failed = [label for label, exc in errors.items() if exc is not None]
     print(f"[crawl-all] crawler_summary ok={len(jobs) - len(failed)} failed={failed or []}", flush=True)
 
     if not args.skip_naver:
         crawl_naver(_naver_args(args.date, bbox))
     if args.gen_web:
-        gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=args.date))
+        gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=args.date, source="auto"))
     print(f"[crawl-all] DONE elapsed={time.monotonic() - started:.1f}s", flush=True)
 
 
@@ -2723,8 +3270,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if hasattr(args, "center_lat"):
             args = apply_center_radius(args)
-        args.func(args)
-        return 0
+        result = args.func(args)
+        return int(result or 0)
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

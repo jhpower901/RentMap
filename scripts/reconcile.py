@@ -356,9 +356,10 @@ def normalize_row(platform_code: str, row: dict[str, Any]) -> dict[str, Any]:
 # Core: per-listing diff
 # ─────────────────────────────────────────────────────────────────────────────
 
-# A missing listing is held in the lightweight retry queue for this many
-# consecutive crawl misses. If it is still absent after the retries, it is
-# marked removed and the single removal event becomes the user-facing alert.
+# A missing listing is held in the lightweight retry queue. A later crawl or
+# retry probe that finds it resets miss_count to 0 via _upsert_listing(); only
+# three consecutive no-data/absent checks remove it and emit the user-facing
+# alert.
 MISSING_RETRY_LIMIT = 2
 REMOVE_AFTER_MISS_COUNT = MISSING_RETRY_LIMIT + 1
 
@@ -774,8 +775,9 @@ def _process_missing(
     """Find listings that were active/missing but didn't show up in this run.
 
     Bumps miss_count and uses ``current_status = 'missing'`` as a lightweight
-    retry queue. The first two misses stay quiet; the next miss marks the row
-    as removed and emits the only user-facing deletion event.
+    retry queue. Any successful future crawl/probe resets the row to active;
+    only three consecutive no-data/absent checks mark it removed and emit the
+    user-facing deletion event.
 
     For backfill (single-run replay) the seen set is the entire CSV — listings
     in the DB but not in the CSV genuinely disappeared since the last replay.

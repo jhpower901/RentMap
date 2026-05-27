@@ -1,11 +1,18 @@
 """Standalone scheduler for the naver crawler.
 
-Runs inside the playwright-based image (Dockerfile.naver). Every hour at :00
-KST, in lock-step with the main `rentmap-server` container which crawls the
-other three sources at the same time. Both containers share `./data`, so
-the `rentmap-server`'s gen-web cron (at :50) picks up whichever
-naver CSV is currently on disk — and gen-web falls back to the most recent
-naver CSV if the current run hasn't finished yet.
+Runs inside the playwright-based image (Dockerfile.naver). Naver is more
+rate-sensitive than the other sources, so it gets its own container with a
+heavier image — but the scheduling model is identical to the server
+container's: a 30s DB sync loop reconciles APScheduler's job set against
+``region_schedules`` rows whose source is in ``ALLOWED_SOURCES_NAVER``
+(just ``naver``).
+
+What this container additionally owns:
+
+- Missing-retry + finalize for the ``naver_land`` platform on an hourly
+  cron, separate from any region-scoped crawl.
+- Webhook flush after the retry cycle (region_runner already flushes after
+  a normal crawl).
 """
 
 from __future__ import annotations
@@ -21,31 +28,66 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 ROOT = Path(__file__).resolve().parent.parent
 RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 NAVER_PLATFORM_CODES = ("naver_land",)
-MISSING_RETRY_LIMIT = 2
+MISSING_RETRY_LIMIT = 1
+RETRY_DEFERRED_EXIT = 75
 CRAWL_LOCK = threading.Lock()
+
+# Sources this container is the sole owner of. server.py handles the
+# lightweight 3-source bundle; naver here is the only thing we touch so a
+# single ``region_schedules`` row is safe to read from both containers.
+ALLOWED_SOURCES_NAVER: tuple[str, ...] = ("naver",)
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import region_runner  # noqa: E402
+import region_scheduler_sync  # noqa: E402
+
+
+def _run_rentmap(args: list[str], *, timeout_s: int, label: str) -> int | None:
+    """Invoke rentmap.py with the inherited env. Returns exit code or None."""
+    started = time.monotonic()
+    command = " ".join(args)
+    print(f"[naver-scheduler] {label}: START rentmap {command}", flush=True)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(RENTMAP_CLI), *args],
+            cwd=str(ROOT),
+            check=False,
+            timeout=timeout_s,
+        )
+        elapsed = time.monotonic() - started
+        status = "OK" if result.returncode == 0 else "FAILED"
+        print(f"[naver-scheduler] {label}: {status} exit={result.returncode} elapsed={elapsed:.1f}s rentmap {command}", flush=True)
+        return result.returncode
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started
+        print(f"[naver-scheduler] {label}: TIMEOUT after {elapsed:.1f}s limit={timeout_s}s rentmap {command}: {exc}", flush=True)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        elapsed = time.monotonic() - started
+        print(f"[naver-scheduler] {label}: ERROR after {elapsed:.1f}s rentmap {command}: {exc}", flush=True)
+        return None
 
 
 def run_webhook_flush(trigger: str = "manual") -> None:
     """Drain pending listing_status_events to Discord after naver reconcile."""
     try:
-        sys.path.insert(0, str(ROOT / "scripts"))
         from webhook_worker import flush_once  # noqa: WPS433
         counts = flush_once()
         nonzero = {k: v for k, v in counts.items() if v}
         if nonzero:
             print(f"[naver-scheduler] webhook-flush[{trigger}]: {nonzero}", flush=True)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"[naver-scheduler] webhook-flush failed: {exc}", flush=True)
 
 
 def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
     try:
-        sys.path.insert(0, str(ROOT / "scripts"))
         from db import session  # noqa: WPS433
         with session() as conn, conn.cursor() as cur:
             cur.execute(
@@ -64,164 +106,115 @@ def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
         return 0
 
 
-def _run_naver_command(out_csv: Path, raw_json: Path, label: str) -> int | None:
-    started = time.monotonic()
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(RENTMAP_CLI),
-                "crawl-naver",
-                "--output-csv", str(out_csv),
-                "--raw-json", str(raw_json),
-                # 20 pages × 100 articles = up to 2000 per cortarNo. cortarNo dedup
-                # inside rentmap.py keeps total pagination calls bounded.
-                "--max-pages", "20",
-                "--skip-home",
-            ],
-            cwd=str(ROOT),
-            check=False,
-            # 45 min: list crawl (~5min) + detail-API enrichment for ~1000 bbox
-            # articles at ~250ms each (~5min) leaves comfortable headroom.
-            timeout=45 * 60,
-        )
-        elapsed = time.monotonic() - started
-        status = "OK" if result.returncode == 0 else "FAILED"
-        print(f"[naver-scheduler] {label} {status} exit={result.returncode} elapsed={elapsed:.1f}s output={out_csv}", flush=True)
-        return result.returncode
-    except subprocess.TimeoutExpired as exc:
-        elapsed = time.monotonic() - started
-        print(f"[naver-scheduler] {label} TIMEOUT after {elapsed:.1f}s limit=2700s output={out_csv}: {exc}", flush=True)
-        return None
-    except Exception as exc:
-        elapsed = time.monotonic() - started
-        print(f"[naver-scheduler] {label} ERROR after {elapsed:.1f}s output={out_csv}: {exc}", flush=True)
-        return None
+def run_naver_missing_retry_cycle() -> None:
+    """Probe + finalize missing naver listings.
 
-
-def _finalize_missing() -> int | None:
-    return subprocess.run(
-        [
-            sys.executable,
-            str(RENTMAP_CLI),
-            "finalize-missing",
-            "--platform", "naver_land",
-        ],
-        cwd=str(ROOT),
-        check=False,
-        timeout=5 * 60,
-    ).returncode
-
-
-def _retry_missing() -> int | None:
-    return subprocess.run(
-        [
-            sys.executable,
-            str(RENTMAP_CLI),
-            "retry-missing",
-            "--platform", "naver_land",
-        ],
-        cwd=str(ROOT),
-        check=False,
-        timeout=10 * 60,
-    ).returncode
-
-
-def run_naver_crawl() -> None:
+    Runs on its own cron decoupled from region crawl fires — region_runner
+    handles the per-crawl webhook flush; this one cleans up listings that
+    aged out without showing up in a fresh crawl.
+    """
     if not CRAWL_LOCK.acquire(blocking=False):
-        print("[naver-scheduler] crawl-naver SKIP already running", flush=True)
+        print("[naver-scheduler] missing-retry: SKIP already running", flush=True)
         return
     try:
-        _run_naver_crawl_locked()
+        _run_naver_missing_retry_cycle_locked()
     finally:
         CRAWL_LOCK.release()
 
 
-def _run_naver_crawl_locked() -> None:
-    today = datetime.now(TZ).strftime("%Y-%m-%d")
-    out_csv = ROOT / "data" / f"naver_land_ajou_{today}.csv"
-    raw_json = ROOT / "data" / f"naver_land_ajou_{today}.raw.json"
-    started = time.monotonic()
-    area = os.environ.get("RENTMAP_AREA_NAME", "")
-    center_lat = os.environ.get("RENTMAP_CENTER_LAT", "")
-    center_lng = os.environ.get("RENTMAP_CENTER_LNG", "")
-    radius_km = os.environ.get("RENTMAP_RADIUS_KM", "")
-    max_deposit = os.environ.get("RENTMAP_MAX_DEPOSIT", "")
-    max_rent = os.environ.get("RENTMAP_MAX_RENT", "")
-    print(
-        "[naver-scheduler] crawl-naver START "
-        f"date={today} area={area or '-'} center={center_lat},{center_lng} "
-        f"radius_km={radius_km or '-'} max_deposit={max_deposit or '-'} max_rent={max_rent or '-'} "
-        f"output={out_csv}",
-        flush=True,
-    )
-    exit_code: int | None = None
-    missing_count = 0
-    for attempt in range(MISSING_RETRY_LIMIT + 1):
-        if attempt == 0:
-            label = "crawl-naver"
-            exit_code = _run_naver_command(out_csv, raw_json, label)
-        else:
-            print(f"[naver-scheduler] crawl-naver-missing-retry-{attempt} START retry-missing", flush=True)
-            try:
-                exit_code = _retry_missing()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[naver-scheduler] crawl-naver-missing-retry-{attempt} ERROR: {exc}", flush=True)
-                exit_code = None
-            status = "OK" if exit_code == 0 else "FAILED"
-            print(f"[naver-scheduler] crawl-naver-missing-retry-{attempt} {status} exit={exit_code}", flush=True)
-        if exit_code != 0:
-            break
+def _run_naver_missing_retry_cycle_locked() -> None:
+    missing_count = _missing_queue_count(NAVER_PLATFORM_CODES)
+    if missing_count == 0:
+        return
+    print(f"[naver-scheduler] missing-retry: pending={missing_count}", flush=True)
+    for attempt in range(1, MISSING_RETRY_LIMIT + 1):
+        retry_code = _run_rentmap(
+            ["retry-missing", "--platform", "naver_land"],
+            label=f"missing-retry-{attempt}",
+            timeout_s=10 * 60,
+        )
+        if retry_code == RETRY_DEFERRED_EXIT:
+            # Naver-specific exit: rate limit asked us to back off. Skip
+            # finalize so the next crawl can try again before we drop these
+            # listings entirely.
+            print(
+                "[naver-scheduler] missing-retry: deferred by Naver rate limit; "
+                "will retry on the next cycle without finalizing",
+                flush=True,
+            )
+            return
+        if retry_code != 0:
+            return
         missing_count = _missing_queue_count(NAVER_PLATFORM_CODES)
         if missing_count == 0:
-            break
-        if attempt < MISSING_RETRY_LIMIT:
-            print(
-                f"[naver-scheduler] missing-retry: pending={missing_count}; "
-                f"probing missing listings {attempt + 1}/{MISSING_RETRY_LIMIT}",
-                flush=True,
-            )
-        else:
-            print(
-                f"[naver-scheduler] missing-retry: pending={missing_count} after retries; "
-                "finalizing unresolved listings",
-                flush=True,
-            )
-    if exit_code == 0 and missing_count:
-        try:
-            finalize_code = _finalize_missing()
-        except Exception as exc:  # noqa: BLE001
-            print(f"[naver-scheduler] missing-finalize ERROR: {exc}", flush=True)
-            finalize_code = None
-        if finalize_code != 0:
-            exit_code = finalize_code
-    if exit_code == 0:
-        elapsed = time.monotonic() - started
-        print(f"[naver-scheduler] crawl-naver complete elapsed={elapsed:.1f}s output={out_csv}", flush=True)
-        run_webhook_flush(trigger="crawl-naver-complete")
+            _run_rentmap(["gen-web"], label="missing-retry-resolved/gen-web",
+                         timeout_s=5 * 60)
+            run_webhook_flush(trigger="missing-retry-resolved")
+            return
+
+    # Still pending after retries — finalize.
+    print(
+        f"[naver-scheduler] missing-retry: pending={missing_count} after retries; "
+        "finalizing unresolved listings",
+        flush=True,
+    )
+    finalize_code = _run_rentmap(
+        ["finalize-missing", "--platform", "naver_land"],
+        label="missing-finalize",
+        timeout_s=5 * 60,
+    )
+    if finalize_code == 0:
+        _run_rentmap(["gen-web"], label="missing-finalize/gen-web", timeout_s=5 * 60)
+        run_webhook_flush(trigger="missing-finalize")
 
 
 def main() -> None:
     scheduler = BlockingScheduler(timezone=TZ)
-    # Every hour at :00, in lock-step with rentmap-server's crawl cron.
+
+    def run_region_sync() -> None:
+        region_scheduler_sync.sync_schedules(
+            scheduler,
+            allowed_sources=ALLOWED_SOURCES_NAVER,
+            run_callback=region_runner.run_schedule,
+            tz=TZ,
+        )
+
+    # Region-driven scheduling: 30s DB sync reconciles jobs whose source
+    # is 'naver'. region_runner.run_schedule is what each registered job
+    # invokes when its cron matches.
     scheduler.add_job(
-        run_naver_crawl,
-        trigger=CronTrigger(minute=0, timezone=TZ),
-        id="naver_crawl",
+        run_region_sync,
+        trigger=IntervalTrigger(seconds=30, timezone=TZ),
+        id="region_sync_interval",
+        max_instances=1,
+        coalesce=True,
+    )
+    # Hourly missing-retry decoupled from the region-driven crawl fires.
+    # :30 to interleave with the server container's missing-retry slot.
+    scheduler.add_job(
+        run_naver_missing_retry_cycle,
+        trigger=CronTrigger(minute=30, timezone=TZ),
+        id="naver_missing_retry_hourly",
         max_instances=1,
         coalesce=True,
         misfire_grace_time=30 * 60,
     )
-    # Startup kick a bit after boot
+    # Startup kick: sync immediately so cron firings don't have to wait
+    # for the first 30s interval tick.
+    now = datetime.now(TZ)
     scheduler.add_job(
-        run_naver_crawl,
+        run_region_sync,
         trigger="date",
-        run_date=datetime.now(TZ) + timedelta(seconds=30),
-        id="naver_startup",
+        run_date=now + timedelta(seconds=5),
+        id="startup_region_sync",
         max_instances=1,
         coalesce=True,
     )
-    print("[naver-scheduler] started — hourly at :00 KST, plus startup kick", flush=True)
+    print(
+        f"[naver-scheduler] started - region-driven crawl via 30s DB sync, "
+        f"missing-retry at :30 hourly, allowed sources: {ALLOWED_SOURCES_NAVER}",
+        flush=True,
+    )
     scheduler.start()
 
 

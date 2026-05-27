@@ -8,6 +8,7 @@ Commands:
     python scripts/users.py list
     python scripts/users.py deactivate <username>
     python scripts/users.py activate <username>
+    python scripts/users.py delete-user <username> [--yes]
     python scripts/users.py migrate-globals --to <username>
 
 ``migrate-globals`` is a one-shot tool for the Caddy-basic-auth → self-login
@@ -132,6 +133,45 @@ def cmd_activate(args: argparse.Namespace) -> None:
     _set_active(args.username, True)
 
 
+def cmd_delete(args: argparse.Namespace) -> None:
+    """Hard-delete a user. CASCADE removes favorites/sessions/user_area_filters
+    in Postgres; we also rmtree the photos directory because the filesystem
+    isn't subject to the DB's CASCADE rule.
+
+    Requires ``--yes`` to skip the interactive confirm (so it's safe to run
+    from a shell script when the operator knows what they're doing).
+    """
+    with session() as conn, conn.cursor() as cur:
+        user = _find_user(cur, args.username)
+        if not user:
+            raise SystemExit(f"user not found: {args.username}")
+        uid = user["id"]
+
+    if not args.yes:
+        prompt = (
+            f"Delete user '{args.username}' (id={uid}), all their favorites, "
+            f"sessions, area filter, AND data/photos/{uid}/ on disk? [y/N] "
+        )
+        try:
+            answer = input(prompt).strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in {"y", "yes"}:
+            print("[users] cancelled")
+            return
+
+    with session() as conn, conn.cursor() as cur:
+        # CASCADE handles favorites, favorite_deleted, sessions,
+        # user_area_filters (all FK-constrained to users.id).
+        cur.execute("DELETE FROM users WHERE id = %s", (uid,))
+
+    photo_dir = PHOTOS_DIR / str(uid)
+    if photo_dir.exists():
+        shutil.rmtree(photo_dir, ignore_errors=True)
+        print(f"[users] removed photos directory {photo_dir}")
+    print(f"[users] deleted user '{args.username}' (id={uid})")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Global → per-user backfill
 # ──────────────────────────────────────────────────────────────────────────────
@@ -225,6 +265,15 @@ def main(argv: list[str] | None = None) -> None:
     p_act = sub.add_parser("activate", help="Re-activate a user")
     p_act.add_argument("username")
     p_act.set_defaults(func=cmd_activate)
+
+    p_del = sub.add_parser(
+        "delete-user",
+        help="Hard-delete a user (DB cascade + photos rmtree). Prompts for confirmation.",
+    )
+    p_del.add_argument("username")
+    p_del.add_argument("--yes", action="store_true",
+                       help="Skip the interactive confirm prompt.")
+    p_del.set_defaults(func=cmd_delete)
 
     p_mig = sub.add_parser(
         "migrate-globals",

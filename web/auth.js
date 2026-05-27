@@ -23,14 +23,59 @@
 .user-pill b{font-weight:700}
 .user-pill button{background:transparent;border:none;color:#4338ca;cursor:pointer;font-size:12px;padding:0;text-decoration:underline;font-family:inherit}
 .user-pill button:hover{color:#1e1b4b}
+.admin-link{background:#111827!important;color:#fff!important}
 @media (max-width:480px){.user-pill{font-size:11px;padding:2px 7px}}
     `;
+    document.head.appendChild(s);
+  }
+
+  function ensureAdminLink(user) {
+    if (!user || !user.isAdmin) return;
+    const nav = document.querySelector('nav');
+    if (!nav || nav.querySelector('a[href="admin.html"]')) return;
+    const link = document.createElement('a');
+    link.href = 'admin.html';
+    link.textContent = '관리';
+    link.className = location.pathname.endsWith('/admin.html') ? 'active-nav admin-link' : 'admin-link';
+    const slot = document.getElementById('userInfo');
+    nav.insertBefore(link, slot || null);
+  }
+
+  function ensureRegionLink(user) {
+    // "지역 신청" link is shown to every logged-in user so they can propose a
+    // crawl area. The admin reviews + approves under /admin.html.
+    if (!user) return;
+    const nav = document.querySelector('nav');
+    if (!nav || nav.querySelector('a[href="region-request.html"]')) return;
+    const link = document.createElement('a');
+    link.href = 'region-request.html';
+    link.textContent = '지역 신청';
+    if (location.pathname.endsWith('/region-request.html')) {
+      link.className = 'active-nav';
+    }
+    const slot = document.getElementById('userInfo');
+    nav.insertBefore(link, slot || null);
+  }
+
+  function ensureRegionSelector() {
+    // Region selector lives in its own file (region.js) and self-installs
+    // into the nav. Dynamically inject the script once per page so every
+    // page that loads auth.js automatically gets the selector without each
+    // page needing a hand-written <script src="region.js"> tag.
+    if (document.getElementById('region-script')) return;
+    var s = document.createElement('script');
+    s.id = 'region-script';
+    s.src = 'region.js?v=20260526-region1';
+    s.async = true;
     document.head.appendChild(s);
   }
 
   function render(user) {
     if (!user) return;
     injectStyle();
+    ensureAdminLink(user);
+    ensureRegionLink(user);
+    ensureRegionSelector();
     let slot = document.getElementById('userInfo');
     if (!slot) {
       // Fall back to appending into the nav so older pages without an explicit

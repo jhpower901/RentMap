@@ -1,5 +1,10 @@
 (function () {
   const KEY = 'rentmap.areaFilter.v1';
+  // localStorage flag: "dirty edit not yet acked by the server". Set when
+  // schedulePush() queues a push, cleared when fetch succeeds. Survives a
+  // page reload so an unsynced edit from the previous visit can re-attempt
+  // on next boot before pullFromServer would otherwise overwrite it.
+  const DIRTY_KEY = 'rentmap.areaFilter.dirty.v1';
   const SERVER_URL = '/api/area-filter';
   const PUSH_DEBOUNCE_MS = 500;
   const DEFAULT_POINTS = [
@@ -41,19 +46,63 @@
   // apply a server fetch into local state so we don't bounce it right back.
   let pushTimer = null;
   let suppressPush = false;
+  function setDirty(on) {
+    try {
+      if (on) localStorage.setItem(DIRTY_KEY, '1');
+      else localStorage.removeItem(DIRTY_KEY);
+    } catch (_) {}
+  }
+  function isDirty() {
+    try { return localStorage.getItem(DIRTY_KEY) === '1'; } catch (_) { return false; }
+  }
   function schedulePush() {
     if (suppressPush) return;
+    setDirty(true);
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(pushNow, PUSH_DEBOUNCE_MS);
   }
   function pushNow() {
     pushTimer = null;
-    fetch(SERVER_URL, {
+    const payload = JSON.stringify({ points: state.points, enabled: state.enabled });
+    return fetch(SERVER_URL, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ points: state.points, enabled: state.enabled }),
-    }).catch(err => console.warn('area-filter push failed:', err));
+      // ``keepalive`` lets a push that's still in flight survive the page
+      // unloading — important when the user edits and immediately closes
+      // the tab. Browsers cap payload at 64 KB which is far more than the
+      // few KB our polygon JSON ever needs.
+      keepalive: true,
+      body: payload,
+    })
+      .then(r => {
+        if (r && r.ok) setDirty(false);
+        else console.warn('area-filter push got non-OK:', r && r.status);
+      })
+      .catch(err => console.warn('area-filter push failed (will retry on next edit / next boot):', err));
+  }
+  // Synchronous best-effort flush for pagehide. sendBeacon ignores
+  // Content-Type but the server's Pydantic body parser tolerates it for
+  // JSON because we still set Content-Type via Blob — sendBeacon picks up
+  // the Blob's type. Used when there's still a pending debounce timer.
+  function flushBeacon() {
+    if (!pushTimer) return;
+    clearTimeout(pushTimer);
+    pushTimer = null;
+    try {
+      const blob = new Blob(
+        [JSON.stringify({ points: state.points, enabled: state.enabled })],
+        { type: 'application/json' }
+      );
+      // sendBeacon is POST-only, but the server accepts the same payload at
+      // POST /api/area-filter? No — only PUT is registered. Fall back to
+      // fetch+keepalive when sendBeacon is unavailable or for PUT semantics.
+      if (navigator.sendBeacon) {
+        // The endpoint takes PUT only; we still call pushNow() (fetch with
+        // keepalive=true) which the browser keeps alive past unload.
+      }
+    } catch (_) {}
+    pushNow();
   }
   function save() {
     saveLocal();
@@ -67,7 +116,16 @@
   // Pull authoritative state from the server on boot. Same-tab updates after
   // this come through setPoints/setEnabled below; cross-tab via the storage
   // event listener at the bottom of this file.
+  //
+  // Special case: if we have a *dirty* localStorage edit that never made it
+  // to the server (page closed inside the debounce window, or last push
+  // errored), retry the push instead of overwriting local state from the
+  // server. This avoids the data-loss scenario where the server's stale
+  // copy would otherwise win on the next boot.
   function pullFromServer() {
+    if (isDirty()) {
+      return pushNow();
+    }
     return fetch(SERVER_URL, { cache: 'no-store', credentials: 'same-origin' })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -92,6 +150,15 @@
   } else {
     pullFromServer();
   }
+
+  // Flush pending push on tab hide / pagehide. ``visibilitychange`` covers
+  // backgrounding (e.g. mobile app switch) and ``pagehide`` catches the
+  // bfcache eviction / actual unload. Both can fire so we no-op when no
+  // timer is pending.
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushBeacon();
+  });
+  window.addEventListener('pagehide', flushBeacon);
 
   function isDefault() {
     if (state.points.length !== DEFAULT_POINTS.length) return false;

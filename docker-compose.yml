@@ -36,12 +36,16 @@ services:
       # HTTPS gets Secure cookies, plain-http LAN/local dev does not.
       # Force 1 behind custom proxies that do not pass X-Forwarded-Proto.
       - RENTMAP_SESSION_SECURE=${RENTMAP_SESSION_SECURE:-auto}
-      - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
+      # NOTE: this is the slug (used in CSV/JS file names), NOT the
+      # display label. Must match regions.slug regex ^[a-z0-9][a-z0-9_-]+$.
+      # The Korean display label lives in regions.name in the DB.
+      - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-ajou}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
       - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}
       - RENTMAP_RADIUS_KM=${RENTMAP_RADIUS_KM:-3.0}
       - RENTMAP_MAX_DEPOSIT=${RENTMAP_MAX_DEPOSIT:-999999}
       - RENTMAP_MAX_RENT=${RENTMAP_MAX_RENT:-999999}
+      - RENTMAP_CRAWL_HOURS=${RENTMAP_CRAWL_HOURS:-6,9,12,15,18}
       # Daangn region IDs (comma-separated). Default = Suwon Gwonseon-gu (아주대 주변).
       # To use in another city: find IDs at daangn.com/kr/realty/?in=x-XXXX and set here.
       - RENTMAP_DAANGN_REGION_IDS=${RENTMAP_DAANGN_REGION_IDS:-}
@@ -58,9 +62,9 @@ services:
       - RENTMAP_NAVER_CORTARNOS=${RENTMAP_NAVER_CORTARNOS:-4111710100,4111710200,4111710300,4111710400,4111710500,4111710600,4111514000,4111514100,4111513300,4111513500,4111513800,4111513900,4111512000,4111313700,4111312600,4111113000,4111113400,4111113600,4111113900}
     restart: unless-stopped
 
-  # Naver crawler runs in its own playwright-based container, in lock-step
-  # with the main container's hourly crawl. Shares the data volume so the
-  # main container's gen-web cron picks up the freshly-written CSV. Not on
+  # Naver crawler runs in its own playwright-based container on a reduced
+  # daytime schedule. It shares data/web so the
+  # web bundle refreshes as soon as the naver crawl finishes. Not on
   # the proxy network — only Caddy needs to reach the server container.
   rentmap-naver:
     build:
@@ -71,6 +75,7 @@ services:
       - rentmap-db
     volumes:
       - ./data:/app/data
+      - ./web:/app/web
       - ./scripts:/app/scripts
       - ./db:/app/db
     environment:
@@ -80,12 +85,16 @@ services:
       # naver flushes webhook events after its own crawl/reconcile completes
       # and honors the dry-run toggle.
       - RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS=${RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS:-0}
-      - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-아주대}
+      # NOTE: this is the slug (used in CSV/JS file names), NOT the
+      # display label. Must match regions.slug regex ^[a-z0-9][a-z0-9_-]+$.
+      # The Korean display label lives in regions.name in the DB.
+      - RENTMAP_AREA_NAME=${RENTMAP_AREA_NAME:-ajou}
       - RENTMAP_CENTER_LAT=${RENTMAP_CENTER_LAT:-37.280062}
       - RENTMAP_CENTER_LNG=${RENTMAP_CENTER_LNG:-127.043688}
       - RENTMAP_RADIUS_KM=${RENTMAP_RADIUS_KM:-3.0}
       - RENTMAP_MAX_DEPOSIT=${RENTMAP_MAX_DEPOSIT:-999999}
       - RENTMAP_MAX_RENT=${RENTMAP_MAX_RENT:-999999}
+      - RENTMAP_NAVER_CRAWL_HOURS=${RENTMAP_NAVER_CRAWL_HOURS:-6,9,12,15,18}
       # Same Naver URL override — naver container uses env vars to generate its grid.
       - RENTMAP_NAVER_URLS=${RENTMAP_NAVER_URLS:-}
       # Same cortarNo backstop as above — the rentmap-naver container is where
