@@ -997,7 +997,7 @@ def reconcile_csv_rows_safely(
         sys.path.insert(0, str(_Path(__file__).resolve().parent))
         from db import session, DBConfigError  # noqa: WPS433
     except ImportError as exc:
-        print(f"[reconcile] {label}: skipped — db module unavailable ({exc})")
+        print(f"[reconcile] {label}: skipped - db module unavailable ({exc})")
         return None
 
     dry = os.environ.get("RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS", "").strip().lower() in ("1", "true", "yes")
@@ -1012,10 +1012,10 @@ def reconcile_csv_rows_safely(
                 dry_run_webhooks=dry,
             )
     except DBConfigError as exc:
-        print(f"[reconcile] {label}: skipped — DB not configured ({exc})")
+        print(f"[reconcile] {label}: skipped - DB not configured ({exc})")
         return None
     except Exception as exc:  # noqa: BLE001 — last-resort safety net
-        print(f"[reconcile] {label}: failed (CSV write OK) — {type(exc).__name__}: {exc}")
+        print(f"[reconcile] {label}: failed (CSV write OK) - {type(exc).__name__}: {exc}")
         return None
 
     suffix = " [dry-run-webhooks]" if dry else ""

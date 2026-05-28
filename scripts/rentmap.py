@@ -67,8 +67,10 @@ NAVER_TRANSIENT_STATUS_CODES = {429, 503}
 NAVER_LIST_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
 NAVER_DETAIL_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
 NAVER_RATE_POLICY_STREAK_THRESHOLD = 3
-DABANG_DEFAULT_DELAY_MS = 120      # gap between Dabang detail requests
+DABANG_DEFAULT_DELAY_MS = 120      # gap between Dabang detail requests (legacy sequential)
 DABANG_DEFAULT_ZOOM = 18
+DABANG_DETAIL_WORKERS = 8          # parallel detail threads
+DAANGN_GQL_WORKERS = 8            # parallel GraphQL detail threads
 CRAWL_DETAIL_PROGRESS_EVERY = 20
 # Missing confirmation policy: a listing can recover on any successful probe.
 # If the retry probe cannot get usable data after these attempts, that probe is
@@ -85,6 +87,35 @@ DAANGN_BASE_URL = "https://realty.daangn.com"
 DAANGN_GRAPHQL_URL = "https://realty.kr.karrotmarket.com/graphql"
 DAANGN_ARTICLE_DETAIL_QUERY_HASH = "a6ca947b00f51b71850abb5757a9bf66e73dd50524352b78aed4138bc82b9ae0"
 _daangn_article_detail_query_hash_cache = ""
+
+# Mapping tables for structured GraphQL fields (discovered 2026-05-28 via Playwright interception).
+DAANGN_ORIENTATION_MAP: dict[str, str] = {
+    "EAST_FACING": "동향", "WEST_FACING": "서향",
+    "SOUTH_FACING": "남향", "NORTH_FACING": "북향",
+    "SOUTH_EAST_FACING": "남동향", "SOUTH_WEST_FACING": "남서향",
+    "NORTH_EAST_FACING": "북동향", "NORTH_WEST_FACING": "북서향",
+}
+DAANGN_BUILDING_USAGE_MAP: dict[str, str] = {
+    "SINGLE_FAMILY_HOUSING": "단독주택",
+    "MULTI_FAMILY_HOUSING": "공동주택",
+    "NEIGHBORHOOD_FACILITY_2": "제2종근린생활시설",
+    "NEIGHBORHOOD_FACILITY_1": "제1종근린생활시설",
+    "OFFICETEL": "오피스텔",
+}
+DAANGN_OPTION_LABEL_MAP: dict[str, str] = {
+    "PARKING": "주차", "ELEVATOR": "엘리베이터", "WASHER": "세탁기",
+    "FRIDGE": "냉장고", "AIRCON": "에어컨", "GAS_RANGE": "가스레인지",
+    "ELEC_RANGE": "전기레인지", "INDUCTION": "인덕션", "BED": "침대",
+    "DESK": "책상", "CLOSET": "옷장", "SINK": "싱크대",
+    "MICROWAVE": "전자레인지", "TV": "TV", "SHOE_CABINET": "신발장",
+    "BIDET": "비데", "PET": "반려동물", "MORTGAGE": "대출",
+    "LOFT": "다락방", "ILLEGAL_BUILDING": "위반건물",
+}
+DAANGN_MANAGE_COST_OPTION_MAP: dict[str, str] = {
+    "WATERWORKS": "수도", "ELECTRICITY": "전기", "GAS": "가스",
+    "INTERNET": "인터넷", "COMMON": "공용관리비", "TV": "TV",
+    "CLEANING": "청소", "ELEVATOR": "엘리베이터", "PARKING": "주차",
+}
 
 DABANG_COLUMNS = [
     "source", "listing_no", "room_id", "url", "agency", "agent_name", "agent_phone",
@@ -574,24 +605,50 @@ def crawl_dabang(args: argparse.Namespace) -> None:
 
     detail_headers = dict(headers)
     detail_headers["D-Api-Version"] = "3.0.1"
+
+    # Deduplicate rooms before issuing any detail requests.
     seen: set[str] = set()
+    unique_rooms: list[tuple[str, dict[str, Any]]] = []
+    for room in rooms:
+        room_id = to_text(first(room, ["id", "room_id", "roomId", "seq", "hash"]))
+        if room_id and room_id not in seen:
+            seen.add(room_id)
+            unique_rooms.append((room_id, room))
+
+    # Parallel detail fetches — each worker gets its own Session.
+    def _fetch_dabang_detail(args_: tuple[str, dict]) -> tuple[str, dict[str, Any] | None]:
+        rid, _ = args_
+        detail_url = (
+            f"https://www.dabangapp.com/api/3/new-room/detail"
+            f"?room_id={quote(rid)}&api_version=3.0.1&call_type=web&version=1"
+        )
+        s = requests.Session()
+        try:
+            payload = request_json(s, detail_url, headers=detail_headers)
+            return rid, payload.get("result", payload)
+        except Exception as exc:
+            print(f"WARNING: Detail fetch failed for room_id={rid}: {exc}", file=sys.stderr)
+            return rid, None
+
+    print(f"[crawl:dabang] detail_fetch rooms={len(unique_rooms)} workers={DABANG_DETAIL_WORKERS}", flush=True)
+    detail_map: dict[str, dict[str, Any]] = {}
+    done_cnt = 0
+    with ThreadPoolExecutor(max_workers=DABANG_DETAIL_WORKERS) as pool:
+        for rid, det in pool.map(_fetch_dabang_detail, unique_rooms):
+            if det is not None:
+                detail_map[rid] = det
+            done_cnt += 1
+            if done_cnt % CRAWL_DETAIL_PROGRESS_EVERY == 0:
+                print(f"[crawl:dabang] detail_progress={done_cnt}/{len(unique_rooms)}", flush=True)
+    print(f"[crawl:dabang] detail_done={done_cnt}", flush=True)
+
     records: list[dict[str, Any]] = []
     raw_details: list[Any] = []
 
-    for idx, room in enumerate(rooms, 1):
-        if idx % CRAWL_DETAIL_PROGRESS_EVERY == 0:
-            print(f"[crawl:dabang] detail_progress={idx}/{len(rooms)}", flush=True)
-        room_id = to_text(first(room, ["id", "room_id", "roomId", "seq", "hash"]))
-        if not room_id or room_id in seen:
+    for room_id, room in unique_rooms:
+        detail = detail_map.get(room_id)
+        if detail is None:
             continue
-        seen.add(room_id)
-        detail_url = f"https://www.dabangapp.com/api/3/new-room/detail?room_id={quote(room_id)}&api_version=3.0.1&call_type=web&version=1"
-        try:
-            detail_payload = request_json(session, detail_url, headers=detail_headers)
-        except Exception as exc:
-            print(f"WARNING: Detail fetch failed for room_id={room_id}: {exc}", file=sys.stderr)
-            continue
-        detail = detail_payload.get("result", detail_payload)
         raw_details.append(detail)
         room_data = first(detail, ["room"], detail)
         agent = first(detail, ["agent", "agency", "agent_info", "agentInfo", "office"], {})
@@ -705,7 +762,6 @@ def crawl_dabang(args: argparse.Namespace) -> None:
             "image_2": image_url(images, 1),
             "crawl_note": "",
         })
-        time.sleep(args.delay_ms / 1000)
 
     records.sort(key=lambda r: (to_text(r["agency"]), float_or_inf(r["total_monthly_manwon"]), float_or_inf(r["rent_manwon"])))
     write_csv(Path(args.output_csv), records, DABANG_COLUMNS)
@@ -914,14 +970,33 @@ def crawl_daangn(args: argparse.Namespace) -> None:
             all_raw.append(listing)
     print(f"[crawl:daangn] unique_listings={len(all_raw)}", flush=True)
 
+    # Batch-fetch details via GraphQL with a thread pool (8 parallel sessions).
+    # Each worker creates its own requests.Session to stay thread-safe.
+    details_map: dict[str, dict[str, str]] = {}
+    if not args.skip_detail and all_raw:
+        article_ids_ordered = [article_id_from_url(l.get("webUrl", "")) for l in all_raw]
+
+        def _fetch_detail(aid: str) -> tuple[str, dict[str, str]]:
+            s = requests.Session()
+            return aid, get_daangn_article_detail_gql(s, aid)
+
+        total_d = len(article_ids_ordered)
+        print(f"[crawl:daangn] gql_detail_fetch articles={total_d} workers={DAANGN_GQL_WORKERS}", flush=True)
+        done = 0
+        with ThreadPoolExecutor(max_workers=DAANGN_GQL_WORKERS) as pool:
+            for aid, det in pool.map(_fetch_detail, article_ids_ordered):
+                details_map[aid] = det
+                done += 1
+                if done % CRAWL_DETAIL_PROGRESS_EVERY == 0:
+                    print(f"[crawl:daangn] detail_progress={done}/{total_d}", flush=True)
+        print(f"[crawl:daangn] detail_done={total_d}", flush=True)
+
     records: list[dict[str, Any]] = []
-    for idx, listing in enumerate(all_raw, 1):
+    for listing in all_raw:
         article_id = article_id_from_url(listing.get("webUrl", ""))
-        if idx % CRAWL_DETAIL_PROGRESS_EVERY == 0:
-            print(f"[crawl:daangn] detail_progress={idx}/{len(all_raw)}", flush=True)
         trades = listing.get("trades") or []
         trade = next((t for t in trades if t.get("type") == "MONTH"), {})
-        detail = {} if args.skip_detail else get_daangn_article_detail(session, article_id)
+        detail = details_map.get(article_id, {}) if not args.skip_detail else {}
         region = listing.get("_regionInfo") or {}
         lat, lon = detail.get("lat", ""), detail.get("lon", "")
         public_addr = detail.get("publicAddress") or listing.get("address", "")
@@ -1170,6 +1245,124 @@ def apply_daangn_graphql_article_detail(detail: dict[str, str], article: dict[st
         facs = [fac for fac in DAANGN_FACILITY_KEYWORDS if fac in detail["description"]]
         if facs:
             detail["options"] = "; ".join(facs)
+
+
+def _daangn_detail_blank() -> dict[str, str]:
+    return {
+        "lat": "", "lon": "", "publicAddress": "", "roomCnt": "",
+        "bathroomCnt": "", "approvalDate": "", "writerType": "", "agencyName": "",
+        "publishedAt": "", "updatedAt": "", "direction": "", "parking": "",
+        "elevator": "", "petAllowed": "", "loanAvailable": "", "moveIn": "",
+        "maintenanceDetail": "", "maintenanceBasis": "", "maintenanceItems": "",
+        "buildingUse": "", "description": "", "options": "",
+    }
+
+
+def get_daangn_article_detail_gql(
+    session: requests.Session, article_id: str
+) -> dict[str, str]:
+    """Fetch Daangn article details via GraphQL only (no SSR HTML parse).
+
+    Discovered 2026-05-28: ArticleDetailQuery returns all structured fields
+    (options, moveInDate, buildingOrientation, totalManageCost, etc.) directly
+    as JSON, which is faster and richer than SSR HTML scraping.
+    """
+    payload = {
+        "operationName": "ArticleDetailQuery",
+        "variables": {"articleId": article_id},
+        "extensions": {
+            "persistedQuery": {
+                "version": 1,
+                "sha256Hash": DAANGN_ARTICLE_DETAIL_QUERY_HASH,
+            },
+        },
+    }
+    try:
+        resp = session.post(
+            DAANGN_GRAPHQL_URL,
+            headers={
+                "User-Agent": UA,
+                "Accept": "application/graphql-response+json, application/json",
+                "Accept-Language": "ko-KR,ko;q=0.9",
+                "Content-Type": "application/json",
+                "Origin": DAANGN_BASE_URL,
+                "Referer": f"{DAANGN_BASE_URL}/articles/{article_id}",
+            },
+            json=payload,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        article = (resp.json().get("data") or {}).get("articleByOriginalArticleId") or {}
+    except Exception as exc:
+        print(f"WARNING: GQL detail {article_id}: {exc}", file=sys.stderr)
+        return {}
+    if not isinstance(article, dict) or not article:
+        return {}
+
+    detail = _daangn_detail_blank()
+
+    coord = article.get("publicCoordinate") or {}
+    if isinstance(coord, dict):
+        detail["lat"] = to_text(coord.get("lat", ""))
+        detail["lon"] = to_text(coord.get("lon", ""))
+
+    detail["publicAddress"] = to_text(article.get("publicAddress", "")).strip()
+    detail["roomCnt"] = to_text(article.get("roomCnt", ""))
+    detail["bathroomCnt"] = to_text(article.get("bathroomCnt", ""))
+    detail["approvalDate"] = to_text(article.get("buildingApprovalDate", ""))
+    detail["writerType"] = to_text(article.get("writerTypeV2", ""))
+    detail["publishedAt"] = to_text(article.get("publishedAt", ""))
+    detail["updatedAt"] = to_text(article.get("updatedAt", ""))
+    detail["description"] = to_text(article.get("content", "")).strip()
+
+    biz = article.get("bizProfile") if isinstance(article.get("bizProfile"), dict) else {}
+    detail["agencyName"] = to_text(first(biz, ["name", "businessCompanyName"])).strip()
+
+    orientation = to_text(article.get("buildingOrientation", ""))
+    detail["direction"] = DAANGN_ORIENTATION_MAP.get(orientation, "")
+
+    usage = to_text(article.get("buildingUsage", ""))
+    detail["buildingUse"] = DAANGN_BUILDING_USAGE_MAP.get(usage, "")
+
+    move_in = to_text(article.get("moveInDate", ""))
+    if move_in:
+        detail["moveIn"] = move_in
+    elif article.get("moveInDateNegotiable"):
+        detail["moveIn"] = "협의"
+
+    manage_desc = to_text(article.get("manageCostDescription", ""))
+    if manage_desc:
+        detail["maintenanceDetail"] = manage_desc
+
+    detail["maintenanceBasis"] = to_text(article.get("manageCostChargeType", ""))
+
+    include_opts = article.get("includeManageCostOptionV3") or []
+    if include_opts:
+        items = [
+            DAANGN_MANAGE_COST_OPTION_MAP.get(o.get("option", ""), o.get("option", ""))
+            for o in include_opts if isinstance(o, dict)
+        ]
+        detail["maintenanceItems"] = "; ".join(filter(None, items))
+
+    options_list = article.get("options") or []
+    yes_labels: list[str] = []
+    for opt in options_list:
+        if not isinstance(opt, dict):
+            continue
+        name, value = opt.get("name", ""), opt.get("value", "")
+        if name == "PARKING":
+            detail["parking"] = "가능" if value == "YES" else ("불가능" if value == "NO" else "")
+        elif name == "ELEVATOR":
+            detail["elevator"] = "있음" if value == "YES" else ("없음" if value == "NO" else "")
+        elif name == "PET":
+            detail["petAllowed"] = "가능" if value == "YES" else ("불가능" if value == "NO" else "")
+        elif name == "MORTGAGE":
+            detail["loanAvailable"] = "가능" if value == "YES" else ("불가능" if value == "NO" else "")
+        if value == "YES":
+            yes_labels.append(DAANGN_OPTION_LABEL_MAP.get(name, name))
+    detail["options"] = "; ".join(yes_labels)
+
+    return detail
 
 
 def get_daangn_article_detail(session: requests.Session, article_id: str) -> dict[str, str]:
@@ -1459,6 +1652,34 @@ async def _naver_wait_for_retry(
     return True
 
 
+async def _fetch_naver_cortarno(
+    context: Any,
+    headers: dict[str, str] | None,
+    center_lat: float,
+    center_lng: float,
+    zoom: int = NAVER_ZOOM,
+) -> str:
+    """Look up the dong cortarNo for a given map centre via the /api/cortars endpoint.
+
+    Discovered 2026-05-28: the browser fires this API on every map viewport change.
+    Using it directly replaces a full page.goto() browser navigation and lets us
+    discover all grid cortarNos with simple HTTP calls after loading the home page once.
+    Returns an empty string on failure.
+    """
+    url = (
+        f"https://new.land.naver.com/api/cortars"
+        f"?zoom={zoom}&centerLat={center_lat}&centerLon={center_lng}"
+    )
+    try:
+        resp = await context.request.get(url, headers=clean_headers(headers), timeout=15000)
+        if resp.ok:
+            data = await resp.json()
+            return to_text(data.get("cortarNo", ""))
+    except Exception:
+        pass
+    return ""
+
+
 async def _paginate_naver_cortarno(
     context: Any,
     template_url: str,
@@ -1541,11 +1762,22 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
 
         async def on_request(request: Any) -> None:
             nonlocal article_headers, first_list_url
-            if "/api/articles?" in request.url:
+            # Capture auth headers from ANY naver land API call so we get the JWT
+            # from the home-page load itself (not just from an articles search page).
+            # Discovered 2026-05-28: the home page fires /api/cortars which also
+            # carries the Authorization: Bearer token.
+            if "new.land.naver.com/api/" in request.url:
                 try:
-                    article_headers = await request.all_headers()
-                    if first_list_url is None:
-                        first_list_url = request.url
+                    h = await request.all_headers()
+                    if h.get("authorization") and article_headers is None:
+                        article_headers = h
+                    # Only treat articles URL as template when it carries the
+                    # small-space-rent filter (our search pages do; the home page
+                    # default viewport may not).
+                    if "/api/articles?" in request.url and first_list_url is None:
+                        if "SMALLSPCRENT" in request.url or "ONEROOM" in request.url or "aa=" in request.url:
+                            article_headers = h
+                            first_list_url = request.url
                 except Exception:
                     pass
 
@@ -1563,8 +1795,50 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
             seen_cortarnos: set[str] = set()
             records: list[dict[str, Any]] = []
             raw_payloads: list[Any] = []
+            # Grid loop: the FIRST url still needs a real page.goto() so the
+            # browser fires /api/articles? and we capture the full template URL
+            # (with all filter params). Every subsequent tile uses the cortars
+            # API to discover its cortarNo and _paginate_naver_cortarno directly —
+            # replacing a ~5s browser navigation with a ~0.5s API call.
             for idx, url in enumerate(urls, 1):
                 print(f"[crawl:naver] url_progress={idx}/{len(urls)} url={url}", flush=True)
+                # Fast path: once we have auth headers + a template list URL, skip
+                # the browser navigation for remaining tiles and use API only.
+                if idx > 1 and first_list_url and article_headers:
+                    center = get_map_center(url)
+                    cn = await _fetch_naver_cortarno(
+                        context, article_headers,
+                        center["latitude"], center["longitude"],
+                    )
+                    if not cn:
+                        print(f"[crawl:naver] cortars_api no cortarNo for tile={idx}", file=sys.stderr, flush=True)
+                        continue
+                    if cn in seen_cortarnos:
+                        print(f"[crawl:naver] cortars_api cortarNo={cn} already seen, skipping tile={idx}", flush=True)
+                        continue
+                    seen_cortarnos.add(cn)
+                    payloads = await _paginate_naver_cortarno(
+                        context, first_list_url, cn, article_headers, args, naver_rate_stats,
+                    )
+                    raw_payloads.extend(payloads)
+                    new_count = 0
+                    tile_center = center
+                    for payload in payloads:
+                        for article in payload.get("articleList") or []:
+                            record = normalize_naver_article(article, first_list_url, tile_center)
+                            if not bbox_ok(record.get("latitude"), record.get("longitude"), args):
+                                continue
+                            key = to_text(record.get("listing_no"))
+                            if key and key in seen:
+                                continue
+                            if key:
+                                seen.add(key)
+                            records.append(record)
+                            new_count += 1
+                    print(f"[crawl:naver] cortars_api cortarNo={cn} pages={len(payloads)} new_in_bbox={new_count}", flush=True)
+                    continue
+
+                # Slow path (first tile or fallback): full browser navigation.
                 one_records, payloads, cortarno = await crawl_naver_one(
                     page,
                     context,
@@ -1585,7 +1859,7 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                     records.append(record)
                     new_count += 1
                 print(f"[crawl:naver] url_result in_bbox={len(one_records)} new_after_dedup={new_count} cortarNo={cortarno or '?'}", flush=True)
-            print(f"[crawl:naver] grid_pass unique_articles={len(records)} cortarNos={len(seen_cortarnos)} payload_pages={len(raw_payloads)}", flush=True)
+            print(f"[crawl:naver] grid_pass unique_articles={len(records)} cortarNos={len(seen_cortarnos)} payload_pages={len(raw_payloads)} fast_tiles={max(0,len(urls)-1)}", flush=True)
 
             # Coverage backstop: paginate every cortarNo from RENTMAP_NAVER_CORTARNOS
             # that the grid didn't already cover. Defends against Naver's
