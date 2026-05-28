@@ -29,6 +29,21 @@ data/*.db
 data/photos/
 !data/.gitkeep
 
+# Auto-generated web bundles — overwritten by ``rentmap.py gen-web``
+# after every crawl. Template source-of-truth lives in scripts/_tpl_*.html;
+# the per-region data bundles are pure DB extracts. Tracking these would
+# churn every commit and conflict on every pull — gen-web regenerates them
+# from current DB state on the next crawl (worst-case 6h cycle).
+web/dabang.html
+web/daangn.html
+web/zigbang.html
+web/naver.html
+web/index.html
+web/data_dabang_*.js
+web/data_daangn_*.js
+web/data_zigbang_*.js
+web/data_naver_*.js
+
 # Temporary files
 tmp/
 .temp/
