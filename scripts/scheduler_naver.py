@@ -36,8 +36,6 @@ TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 NAVER_PLATFORM_CODES = ("naver_land",)
 MISSING_RETRY_LIMIT = 1
 RETRY_DEFERRED_EXIT = 75
-CRAWL_LOCK = threading.Lock()
-
 # Sources this container is the sole owner of. server.py handles the
 # lightweight 3-source bundle; naver here is the only thing we touch so a
 # single ``region_schedules`` row is safe to read from both containers.
@@ -51,6 +49,14 @@ def _ts() -> str:
 sys.path.insert(0, str(ROOT / "scripts"))
 import region_runner  # noqa: E402
 import region_scheduler_sync  # noqa: E402
+
+# Reuse the container-global crawl lock that ``region_runner`` uses to
+# serialize cross-region crawls. Previously this file owned a separate
+# lock that only guarded its own missing-retry against itself — meaning
+# missing-retry could race a live Naver crawl, doubling the IP rate
+# usage and tripping 429. Sharing the lock makes missing-retry yield
+# politely while a crawl is in flight.
+CRAWL_LOCK = region_runner.CRAWL_LOCK
 
 
 def _run_rentmap(args: list[str], *, timeout_s: int, label: str) -> int | None:

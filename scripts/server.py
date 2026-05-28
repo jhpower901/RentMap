@@ -28,7 +28,12 @@ RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 MAIN_CRAWL_PLATFORM_CODES = ("dabang", "zigbang", "daangn")
 MISSING_RETRY_LIMIT = 2
-CRAWL_LOCK = threading.Lock()
+# CRAWL_LOCK assigned after region_runner is imported below. We share
+# region_runner's container-global lock so the hourly missing-retry
+# can't race a live region crawl (previously a local lock here only
+# guarded missing-retry against itself, leaving a window where
+# missing-retry and a crawl both hit Naver's rate budget).
+CRAWL_LOCK: threading.Lock
 
 # Sources this container is the sole owner of. Naver runs in the playwright
 # image (rentmap-naver / scheduler_naver.py), so we never schedule it here
@@ -303,6 +308,9 @@ import region_schedules as schedule_store  # noqa: E402
 import region_runner  # noqa: E402
 import region_scheduler_sync  # noqa: E402
 from db import session as db_session  # noqa: E402
+
+# Bind the forward-declared CRAWL_LOCK to the shared region_runner one.
+CRAWL_LOCK = region_runner.CRAWL_LOCK
 
 # Paths the auth middleware will let through without a session cookie.
 # Anything else under "/" or "/api" requires a logged-in user.

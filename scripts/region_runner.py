@@ -65,6 +65,35 @@ _DAANGN_LEARN_DONE_LOCK = threading.Lock()
 _NAVER_LEARN_DONE: set[int] = set()
 _NAVER_LEARN_DONE_LOCK = threading.Lock()
 
+# Container-global crawl exclusion. Distinct from ``_SCHEDULE_LOCKS``
+# (per-schedule) and APScheduler's per-job ``max_instances=1``: those
+# only prevent the SAME schedule firing twice — they don't stop a
+# Naver crawl for region A from running concurrently with a Naver
+# crawl for region B in the same container. Concurrent crawls are
+# bad because:
+#
+# - Each spawns its own Playwright browser (~150MB) plus a Python
+#   process; 3 simultaneous Naver crawls means 3 Chromium instances
+#   competing for CPU and 3 IP-rate-limit budgets.
+# - The per-listing pacing (NAVER_PAGE_DELAY_MS, detail fetch) is
+#   process-local, so N concurrent crawls send N× the requests per
+#   wall-second and trip 429 much faster.
+# - The naver-finder fast path uses /api/cortars heavily; N parallel
+#   finders multiply those calls too.
+#
+# Acquired by ``run_schedule`` (blocking with timeout) so concurrent
+# tick arrivals serialize through the lock. Also acquired by the
+# scheduler files' missing-retry cron so retries don't overlap a
+# live crawl.
+#
+# 45 minutes covers the longest expected crawl (Naver with full
+# detail enrichment ≈ 25-30 min, plus headroom). If the lock isn't
+# released within that window, the late-arriving schedule logs SKIP
+# and lets APScheduler re-fire on the next cron tick — better than
+# stacking up an unbounded backlog of queued runs.
+CRAWL_LOCK = threading.Lock()
+_CRAWL_LOCK_TIMEOUT_SEC = 45 * 60
+
 
 def _lock_for(schedule_id: int) -> threading.Lock:
     with _SCHEDULE_LOCKS_MUTEX:
@@ -294,6 +323,41 @@ def _merge_naver_cortarnos(region_id: int, slug: str, dump_path: Path) -> None:
         print(f"{_ts()} [region-runner] cortarNo merge failed for {slug}: {exc}", flush=True)
 
 
+def _maybe_run_missing_retry(platforms: tuple[str, ...], env: dict[str, str],
+                             label: str) -> None:
+    """Trigger a single retry-missing pass for the platforms just crawled.
+
+    Runs INSIDE the held ``CRAWL_LOCK`` (we're called from
+    ``_run_schedule_locked`` after the crawl process exits) so it
+    won't fight the next region's crawl for IP rate budget.
+
+    Scope: one quick retry attempt — no finalize. The hourly
+    missing-retry cron in scheduler_naver/server still runs as a
+    safety net to catch listings that fail this fast pass plus do
+    the finalize step.
+
+    Why post-crawl: previously the only retry path was a separate
+    :30-hourly cron. A listing that disappeared at 0:00 would wait
+    until 0:30 before its first retry attempt, and a 0:31 misfire
+    pushed it to 1:30. Inlining a fast retry right after the crawl
+    drops that latency to ~seconds — which matters because removed-
+    then-relisted listings (very common on Naver) need to clear the
+    missing queue before users see them re-disappear in the UI.
+
+    Failures here are non-fatal — the cron will pick up anything we
+    don't resolve.
+    """
+    if not platforms:
+        return
+    cli_args = ["retry-missing"]
+    for p in platforms:
+        cli_args.extend(["--platform", p])
+    # 10 min cap: a quick pass for fresh missing items. If something
+    # takes longer, the hourly safety-net cron will work through it.
+    _run_rentmap(cli_args, env=env, timeout_s=10 * 60,
+                 label=f"{label}/missing-retry")
+
+
 def _maybe_run_webhook_flush(trigger: str) -> None:
     """Drain pending listing_status_events. Failure never kills the run."""
     try:
@@ -310,15 +374,38 @@ def _maybe_run_webhook_flush(trigger: str) -> None:
 def run_schedule(schedule_id: int) -> None:
     """Materialize the schedule row, run its crawl, record telemetry.
 
-    Idempotent w.r.t. overlapping fires: serialized by a per-schedule mutex
-    so a late-misfired tick won't pile up on an in-progress run.
+    Idempotent w.r.t. overlapping fires:
+
+    1. Per-schedule mutex — a late misfire for THIS schedule skips
+       immediately rather than queueing up indefinitely.
+    2. Container-global CRAWL_LOCK — different schedules serialize
+       through this so two regions' Naver crawls never share the
+       same Playwright + IP rate budget. Late arrivals block up to
+       ``_CRAWL_LOCK_TIMEOUT_SEC``; past that, they skip and let
+       APScheduler re-fire on the next cron tick (preventing an
+       unbounded backlog when the queue head hangs).
     """
     lock = _lock_for(schedule_id)
     if not lock.acquire(blocking=False):
         print(f"{_ts()} [region-runner] schedule={schedule_id}: SKIP already running", flush=True)
         return
     try:
-        _run_schedule_locked(schedule_id)
+        # Wait for any other crawl in this container to finish before
+        # spinning up our own Playwright/HTTP workload. blocking=True
+        # with a timeout means we queue politely up to 45 min then bail.
+        acquired = CRAWL_LOCK.acquire(timeout=_CRAWL_LOCK_TIMEOUT_SEC)
+        if not acquired:
+            print(
+                f"{_ts()} [region-runner] schedule={schedule_id}: SKIP — "
+                f"another crawl held the container lock past "
+                f"{_CRAWL_LOCK_TIMEOUT_SEC // 60}min",
+                flush=True,
+            )
+            return
+        try:
+            _run_schedule_locked(schedule_id)
+        finally:
+            CRAWL_LOCK.release()
     finally:
         lock.release()
 
@@ -426,6 +513,12 @@ def _run_schedule_locked(schedule_id: int) -> None:
             # gen-web pass.
             _run_rentmap(["gen-web"], env=env, timeout_s=5 * 60,
                          label=f"{label}/gen-web")
+        # Fast missing-retry for whatever this crawl just touched.
+        # Stays inside CRAWL_LOCK so it doesn't fight the next region's
+        # crawl. The hourly :30 cron still runs as a safety net for
+        # items this fast pass can't resolve.
+        _maybe_run_missing_retry(profile.get("platforms") or (),
+                                 env=env, label=label)
         _maybe_run_webhook_flush(trigger=f"{region['slug']}/{source}")
         schedule_store.record_run(schedule_id, status="ok", log_excerpt=msg)
         return
