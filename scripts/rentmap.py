@@ -1861,11 +1861,58 @@ async def crawl_naver_async(args: argparse.Namespace, async_playwright: Any) -> 
                 print(f"[crawl:naver] url_result in_bbox={len(one_records)} new_after_dedup={new_count} cortarNo={cortarno or '?'}", flush=True)
             print(f"[crawl:naver] grid_pass unique_articles={len(records)} cortarNos={len(seen_cortarnos)} payload_pages={len(raw_payloads)} fast_tiles={max(0,len(urls)-1)}", flush=True)
 
+            # Region-hierarchy discovery: walk Naver's /api/regions/list
+            # endpoint to enumerate every leaf 동 in this region's bbox.
+            # Replaces relying on the viewport grid for cortarNo coverage
+            # (the grid finds 5-12 of ~16 expected for a typical 3km
+            # urban area — Naver's SPA picks a single dominant cortarNo
+            # per tile rather than mapping coordinates 1:1 to dongs).
+            #
+            # MUST run after the grid pass because that's when
+            # ``article_headers`` (with the Naver Authorization Bearer
+            # token) gets captured. The region endpoint rejects anonymous
+            # requests with 429, so without those headers the walk
+            # silently returns 0 — we log loudly when that happens so
+            # an operator can see why the discovery is missing.
+            if article_headers and len(seen_cortarnos) > 0:
+                try:
+                    import naver_region_finder as _nrf  # noqa: WPS433
+                    center_lat = (float(args.min_lat) + float(args.max_lat)) / 2
+                    center_lng = (float(args.min_lng) + float(args.max_lng)) / 2
+                    # Use the longer half-axis as the radius — the bbox
+                    # is the bounding square of a circle, so any corner
+                    # is sqrt(2)*radius from the center; we want enough
+                    # to cover the whole inscribed circle plus a bit.
+                    half_lat_km = (float(args.max_lat) - center_lat) * 111.0
+                    half_lng_km = (float(args.max_lng) - center_lng) * 111.0 * math.cos(math.radians(center_lat))
+                    radius_km = max(half_lat_km, half_lng_km)
+                    nrf_fetch = _nrf.build_playwright_fetch(context, article_headers)
+                    discovered, names = await _nrf.discover_cortarnos_async(
+                        nrf_fetch, center_lat, center_lng, radius_km,
+                    )
+                    if discovered:
+                        sample = ", ".join(f"{cn}={nm}" for cn, nm in names[:8])
+                        if len(names) > 8:
+                            sample += f", … (+{len(names) - 8} more)"
+                        print(f"[crawl:naver] naver-finder discovered {len(discovered)} "
+                              f"cortarNos: {sample}", flush=True)
+                        # Union into explicit_cortarnos so the backstop
+                        # below picks them up. Dedup happens naturally
+                        # in the missing_cortarnos comprehension.
+                        explicit_cortarnos = sorted(set(explicit_cortarnos) | set(discovered))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[crawl:naver] naver-finder failed: {exc!r} — "
+                          f"falling back to env/DB cortarNos only", flush=True)
+            elif not article_headers:
+                print(f"[crawl:naver] naver-finder skipped: no article_headers captured "
+                      f"(grid pass didn't yield a usable list-API URL)", flush=True)
+
             # Coverage backstop: paginate every cortarNo from RENTMAP_NAVER_CORTARNOS
-            # that the grid didn't already cover. Defends against Naver's
-            # non-deterministic ms= → cortarNo mapping (the same tile can flip
-            # between dongs across requests, so grid-only coverage can silently
-            # drop entire dongs of listings).
+            # (plus whatever naver-finder discovered above) that the grid
+            # didn't already cover. Defends against Naver's non-deterministic
+            # ms= → cortarNo mapping (the same tile can flip between dongs
+            # across requests, so grid-only coverage can silently drop entire
+            # dongs of listings).
             template = first_list_url
             missing_cortarnos = [cn for cn in explicit_cortarnos if cn not in seen_cortarnos]
             if missing_cortarnos and template and article_headers:

@@ -383,25 +383,18 @@ def _run_schedule_locked(schedule_id: int) -> None:
             except region_store.RegionError:
                 pass
 
-    # Naver cortarNo auto-learning via the region-hierarchy API. Runs
-    # only for the dedicated naver source — all_light skips naver, and
-    # the rentmap-server container that runs all_light shouldn't pay
-    # the discovery cost. Once per container lifetime per region (same
-    # cadence as the daangn learner), so the 5-12 HTTP calls are paid
-    # once per restart, not per crawl. The discovered IDs land in
-    # regions.naver_cortar_nos, which build_env then exports as
-    # RENTMAP_NAVER_CORTARNOS for the crawler's explicit-backstop pass.
-    if source == "naver":
-        with _NAVER_LEARN_DONE_LOCK:
-            need_learn_naver = region["id"] not in _NAVER_LEARN_DONE
-            if need_learn_naver:
-                _NAVER_LEARN_DONE.add(region["id"])
-        if need_learn_naver:
-            _learn_naver_cortarnos(region)
-            try:
-                region = region_store.get_region(region["id"])
-            except region_store.RegionError:
-                pass
+    # Naver cortarNo auto-discovery is wired INSIDE crawl_naver_async
+    # itself (rentmap.py) — it must run there to reuse the Playwright
+    # session's captured Authorization header (the region API rejects
+    # anonymous calls with HTTP 429 regardless of rate). The pre-crawl
+    # hook we tried briefly here couldn't authenticate and was a no-op
+    # in practice; ``_learn_naver_cortarnos`` is kept above for ad-hoc
+    # operator use but is no longer called by the scheduler.
+    #
+    # The crawler dumps its full discovered cortarNo set to
+    # --cortarnos-out, and _merge_naver_cortarnos below UNION-merges
+    # that into regions.naver_cortar_nos so the next run's explicit-
+    # backstop pass benefits from the prior discoveries.
 
     env = build_env(region)
     label = f"region={region['slug']} source={source}"
