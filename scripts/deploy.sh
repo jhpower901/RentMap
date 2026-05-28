@@ -95,6 +95,31 @@ if [ "$LOCAL_REF" = "$REMOTE_REF" ]; then
 else
     log "pulling: $LOCAL_REF -> $REMOTE_REF"
     git log --oneline "$LOCAL_REF..$REMOTE_REF"
+
+    # Pre-pull guard: if the incoming change ADDS a file we already
+    # have on disk untracked, git refuses ("would be overwritten by
+    # merge") even when the local copy is identical. Move conflicting
+    # files into a dedicated backup so the pull goes through. The
+    # operator can diff them later if they actually had local edits;
+    # for the typical case (someone hand-copied the new file before
+    # the pull) the moved version is just a duplicate.
+    CONFLICT_BACKUP_DIR="$(mktemp -d -t rentmap-conflict.XXXXXX)"
+    CONFLICTS=0
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        if [ -e "$f" ] && ! git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+            log "moving untracked $f aside (incoming pull adds it)"
+            mkdir -p "$CONFLICT_BACKUP_DIR/$(dirname "$f")"
+            mv "$f" "$CONFLICT_BACKUP_DIR/$f"
+            CONFLICTS=$((CONFLICTS + 1))
+        fi
+    done < <(git diff --name-only --diff-filter=A "$LOCAL_REF..$REMOTE_REF" 2>/dev/null || true)
+    if [ "$CONFLICTS" -gt 0 ]; then
+        log "moved $CONFLICTS conflicting file(s) to $CONFLICT_BACKUP_DIR (keep for diff if you had local edits)"
+    else
+        rmdir "$CONFLICT_BACKUP_DIR" 2>/dev/null || true
+    fi
+
     git pull --ff-only
 fi
 
