@@ -3029,9 +3029,9 @@ def gen_web(args: argparse.Namespace) -> None:
     # to write_platform for backward compatibility with the legacy
     # __DATA__ placeholder (template doesn't reference it anymore, so this
     # is a no-op string replace).
-    write_platform(out_dir / "dabang.html", tpl_platform, "dabang", "#FF5C38", "[]")
+    write_platform(out_dir / "dabang.html", tpl_platform, "dabang", "#326CF9", "[]")
     write_platform(out_dir / "daangn.html", tpl_platform, "daangn", "#FF6F00", "[]")
-    write_platform(out_dir / "zigbang.html", tpl_platform, "zigbang", "#6366F1", "[]")
+    write_platform(out_dir / "zigbang.html", tpl_platform, "zigbang", "#EF4444", "[]")
     write_platform(out_dir / "naver.html", tpl_platform, "naver", "#03C75A", "[]")
 
     # Data files are per-region; the slug suffix matches the one
