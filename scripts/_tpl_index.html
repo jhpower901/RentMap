@@ -300,10 +300,11 @@ function applyFilter() {
     const rentOk = data.rent    === null || data.rent    <= maxRent;
     const areaOk = AreaFilter.applies(data);
     if (chk && depOk && rentOk && areaOk) {
+      if (!map.hasLayer(marker)) marker.addTo(map);
       marker.setStyle({ fillOpacity: 0.85, opacity: 1 });
       shown[src]++;
     } else {
-      marker.setStyle({ fillOpacity: 0, opacity: 0 });
+      if (map.hasLayer(marker)) marker.remove();
     }
   });
 
