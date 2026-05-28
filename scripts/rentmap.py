@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import builtins as _builtins
 import csv
 import html
 import json
@@ -177,6 +178,14 @@ NAVER_COLUMNS = [
     "building_use", "description", "options", "security_options",
     "image_1", "image_2", "crawl_note",
 ]
+
+
+def print(*args, **kwargs):  # noqa: A001 — shadow builtins.print within this module only
+    """Prepend HH:MM:SS to every print() call in rentmap.py."""
+    _ts = datetime.now().strftime("%H:%M:%S")
+    if args and isinstance(args[0], str):
+        args = (f"{_ts} {args[0]}", *args[1:])
+    _builtins.print(*args, **kwargs)
 
 
 def first(obj: Any, names: list[str], default: Any = "") -> Any:

@@ -37,6 +37,10 @@ import psycopg
 
 log = logging.getLogger(__name__)
 
+
+def _ts() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
 # Price fields contribute to price_hash *and* content_hash.
 PRICE_KEYS = (
     "trade_type",
@@ -997,7 +1001,7 @@ def reconcile_csv_rows_safely(
         sys.path.insert(0, str(_Path(__file__).resolve().parent))
         from db import session, DBConfigError  # noqa: WPS433
     except ImportError as exc:
-        print(f"[reconcile] {label}: skipped - db module unavailable ({exc})")
+        print(f"{_ts()} [reconcile] {label}: skipped - db module unavailable ({exc})")
         return None
 
     dry = os.environ.get("RENTMAP_RECONCILE_DRY_RUN_WEBHOOKS", "").strip().lower() in ("1", "true", "yes")
@@ -1012,15 +1016,15 @@ def reconcile_csv_rows_safely(
                 dry_run_webhooks=dry,
             )
     except DBConfigError as exc:
-        print(f"[reconcile] {label}: skipped - DB not configured ({exc})")
+        print(f"{_ts()} [reconcile] {label}: skipped - DB not configured ({exc})")
         return None
     except Exception as exc:  # noqa: BLE001 — last-resort safety net
-        print(f"[reconcile] {label}: failed (CSV write OK) - {type(exc).__name__}: {exc}")
+        print(f"{_ts()} [reconcile] {label}: failed (CSV write OK) - {type(exc).__name__}: {exc}")
         return None
 
     suffix = " [dry-run-webhooks]" if dry else ""
     print(
-        f"[reconcile] {label}{suffix}: run={summary.crawl_run_id} "
+        f"{_ts()} [reconcile] {label}{suffix}: run={summary.crawl_run_id} "
         f"disc={summary.discovered} Δprice={summary.price_changed} "
         f"Δdetail={summary.detail_changed} unchanged={summary.unchanged} "
         f"missing={summary.missing} removed={summary.removed} "
