@@ -21,7 +21,12 @@ the immediate children with centerLat/centerLon. We:
 3. For each kept 시도, fetch 시군구 list and keep those within
    ``radius + 15km`` (city centers tend to be near the city center).
 4. For each kept 시군구, fetch 읍면동 list and keep those whose centroid
-   is within the *exact* search ``radius``.
+   is within ``radius + 1.5km``. The leaf margin matters: a dong's
+   centroid being just outside the search circle doesn't mean the dong
+   itself doesn't overlap (urban dongs are 1.5–2.5km across, so the
+   centroid is typically ~1km from the dong's edge). The per-listing
+   bbox filter in ``crawl_naver_one`` discards out-of-area articles
+   downstream anyway.
 
 Cost: ~25-30 HTTP calls per discovery (one per node we descend into:
 1 root + 1-2 시도 + 3-5 시군구 + 5-10 구/동 + 10-15 leaf 동s). With
@@ -92,6 +97,20 @@ _DEBUG = bool(__import__("os").environ.get("RENTMAP_NAVER_FINDER_DEBUG"))
 # tighter margin works.
 _SIDO_MARGIN_KM = 80.0
 _SIGUNGU_MARGIN_KM = 15.0
+
+# Leaf-level margin: a dong's centroid being just outside the search
+# radius doesn't mean the dong has no overlap — a typical urban dong
+# is 1.5–2.5 km across, so its centroid can be ~1–1.5 km from its
+# edges. Without this margin we drop boundary dongs (we saw
+# 본오1동/사1동/고잔2동/선부1동 lost for ERICA every run despite all
+# being within reach of the 3km circle).
+#
+# Including a few extra dongs is essentially free in the crawl: the
+# per-listing bbox filter inside ``crawl_naver_one`` discards any
+# article that lands outside the exact bbox, so over-inclusion at the
+# dong level just adds a handful of HTTP calls but never pollutes the
+# CSV with out-of-area listings.
+_DONG_MARGIN_KM = 1.5
 
 
 def _get_region_list(cortar_no: str = "") -> list[dict[str, Any]] | None:
@@ -224,9 +243,11 @@ def discover_cortarnos(
         time.sleep(_REQUEST_DELAY_S)
 
         if not children:
-            # Leaf. Strict bbox check before adding — only dongs whose
-            # centroid lies inside the search disc count.
-            if dist is not None and dist <= radius_km:
+            # Leaf. Add when the dong centroid lies inside
+            # ``radius + _DONG_MARGIN_KM`` — see _DONG_MARGIN_KM docs
+            # for why a strict bbox would drop legitimate boundary
+            # dongs whose area still overlaps the search disc.
+            if dist is not None and dist <= radius_km + _DONG_MARGIN_KM:
                 leaves.append(region)
             continue
 
