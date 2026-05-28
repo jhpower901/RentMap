@@ -82,6 +82,8 @@ version=1
 
 The list API returns opaque room IDs for detail lookup. The detail API includes the public listing number, price, address, agent office, options, room detail, and image URLs.
 
+Detail fetches run in parallel via `ThreadPoolExecutor(max_workers=DABANG_DETAIL_WORKERS)` (default 8). Each worker creates its own `requests.Session` to avoid thread-safety issues. 1340 rooms now complete in ~68 s (was ~160 s+ with sequential 120 ms delays).
+
 ## Search area used
 
 The Ajou University crawl used this bounding box:
@@ -162,6 +164,7 @@ The script exports CSV by default. If you need the raw detail payload for debugg
 
 - Dabang can change API paths, headers, field names, or bot protections without notice.
 - As of 2026-05-22, the current web app uses `GET /api/v5/room-list/category/one-two/bbox` with `bbox`, not the older `POST` shape with `location`.
+- If rate-limit errors (HTTP 429) appear during parallel detail fetches, reduce `DABANG_DETAIL_WORKERS` in `scripts/rentmap.py`.
 - Results can include duplicate physical rooms posted by different agencies.
 - Dabang often hides exact jibun/road address before contacting the agency. Treat exported coordinates as Dabang-provided map coordinates, not legally verified addresses.
 - Monthly support applies to rent only, not maintenance fees or utilities.

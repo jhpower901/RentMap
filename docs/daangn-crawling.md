@@ -10,9 +10,7 @@ This documents the Karrot Real Estate crawl used for the Ajou University one-roo
   - Deposit: 0 to 30,000,000 KRW
   - Monthly rent: 0 to 600,000 KRW
 
-## Data source: SSR page + RELAY_STORE
-
-Unlike Dabang which has a JSON list API, Karrot Real Estate embeds data in two ways:
+## Data source: SSR listing page + GraphQL detail API
 
 ### 1. Listing page SSR (`window.__remixContext`)
 
@@ -24,11 +22,33 @@ ctx.state.loaderData['routes/kr.realty._index'].realtyPosts.realtyPosts
 
 Fields available from the listing page: `title`, `images`, `salesType`, `trades`, `area`, `floor`, `address`, `region`, `manageCost`, `buildingApprovalDate`, `writerType`, `chatRoomCount`, `watchCount`, `webUrl`, `status`, `content`.
 
-### 2. Article detail page (`window.RELAY_STORE`)
+### 2. Article detail via GraphQL persisted query (discovered 2026-05-28)
 
-The page `https://realty.daangn.com/articles/{ARTICLE_ID}` embeds Relay store data as a JSON string in `window.RELAY_STORE`. The store is a normalized flat object; some fields use `__ref` pointers to other nodes.
+**Instead of scraping the SSR detail HTML**, the crawler now calls the GraphQL endpoint directly:
 
-Additional fields from the detail page: `publicCoordinate` (lat/lon), `publicAddress`, `roomCnt`, `bathroomCnt`, `subwayStations`, `writerTypeV2`, `buildingApprovalDate`.
+```
+POST https://realty.kr.karrotmarket.com/graphql
+operationName: ArticleDetailQuery
+variables: {"articleId": "<id>"}
+extensions: {"persistedQuery": {"version": 1, "sha256Hash": "<hash>"}}
+```
+
+The hash for `ArticleDetailQuery` was found by scanning the Relay JS bundles from `realty.daangn.com/assets/`. It is stored as `DAANGN_ARTICLE_DETAIL_QUERY_HASH` in `scripts/rentmap.py`.
+
+Detail fields returned by GraphQL: `publicCoordinate` (lat/lon), `publicAddress`,
+`roomCount`, `bathroomCount`, `buildingApprovalDate`, `buildingOrientation` (e.g. `SOUTH_FACING`),
+`buildingUsage` (e.g. `SINGLE_FAMILY_HOUSING`), `moveInDate`, `options[]` (PARKING/ELEVATOR/…),
+`includeManageCostOptionV3[]` (maintenance inclusions), `manageCostChargeType` (FIXED/ACTUAL),
+`bizProfile.name` (agency name), `description`.
+
+All `ENUM` values are translated to Korean via mapping tables in `scripts/rentmap.py`:
+- `DAANGN_ORIENTATION_MAP` — 동향/서향/남향/북향/…
+- `DAANGN_BUILDING_USAGE_MAP` — 단독주택/공동주택/오피스텔/…
+- `DAANGN_OPTION_LABEL_MAP` — 주차/엘리베이터/세탁기/전기레인지/다락방/…
+- `DAANGN_MANAGE_COST_OPTION_MAP` — 수도/전기/가스/인터넷/…
+
+Detail fetches run in parallel via `ThreadPoolExecutor(max_workers=DAANGN_GQL_WORKERS)`.
+402 articles now complete in ~25 s (was ~80 s with sequential SSR scraping).
 
 ## Region IDs near Ajou University
 
@@ -113,34 +133,25 @@ Docker:
 - area_m2
 - floor
 - approval_date
-- options              *(facility tokens detected in the description body — see "Description + options" below)*
-- description          *(full free-text body the agent wrote on the article page)*
+- direction             *(GraphQL `buildingOrientation` → 동향/남향/…)*
+- parking              *(GraphQL `options[PARKING].value` → 가능/불가능)*
+- elevator             *(GraphQL `options[ELEVATOR].value` → 있음/없음)*
+- pet_allowed          *(GraphQL `options[PET].value` → 가능/불가능)*
+- loan_available       *(GraphQL `options[MORTGAGE].value` → 가능/불가능)*
+- building_use         *(GraphQL `buildingUsage` → 단독주택/공동주택/…)*
+- move_in              *(GraphQL `moveInDate`)*
+- maintenance_basis    *(GraphQL `manageCostChargeType`: FIXED/ACTUAL)*
+- maintenance_items    *(GraphQL `includeManageCostOptionV3`: 수도; 전기; 가스; …)*
+- options              *(GraphQL `options[]` YES values translated via DAANGN_OPTION_LABEL_MAP)*
+- description          *(GraphQL `description` — full free-text body)*
 - image_1
 - image_2
 - crawl_note
 
-## Description + options
-
-The full free-text body is captured from the SSR HTML via
-`get_daangn_article_detail`. The page can inline multiple articles
-(related listings, recommendations, etc.), so the extractor anchors
-to `originalId=<article_id>` and then takes the first `content\":\"…\"`
-field that follows. The captured string is JSON-decoded (lazy regex
-+ `json.loads` + a second targeted unescape pass) so the body has
-real newlines and decoded quotes.
-
-`options` is derived by scanning that body for facility keywords listed
-in `DAANGN_FACILITY_KEYWORDS` in `scripts/rentmap.py`. The proper
-"시설 정보" grid that the user sees on the rendered page is React-
-rendered from a separate fetch we don't see in the SSR HTML, but most
-agents repeat the same vocabulary in the description so a keyword scan
-recovers ~80% of the signal. Add tokens to that constant if you spot
-a new label Daangn uses (e.g. `"펫허용"`, `"오토바이주차"`, ...).
-
 ## Caveats
 
-- Karrot can change their SSR page structure, route keys, or RELAY_STORE format without notice.
-- As of 2026-05-22, the listing page uses `routes/kr.realty._index` as the loader data key.
+- Karrot can change their SSR page structure, route keys, or GraphQL persisted-query hashes without notice. If `ArticleDetailQuery` starts returning `PersistedQueryKeyNotFound`, re-run `scripts/_scan_daangn_bundles.py` to extract the updated hash and update `DAANGN_ARTICLE_DETAIL_QUERY_HASH` in `scripts/rentmap.py`.
+- As of 2026-05-28, the listing page uses `routes/kr.realty._index` as the loader data key; the GraphQL endpoint is `realty.kr.karrotmarket.com/graphql`.
 - The SSR page returns a fixed snapshot; listings added after page load are not included.
 - Most listings are one page (no pagination observed). If a region has many listings, older ones may be cut off.
 - Karrot listings include both agency (BROKER) and individual owner (DIRECT_USER) postings. Only BROKER listings are comparable to Dabang/Zigbang agency listings.

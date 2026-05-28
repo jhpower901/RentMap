@@ -22,11 +22,12 @@ Direct HTTP requests to the Naver Land article API can return `401` or `429`. Th
 reusable script therefore opens Chrome via Playwright, enters through the Naver Land
 home page, and captures the same article-list JSON that the web app requests.
 
-Two endpoints are hit:
+Three endpoints are hit:
 
 ```text
-GET https://new.land.naver.com/api/articles?cortarNo=...&page=N    (list)
-GET https://new.land.naver.com/api/articles/{articleNo}            (detail)
+GET https://new.land.naver.com/api/cortars?zoom=16&centerLat=X&centerLon=Y   (cortarNo lookup — fast, no auth)
+GET https://new.land.naver.com/api/articles?cortarNo=...&page=N               (list — requires Authorization: Bearer JWT)
+GET https://new.land.naver.com/api/articles/{articleNo}                        (detail — requires same JWT)
 ```
 
 The app supplies dynamic query parameters such as `cortarNo`, map bounds, zoom,
@@ -36,6 +37,15 @@ successful list request, then:
 1. Walks `page=2..max_pages` for that `cortarNo` (until `isMoreData` is `False`).
 2. Calls the detail endpoint once per bbox article to fetch the real
    address and the fields not present in the list response.
+
+### cortarNo fast path (discovered 2026-05-28)
+
+The `/api/cortars` endpoint returns `{"cortarNo": "4111710200", ...}` for any
+`(centerLat, centerLon, zoom)` triple **without** needing an Authorization header.
+This means only the **first** grid tile requires a full `page.goto()` browser
+navigation (to capture the JWT). All remaining 36 tiles call `/api/cortars` via
+`context.request.get()` — a lightweight HTTP call inside the existing browser
+context. Result: 37-tile Ajou grid completes in ~21 s (`fast_tiles=36`).
 
 ## Coverage strategy
 
