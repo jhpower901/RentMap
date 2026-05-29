@@ -385,7 +385,14 @@ def _matches_webhook(
     event: dict[str, Any],
     webhook: dict[str, Any],
 ) -> bool:
-    """Return True if the event passes all of the webhook's filters."""
+    """Return True if the event passes all of the webhook's filters.
+
+    Filter composition:
+    - event_type / platforms / price caps: AND (must all match if set)
+    - Location group (region_ids + polygon): OR within — passes if ANY
+      configured location filter matches. Setting neither lifts the
+      location restriction entirely (the prior default).
+    """
     if event["event_type"] not in (webhook["event_types"] or []):
         return False
     if event["platform_code"] not in (webhook["platforms"] or []):
@@ -398,9 +405,14 @@ def _matches_webhook(
         rent = event.get("monthly_rent_won")
         if rent is not None and rent > webhook["max_rent_manwon"] * 10000:
             return False
-    if webhook["use_area_filter"] and webhook.get("area_filter_enabled"):
+
+    region_ids = list(webhook.get("region_ids") or [])
+    polygon: list[list[float]] | None = None
+    polygon_enabled = bool(
+        webhook.get("use_area_filter") and webhook.get("area_filter_enabled")
+    )
+    if polygon_enabled:
         raw = webhook.get("points_json")
-        polygon: list[list[float]] | None = None
         if isinstance(raw, str):
             try:
                 polygon = json.loads(raw)
@@ -408,13 +420,28 @@ def _matches_webhook(
                 polygon = None
         elif isinstance(raw, list):
             polygon = raw
-        if polygon and len(polygon) >= 3:
-            lat = event.get("lat")
-            lng = event.get("lng")
-            if lat is not None and lng is not None:
-                if not _point_in_polygon(float(lat), float(lng), polygon):
-                    return False
-    return True
+    has_polygon = bool(polygon and len(polygon) >= 3)
+    has_region = bool(region_ids)
+
+    if not has_polygon and not has_region:
+        return True  # no location restriction
+
+    # Region match: ANY overlap between webhook's region_ids and the
+    # listing's listing_regions tags.
+    if has_region:
+        listing_regions = list(event.get("listing_region_ids") or [])
+        if any(int(rid) in region_ids for rid in listing_regions):
+            return True
+
+    # Polygon match: point-in-polygon against the user's saved polygon.
+    if has_polygon:
+        lat = event.get("lat")
+        lng = event.get("lng")
+        if lat is not None and lng is not None:
+            if _point_in_polygon(float(lat), float(lng), polygon):  # type: ignore[arg-type]
+                return True
+
+    return False
 
 
 # Batch cap for fan-out to avoid long-held locks on the events table.
@@ -428,10 +455,30 @@ def fan_out_new_events() -> int:
 
     Returns the number of events processed (not the number of deliveries
     created — one event may fan out to 0 or N webhooks).
+
+    No active subscribers: sweep every pending event to a 'fanned out'
+    + 'sent' state with zero delivery rows. A late-arriving webhook
+    registration should only see events from its registration point
+    forward — never inherit a multi-day backlog as a flood. Without
+    this sweep, events with ``user_webhook_fanned_out_at IS NULL``
+    accumulate forever and the first subscriber gets blasted on next
+    fan_out tick.
     """
     active_webhooks = webhook_store.list_active_for_fanout()
     if not active_webhooks:
-        return 0
+        with session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE listing_status_events
+                SET user_webhook_fanned_out_at = COALESCE(user_webhook_fanned_out_at, now()),
+                    webhook_sent_at = COALESCE(webhook_sent_at, now())
+                WHERE user_webhook_fanned_out_at IS NULL
+                   OR webhook_sent_at IS NULL
+                """
+            )
+            swept = cur.rowcount
+            conn.commit()
+        return swept
 
     processed = 0
     with session() as conn, conn.cursor() as cur:
@@ -446,7 +493,15 @@ def fan_out_new_events() -> int:
                 COALESCE(curr.deposit_won, prev.deposit_won, latest.deposit_won)
                     AS deposit_won,
                 COALESCE(curr.monthly_rent_won, prev.monthly_rent_won, latest.monthly_rent_won)
-                    AS monthly_rent_won
+                    AS monthly_rent_won,
+                -- All regions this listing is tagged for. Empty array for
+                -- pre-012 orphan listings; the matcher's region check then
+                -- can't fire on those rows (polygon still can).
+                COALESCE((
+                    SELECT array_agg(region_id ORDER BY region_id)
+                    FROM listing_regions
+                    WHERE listing_id = l.id
+                ), '{}') AS listing_region_ids
             FROM listing_status_events e
             JOIN listings l ON l.id = e.listing_id
             JOIN platforms p ON p.id = l.platform_id

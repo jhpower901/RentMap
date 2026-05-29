@@ -35,6 +35,24 @@ nav a.active-nav{background:#222;color:#fff}
 .btn-primary{background:#222;color:#fff;border-color:#222}
 .btn-primary:hover{background:#333}
 .controls select{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;font-family:inherit;background:#fff;cursor:pointer}
+/* 좋아요 / 싫어요 view toggle — sits inside .controls. Active button is the
+   solid dark style to mirror .btn-primary so the current bucket is obvious
+   even when the count is zero. */
+.view-toggle{display:inline-flex;border:1px solid #ccc;border-radius:6px;overflow:hidden}
+.view-toggle button{background:#fff;border:none;padding:5px 12px;font-size:13px;cursor:pointer;font-family:inherit;color:#222;border-right:1px solid #ddd}
+.view-toggle button:last-child{border-right:none}
+.view-toggle button.active{background:#4b5563;color:#fff}
+.view-toggle button:hover:not(.active){background:#f0f0f0}
+/* Disliked card: fade the whole card so it visibly sinks below 좋아요 ones,
+   and lighten the pill so the "싫어요" tag doesn't look harsh next to the
+   muted card body. Hover restores opacity for legibility. */
+.fav-card.is-dislike{background:#fff;opacity:.55;transition:opacity .15s}
+.fav-card.is-dislike:hover{opacity:.92}
+.fav-card.is-dislike .fav-title{color:#6b7280}
+.kind-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;background:#ef4444}
+.kind-pill.kind-dislike{background:#e2e8f0;color:#64748b}
+.btn-toggle-kind{border-color:#cbd5e1}
+.btn-toggle-kind:hover{background:#eef2ff}
 
 /* Favorite map */
 .fav-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,400px);gap:14px;align-items:start}
@@ -232,6 +250,10 @@ nav a.active-nav{background:#222;color:#fff}
 
 <div class="page">
   <div class="controls">
+    <div class="view-toggle" role="tablist" aria-label="좋아요 / 싫어요 보기">
+      <button type="button" data-view="like" class="active" role="tab" aria-selected="true">❤️ 좋아요 <span id="cntLike">0</span></button>
+      <button type="button" data-view="dislike" role="tab" aria-selected="false">👎 싫어요 <span id="cntDislike">0</span></button>
+    </div>
     <input type="text" id="search" placeholder="검색 (제목, 주소, 중개사...)">
     <label style="font-size:13px;display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer">
       <input type="checkbox" id="hideGone"> 매물없음 숨기기
@@ -304,7 +326,7 @@ nav a.active-nav{background:#222;color:#fff}
 
 <script src="region-data-loader.js?v=20260526-region1"></script>
 <script src="auth.js?v=20260525-auth1"></script>
-<script src="favorites.js?v=20260526-user-guard"></script>
+<script src="favorites.js?v=20260529-dislike"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script src="listing-info.js?v=20260527-naverurl"></script>
 <script>
@@ -527,13 +549,21 @@ function buildCard(fav) {
     ? `<span class="score-chip">★ ${score.toFixed(1)}/5</span>`
     : `<span class="score-chip none">미평가</span>`;
 
+  const isDislike = fav.kind === 'dislike';
   const card = document.createElement('div');
-  card.className = 'fav-card';
+  card.className = 'fav-card' + (isDislike ? ' is-dislike' : '');
   card.dataset.favKey = fav.key;
+  // 좋아요 → 싫어요 (and back) toggle. Stays a single button so the row
+  // header doesn't sprout a third control next to 제거/🔗.
+  const toggleLabel = isDislike ? '❤️ 좋아요로' : '👎 싫어요로';
+  const kindPill = isDislike
+    ? '<span class="kind-pill kind-dislike">싫어요</span>'
+    : '<span class="kind-pill">좋아요</span>';
   card.innerHTML = `
     <div class="fav-header">
       <div class="fav-main">
         <span class="badge" style="background:${srcColor}">${esc(srcName)}</span>
+        ${kindPill}
         <span class="fav-title">${esc(d.title || d.address || '제목없음')}</span>
         ${statusHtml}
         ${scoreHtml}
@@ -545,6 +575,7 @@ function buildCard(fav) {
           const linkUrl = safeUrl(window.ListingInfo.resolveListingUrl(d.url, fav.source, d));
           return linkUrl ? `<a href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer" class="btn" style="padding:4px 8px">🔗</a>` : '';
         })()}
+        <button class="btn btn-toggle-kind fav-toggle-kind" type="button" style="padding:4px 8px">${toggleLabel}</button>
         <button class="btn btn-danger fav-remove" type="button" style="padding:4px 8px">제거</button>
       </div>
       <span class="expand-arrow">▼</span>
@@ -564,6 +595,7 @@ function buildCard(fav) {
   });
   const link = card.querySelector('.fav-actions a');
   if (link) link.addEventListener('click', e => e.stopPropagation());
+  card.querySelector('.fav-toggle-kind').addEventListener('click', e => doToggleKind(e, fav));
   card.querySelector('.fav-remove').addEventListener('click', e => doRemove(e, fav.id, fav.source));
   return card;
 }
@@ -577,6 +609,11 @@ function appendFavCard(parent, fav) {
   }
 }
 
+// 'like' | 'dislike' — switched by the view-toggle buttons in the controls bar.
+// Persisted in localStorage so revisiting the page lands on the same view.
+const VIEW_KEY = 'rentmap.favoritesView';
+let favoritesView = localStorage.getItem(VIEW_KEY) === 'dislike' ? 'dislike' : 'like';
+
 function renderList() {
   document.querySelectorAll('.fav-card.open').forEach(card => {
     if (card.dataset.favKey) openFavKeys.add(card.dataset.favKey);
@@ -584,7 +621,18 @@ function renderList() {
   const q = document.getElementById('search').value.toLowerCase();
   const hideGone = document.getElementById('hideGone').checked;
   const groupBy = document.getElementById('groupBy').value;
-  const favs = Favorites.getAll();
+  const likes = Favorites.getAll();
+  const dislikes = Favorites.getDislikes();
+  // Counts in the toggle are global — they ignore search/area filters so the
+  // user always sees the absolute size of each bucket.
+  document.getElementById('cntLike').textContent = likes.length;
+  document.getElementById('cntDislike').textContent = dislikes.length;
+  document.querySelectorAll('.view-toggle button').forEach(btn => {
+    const on = btn.dataset.view === favoritesView;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  const favs = favoritesView === 'dislike' ? dislikes : likes;
   const filtered = favs.filter(fav => {
     const d = freshData(fav);
     if (hideGone && availability(fav) === 'gone') return false;
@@ -602,7 +650,13 @@ function renderList() {
   const emptyEl = document.getElementById('emptyMsg');
   listEl.innerHTML = '';
 
-  if (!favs.length) { emptyEl.style.display = ''; return; }
+  if (!favs.length) {
+    emptyEl.style.display = '';
+    emptyEl.innerHTML = favoritesView === 'dislike'
+      ? '싫어요한 매물이 없습니다.<br>각 플랫폼 페이지에서 👎 버튼으로 추가하세요.'
+      : '좋아요한 매물이 없습니다.<br>각 플랫폼 페이지에서 ❤️ 버튼으로 추가하세요.';
+    return;
+  }
   emptyEl.style.display = 'none';
 
   if (groupBy === 'agency') {
@@ -826,8 +880,20 @@ function moveGallery(delta) {
 
 function doRemove(e, id, source) {
   e.stopPropagation();
-  if (!confirm('좋아요를 취소하시겠습니까?')) return;
+  if (!confirm('이 매물을 목록에서 제거하시겠습니까?')) return;
   Favorites.remove(id, source);
+  renderList();
+}
+
+// Flip a card between 좋아요 ⇄ 싫어요 without losing notes / rating (favorites.js
+// preserves them across kind changes). The card hops out of the current view
+// because the same key can't sit in both buckets at once.
+function doToggleKind(e, fav) {
+  e.stopPropagation();
+  const d = freshData(fav);
+  const listing = { ...d, id: fav.id, source: fav.source };
+  if (fav.kind === 'dislike') Favorites.add(listing);
+  else Favorites.addDislike(listing);
   renderList();
 }
 
@@ -879,6 +945,20 @@ document.getElementById('manualSave').addEventListener('click', () => {
 
 document.getElementById('search').addEventListener('input', renderList);
 document.getElementById('hideGone').addEventListener('change', renderList);
+
+// View toggle: 좋아요 ⇄ 싫어요. We clear openFavKeys when switching so the
+// previously expanded card doesn't auto-open on the other side (different
+// listings entirely).
+document.querySelectorAll('.view-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const next = btn.dataset.view === 'dislike' ? 'dislike' : 'like';
+    if (next === favoritesView) return;
+    favoritesView = next;
+    localStorage.setItem(VIEW_KEY, favoritesView);
+    openFavKeys.clear();
+    renderList();
+  });
+});
 
 const GROUP_KEY = 'rentmap.favoritesGroupBy';
 const groupSel = document.getElementById('groupBy');

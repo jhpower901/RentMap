@@ -98,16 +98,26 @@ def run_webhook_flush(trigger: str = "manual") -> None:
 
 
 def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
+    """Count distinct listings flagged 'missing' anywhere — see notes in
+    server._missing_queue_count. Per-region missing rows live in
+    listing_regions post-migration 012; legacy globals stay valid too."""
     try:
         from db import session  # noqa: WPS433
         with session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT COUNT(*) AS n
+                SELECT COUNT(DISTINCT l.id) AS n
                 FROM listings l
                 JOIN platforms p ON p.id = l.platform_id
                 WHERE p.code = ANY(%s)
-                  AND l.current_status = 'missing'
+                  AND (
+                      l.current_status = 'missing'
+                      OR EXISTS (
+                          SELECT 1 FROM listing_regions
+                          WHERE listing_id = l.id
+                            AND current_status = 'missing'
+                      )
+                  )
                 """,
                 (list(platform_codes),),
             )

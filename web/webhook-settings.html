@@ -153,10 +153,18 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
       </div>
     </div>
 
+    <div class="form-group">
+      <label>지역 (체크한 지역의 매물만 알림 — 미선택 시 지역 제한 없음)</label>
+      <div class="check-group" id="fRegionIds">
+        <span style="color:#888;font-size:12px">지역 목록을 불러오는 중…</span>
+      </div>
+      <small>면적 필터와 OR로 결합돼요. 지역 + 폴리곤 둘 다 비우면 모든 지역 알림.</small>
+    </div>
+
     <div class="form-group" style="margin-top:14px">
       <label class="toggle-row">
         <input type="checkbox" id="fUseAreaFilter" checked>
-        면적 필터 사용 (내 면적 폴리곤 범위 안의 매물만)
+        면적 필터 사용 (내 면적 폴리곤 범위 안의 매물도 포함)
       </label>
     </div>
 
@@ -215,6 +223,40 @@ function renderChips(arr, prefix) {
   }).join('');
 }
 
+// Region cache populated by loadRegions() at boot.
+let REGIONS_BY_ID = {};
+
+function renderRegionList(ids) {
+  if (!ids || !ids.length) return '<span style="color:#666">전 지역</span>';
+  return ids.map(id => {
+    const r = REGIONS_BY_ID[id];
+    const name = r ? (r.name || r.slug) : `#${id}`;
+    return `<span class="chip" style="background:#eef;color:#33a">${name}</span>`;
+  }).join(' ');
+}
+
+async function loadRegions() {
+  try {
+    const res = await fetch('/api/regions');
+    if (!res.ok) throw new Error('fetch failed');
+    const list = await res.json();
+    REGIONS_BY_ID = {};
+    const approved = list.filter(r => r.status === 'approved');
+    approved.forEach(r => { REGIONS_BY_ID[r.id] = r; });
+    const el = document.getElementById('fRegionIds');
+    if (!approved.length) {
+      el.innerHTML = '<span style="color:#888;font-size:12px">승인된 지역이 없습니다.</span>';
+      return;
+    }
+    el.innerHTML = approved.map(r =>
+      `<label><input type="checkbox" value="${r.id}"> ${r.name || r.slug}</label>`
+    ).join('');
+  } catch (exc) {
+    document.getElementById('fRegionIds').innerHTML =
+      '<span style="color:#c00;font-size:12px">지역 목록을 불러오지 못했습니다.</span>';
+  }
+}
+
 function renderCard(wh) {
   const priceRows = [];
   if (wh.maxDepositManwon) priceRows.push(`보증 ${wh.maxDepositManwon.toLocaleString()}만 이하`);
@@ -242,6 +284,10 @@ function renderCard(wh) {
       <div class="wh-row">
         <span class="wh-row-label">가격</span>
         <span>${priceStr}</span>
+      </div>
+      <div class="wh-row">
+        <span class="wh-row-label">지역</span>
+        <span>${renderRegionList(wh.regionIds)}</span>
       </div>
       <div class="wh-row">
         <span class="wh-row-label">면적필터</span>
@@ -319,6 +365,9 @@ document.getElementById('btnAdd').addEventListener('click', async () => {
   if (!etypes.length) { errEl.textContent = '이벤트를 하나 이상 선택하세요.'; return; }
   const platforms = getChecked('fPlatforms');
   if (!platforms.length) { errEl.textContent = '플랫폼을 하나 이상 선택하세요.'; return; }
+  // Region ids are stored as numeric strings on the checkbox values;
+  // coerce so the API gets ints (it validates type-strictly).
+  const regionIds = getChecked('fRegionIds').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
 
   const btn = document.getElementById('btnAdd');
   btn.disabled = true;
@@ -334,6 +383,7 @@ document.getElementById('btnAdd').addEventListener('click', async () => {
         maxDepositManwon: parseManwon(document.getElementById('fMaxDeposit').value),
         maxRentManwon: parseManwon(document.getElementById('fMaxRent').value),
         useAreaFilter: document.getElementById('fUseAreaFilter').checked,
+        regionIds,
       }),
     });
     const data = await res.json();
@@ -343,6 +393,8 @@ document.getElementById('btnAdd').addEventListener('click', async () => {
       document.getElementById('fUrl').value = '';
       document.getElementById('fMaxDeposit').value = '';
       document.getElementById('fMaxRent').value = '';
+      // Reset region checkboxes for the next entry.
+      document.querySelectorAll('#fRegionIds input[type=checkbox]').forEach(c => c.checked = false);
       loadWebhooks();
     } else {
       errEl.textContent = data.detail || '등록 실패';
@@ -365,7 +417,13 @@ fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(u => {
   if (u) document.getElementById('userInfo').textContent = u.displayName || u.username;
 });
 
-loadWebhooks();
+// Regions must be loaded before the first card render so the region cache
+// is populated for renderRegionList(). Chain awaits so the card pass uses
+// the resolved cache instead of empty placeholders.
+(async () => {
+  await loadRegions();
+  await loadWebhooks();
+})();
 </script>
 </body>
 </html>

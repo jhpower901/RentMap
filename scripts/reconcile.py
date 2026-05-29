@@ -125,12 +125,19 @@ def compute_hashes(normalized: dict[str, Any]) -> tuple[str, str, str]:
     return content_hash, price_hash, detail_hash
 
 
+_PG_BIGINT_MAX = 9_223_372_036_854_775_807
+
+
 def _to_int_won(manwon: Any) -> int | None:
     """Convert a 만원 number (possibly a CSV string) to 원 (BIGINT).
 
     Guards against the ``inf`` / ``nan`` strings that occasionally slip out of
     the naver crawler when a maintenance amount can't be derived — those would
-    OverflowError in int().
+    OverflowError in int(). Also drops values that would overflow PostgreSQL's
+    BIGINT range, which can happen when a detail-API response includes a
+    composite dict (e.g. ``maintenanceCost.costsByDate``) whose serialization
+    accidentally concatenates all numeric digits — backstop for the upstream
+    parse_manwon_from_text guard.
     """
     if manwon in (None, "", "None"):
         return None
@@ -140,7 +147,10 @@ def _to_int_won(manwon: Any) -> int | None:
         return None
     if value != value or value in (float("inf"), float("-inf")):  # nan or inf
         return None
-    return int(round(value * 10000))
+    result = int(round(value * 10000))
+    if abs(result) > _PG_BIGINT_MAX:
+        return None
+    return result
 
 
 def _to_float(value: Any) -> float | None:
@@ -474,6 +484,64 @@ def _upsert_listing(
     return existing["id"], False, was_reappeared
 
 
+def _resolve_region_id(cur: psycopg.Cursor, target_area: str | None) -> int | None:
+    """Map a region slug to its numeric id.
+
+    ``target_area`` is the slug passed through by the crawler (env
+    ``RENTMAP_AREA_NAME``). Returns None when no slug was given (e.g.
+    backfill CLI replays) or when the slug doesn't match any row — both
+    cases fall back to legacy platform-wide behaviour in _process_missing
+    and to no region-scoping in gen-web.
+    """
+    if not target_area:
+        return None
+    cur.execute("SELECT id FROM regions WHERE slug = %s", (target_area,))
+    row = cur.fetchone()
+    return row["id"] if row else None
+
+
+def _upsert_listing_region(
+    cur: psycopg.Cursor,
+    listing_id: int,
+    region_id: int,
+    crawled_at: datetime,
+    crawl_run_id: int,
+) -> None:
+    """Mark (listing, region) as just-seen by this crawl run.
+
+    Mirrors the listings-row reset _upsert_listing does, but on the per-
+    region lifecycle row. Independent reappeared_at tracking means a
+    listing recovering in ERICA's view doesn't reset AJOU's timeline (and
+    vice versa).
+
+    Called *after* _upsert_listing so the listing_id is guaranteed to
+    exist before we FK-reference it. No-op when no region was resolved —
+    the legacy non-region-scoped reconcile path still works for backfill.
+    """
+    cur.execute(
+        """
+        INSERT INTO listing_regions (
+            listing_id, region_id,
+            first_seen_at, last_seen_at, last_crawl_run_id,
+            current_status, miss_count
+        ) VALUES (%s, %s, %s, %s, %s, 'active', 0)
+        ON CONFLICT (listing_id, region_id) DO UPDATE
+        SET last_seen_at = EXCLUDED.last_seen_at,
+            last_crawl_run_id = EXCLUDED.last_crawl_run_id,
+            current_status = 'active',
+            miss_count = 0,
+            removed_at = NULL,
+            reappeared_at = CASE
+                WHEN listing_regions.current_status = 'removed'
+                THEN EXCLUDED.last_seen_at
+                ELSE listing_regions.reappeared_at
+            END,
+            updated_at = now()
+        """,
+        (listing_id, region_id, crawled_at, crawled_at, crawl_run_id),
+    )
+
+
 def _latest_snapshot(cur: psycopg.Cursor, listing_id: int) -> dict | None:
     cur.execute(
         "SELECT id, content_hash, price_hash, detail_hash "
@@ -622,11 +690,40 @@ def finalize_missing_queue(
     The hourly schedulers call this after their in-schedule recrawls are
     exhausted. At that point a row still in ``missing`` did not recover inside
     the schedule window, so we emit the single user-facing deletion event.
+
+    Operates on per-region rows (post-migration 012) plus the legacy global
+    ``listings.current_status='missing'`` set. A listing whose listing_regions
+    rows have all hit 'removed' triggers a single user-facing 'removed'
+    event — the global aggregate transition is what subscribers care about.
     """
     codes = list(platform_codes)
     if not codes:
         return 0
     with conn.cursor() as cur:
+        # Phase 1: per-region missing rows.
+        cur.execute(
+            """
+            SELECT lr.id AS lr_id, lr.listing_id, lr.miss_count, lr.region_id,
+                   latest.id AS latest_snapshot_id
+            FROM listing_regions lr
+            JOIN listings l ON l.id = lr.listing_id
+            JOIN platforms p ON p.id = l.platform_id
+            LEFT JOIN LATERAL (
+                SELECT s.id
+                FROM listing_snapshots s
+                WHERE s.listing_id = l.id
+                ORDER BY s.captured_at DESC, s.id DESC
+                LIMIT 1
+            ) latest ON TRUE
+            WHERE p.code = ANY(%s)
+              AND lr.current_status = 'missing'
+            ORDER BY lr.listing_id
+            """,
+            (codes,),
+        )
+        lr_rows = cur.fetchall()
+
+        # Phase 2: legacy global-missing rows without any lr coverage.
         cur.execute(
             """
             SELECT l.id, l.miss_count, latest.id AS latest_snapshot_id
@@ -641,14 +738,76 @@ def finalize_missing_queue(
             ) latest ON TRUE
             WHERE p.code = ANY(%s)
               AND l.current_status = 'missing'
+              AND NOT EXISTS (
+                  SELECT 1 FROM listing_regions WHERE listing_id = l.id
+              )
             ORDER BY l.id
             """,
             (codes,),
         )
-        rows = cur.fetchall()
+        legacy_rows = cur.fetchall()
+
         if dry_run:
-            return len(rows)
-        for row in rows:
+            return len(lr_rows) + len(legacy_rows)
+
+        affected_listing_ids: set[int] = set()
+        snapshot_by_listing: dict[int, int | None] = {}
+        prev_miss_by_listing: dict[int, int] = {}
+        for lrow in lr_rows:
+            miss_count = max(int(lrow["miss_count"] or 0), REMOVE_AFTER_MISS_COUNT)
+            cur.execute(
+                """
+                UPDATE listing_regions
+                SET miss_count = %s, current_status = 'removed',
+                    removed_at = %s, updated_at = now()
+                WHERE id = %s
+                """,
+                (miss_count, event_at, lrow["lr_id"]),
+            )
+            affected_listing_ids.add(lrow["listing_id"])
+            snapshot_by_listing.setdefault(lrow["listing_id"], lrow["latest_snapshot_id"])
+            prev_miss_by_listing[lrow["listing_id"]] = max(
+                prev_miss_by_listing.get(lrow["listing_id"], 0),
+                int(lrow["miss_count"] or 0),
+            )
+
+        # Aggregate: emit a single global 'removed' event per listing once
+        # no region keeps it alive. Mirrors _process_missing's invariant.
+        emitted = 0
+        for listing_id in affected_listing_ids:
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM listing_regions
+                    WHERE listing_id = %s
+                      AND current_status IN ('active', 'missing')
+                ) AS still_alive
+                """,
+                (listing_id,),
+            )
+            if cur.fetchone()["still_alive"]:
+                continue
+            cur.execute(
+                """
+                UPDATE listings
+                SET current_status = 'removed',
+                    removed_at = %s,
+                    updated_at = now()
+                WHERE id = %s AND current_status <> 'removed'
+                """,
+                (event_at, listing_id),
+            )
+            _emit_event(
+                cur, listing_id, None, "removed", event_at,
+                snapshot_by_listing.get(listing_id), None, [],
+                {"miss_count": prev_miss_by_listing.get(listing_id, 0)},
+                {"finalized_after_retries": True},
+                dry_run_webhooks,
+            )
+            emitted += 1
+
+        # Legacy global rows without lr coverage — unchanged behaviour.
+        for row in legacy_rows:
             miss_count = max(int(row["miss_count"] or 0), REMOVE_AFTER_MISS_COUNT)
             cur.execute(
                 """
@@ -668,7 +827,8 @@ def finalize_missing_queue(
                 {"miss_count": miss_count, "finalized_after_retries": True},
                 dry_run_webhooks,
             )
-    return len(rows)
+            emitted += 1
+    return emitted
 
 
 def reconcile_missing_probe(
@@ -706,14 +866,109 @@ def reconcile_missing_probe(
                 if platform_listing_id not in probed_ids:
                     continue
                 found_ids.add(platform_listing_id)
-                _upsert_listing(
+                listing_id, _, _ = _upsert_listing(
                     cur, platform_id, platform_listing_id,
                     row.get("url"), crawled_at, run_id,
+                )
+                # The probe just proved the listing still exists on the
+                # platform. Recover every 'missing' per-region row, not
+                # just the global listings row — gen-web filters by
+                # lr.current_status so leaving lr='missing' would keep
+                # the recovered listing hidden from the region's bundle.
+                cur.execute(
+                    """
+                    UPDATE listing_regions
+                    SET current_status = 'active', miss_count = 0,
+                        last_seen_at = %s, last_crawl_run_id = %s,
+                        removed_at = NULL,
+                        updated_at = now()
+                    WHERE listing_id = %s AND current_status = 'missing'
+                    """,
+                    (crawled_at, run_id, listing_id),
                 )
                 summary.unchanged += 1
 
             absent_ids = sorted(probed_ids - found_ids)
             if absent_ids:
+                # Per-region missing rows for absent listings get bumped
+                # here. The legacy global-only listings row is bumped in
+                # the fallback block below for listings without any lr
+                # coverage (only pre-012 outliers outside every region).
+                cur.execute(
+                    """
+                    SELECT lr.id AS lr_id, lr.listing_id, lr.miss_count,
+                           lr.region_id, l.platform_listing_id
+                    FROM listing_regions lr
+                    JOIN listings l ON l.id = lr.listing_id
+                    WHERE l.platform_id = %s
+                      AND lr.current_status = 'missing'
+                      AND l.platform_listing_id = ANY(%s)
+                    """,
+                    (platform_id, absent_ids),
+                )
+                lr_rows = cur.fetchall()
+                listings_with_lr_removed: set[int] = set()
+                for lrow in lr_rows:
+                    new_miss = int(lrow["miss_count"] or 0) + 1
+                    if new_miss >= REMOVE_AFTER_MISS_COUNT:
+                        cur.execute(
+                            """
+                            UPDATE listing_regions
+                            SET miss_count = %s, current_status = 'removed',
+                                removed_at = %s, updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (new_miss, crawled_at, lrow["lr_id"]),
+                        )
+                        listings_with_lr_removed.add(lrow["listing_id"])
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE listing_regions
+                            SET miss_count = %s, updated_at = now()
+                            WHERE id = %s
+                            """,
+                            (new_miss, lrow["lr_id"]),
+                        )
+                        summary.missing += 1
+
+                # Global "removed" event fires per-listing, only after no
+                # region keeps it alive — matches the per-crawl path in
+                # _process_missing so webhook semantics stay consistent.
+                for listing_id in listings_with_lr_removed:
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1 FROM listing_regions
+                            WHERE listing_id = %s
+                              AND current_status IN ('active', 'missing')
+                        ) AS still_alive
+                        """,
+                        (listing_id,),
+                    )
+                    if cur.fetchone()["still_alive"]:
+                        continue
+                    cur.execute(
+                        """
+                        UPDATE listings
+                        SET current_status = 'removed',
+                            removed_at = %s,
+                            updated_at = now()
+                        WHERE id = %s
+                        """,
+                        (crawled_at, listing_id),
+                    )
+                    _emit_event(
+                        cur, listing_id, run_id, "removed", crawled_at,
+                        None, None, [], {}, {"finalized_after_retries": False},
+                        dry_run_webhooks,
+                    )
+                    summary.removed += 1
+
+                # Legacy fallback: listings still flagged 'missing'
+                # globally with NO listing_regions coverage. Rare after
+                # migration 012, but keeps the path working for outlier
+                # rows that fell outside every approved region's bbox.
                 cur.execute(
                     """
                     SELECT id, platform_listing_id, miss_count
@@ -721,6 +976,10 @@ def reconcile_missing_probe(
                     WHERE platform_id = %s
                       AND current_status = 'missing'
                       AND platform_listing_id = ANY(%s)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM listing_regions
+                          WHERE listing_id = listings.id
+                      )
                     """,
                     (platform_id, absent_ids),
                 )
@@ -775,6 +1034,7 @@ def _process_missing(
     crawled_at: datetime,
     summary: CrawlSummary,
     dry_run_webhooks: bool,
+    region_id: int | None = None,
 ) -> None:
     """Find listings that were active/missing but didn't show up in this run.
 
@@ -786,6 +1046,130 @@ def _process_missing(
     For backfill (single-run replay) the seen set is the entire CSV — listings
     in the DB but not in the CSV genuinely disappeared since the last replay.
     For live reconcile (hourly) the seen set is just this hour.
+
+    ``region_id`` enables per-region scoping (the supported path post-2026-05
+    multi-region rollout). When set, candidates are drawn from
+    ``listing_regions`` for THIS region only, so a crawl of region A no
+    longer bumps every region-B listing toward 'removed'. The global
+    ``listings.current_status`` is maintained as an aggregate — flipped to
+    'removed' only when no *other* region still considers the listing alive,
+    which is what preserves the existing webhook semantics (the 'removed'
+    user-facing event fires when the listing genuinely disappears from every
+    region that tracked it, not when it merely leaves one region's view).
+
+    Legacy callers (backfill CLI, tests) that don't pass a region_id keep
+    the original platform-wide behaviour: no per-region tracking, miss_count
+    on listings is the only source of truth.
+    """
+    if region_id is None:
+        _process_missing_global(
+            cur, platform_id, crawl_run_id, seen_platform_listing_ids,
+            crawled_at, summary, dry_run_webhooks,
+        )
+        return
+
+    cur.execute(
+        """
+        SELECT lr.id AS lr_id,
+               l.id AS listing_id,
+               l.platform_listing_id,
+               lr.current_status AS lr_status,
+               lr.miss_count AS lr_miss_count
+        FROM listing_regions lr
+        JOIN listings l ON l.id = lr.listing_id
+        WHERE l.platform_id = %s
+          AND lr.region_id = %s
+          AND lr.current_status IN ('active', 'missing')
+          AND lr.last_crawl_run_id IS DISTINCT FROM %s
+        """,
+        (platform_id, region_id, crawl_run_id),
+    )
+    candidates = cur.fetchall()
+
+    for row in candidates:
+        if row["platform_listing_id"] in seen_platform_listing_ids:
+            # Was processed by the main loop already (covered by upsert).
+            continue
+        new_miss = row["lr_miss_count"] + 1
+        if new_miss >= REMOVE_AFTER_MISS_COUNT:
+            # Flip the per-region row to 'removed'. The user-facing event
+            # only fires below if every region with this listing agrees
+            # it's gone (the global aggregate transitions to 'removed').
+            cur.execute(
+                """
+                UPDATE listing_regions
+                SET miss_count = %s,
+                    current_status = 'removed',
+                    removed_at = %s,
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (new_miss, crawled_at, row["lr_id"]),
+            )
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM listing_regions
+                    WHERE listing_id = %s
+                      AND region_id <> %s
+                      AND current_status IN ('active', 'missing')
+                ) AS still_alive_elsewhere
+                """,
+                (row["listing_id"], region_id),
+            )
+            still_alive = cur.fetchone()["still_alive_elsewhere"]
+            if not still_alive:
+                cur.execute(
+                    """
+                    UPDATE listings
+                    SET miss_count = %s,
+                        current_status = 'removed',
+                        removed_at = %s,
+                        updated_at = now()
+                    WHERE id = %s
+                    """,
+                    (new_miss, crawled_at, row["listing_id"]),
+                )
+                _emit_event(
+                    cur, row["listing_id"], crawl_run_id, "removed", crawled_at,
+                    None, None, [], {}, {"miss_count": new_miss},
+                    dry_run_webhooks,
+                )
+                summary.removed += 1
+            # else: silent — listing still tracked by another region, so no
+            # user-facing "removed" event yet. The per-region row is removed
+            # for THIS region's gen-web filter, but the global listings row
+            # stays 'active'/'missing' so the still-tracking region keeps
+            # working without aggregation drift.
+        else:
+            cur.execute(
+                """
+                UPDATE listing_regions
+                SET miss_count = %s,
+                    current_status = 'missing',
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (new_miss, row["lr_id"]),
+            )
+            summary.missing += 1
+
+
+def _process_missing_global(
+    cur: psycopg.Cursor,
+    platform_id: int,
+    crawl_run_id: int,
+    seen_platform_listing_ids: set[str],
+    crawled_at: datetime,
+    summary: CrawlSummary,
+    dry_run_webhooks: bool,
+) -> None:
+    """Legacy platform-wide missing pass (no region scoping).
+
+    Kept for backfill replays and other callers that don't have a region
+    context. The live reconcile path (region_runner → crawler →
+    _reconcile_after_crawl) always resolves a region_id, so this branch
+    is no longer hit in production after migration 012.
     """
     cur.execute(
         """
@@ -801,7 +1185,6 @@ def _process_missing(
 
     for row in candidates:
         if row["platform_listing_id"] in seen_platform_listing_ids:
-            # Was processed by the main loop already (covered by upsert).
             continue
         new_miss = row["miss_count"] + 1
         if new_miss >= REMOVE_AFTER_MISS_COUNT:
@@ -854,10 +1237,18 @@ def reconcile_crawl(
     crawlers already produce. We normalize, hash, diff against the previous
     snapshot, and emit events.
 
+    ``target_area`` is the region slug (env ``RENTMAP_AREA_NAME``) injected
+    by region_runner. When it resolves to an approved region row we attach
+    each upserted listing to that region via ``listing_regions``; that
+    per-region tracking is what gates _process_missing's candidate set and
+    gen-web's read filter so the AJOU page only shows AJOU's listings even
+    though ERICA crawled the same platform an hour ago.
+
     Returns a CrawlSummary the caller can log or persist.
     """
     with conn.cursor() as cur:
         platform_id = _platform_id(cur, platform_code)
+        region_id = _resolve_region_id(cur, target_area)
         run_id = _start_crawl_run(cur, platform_id, crawled_at, target_area)
         summary = CrawlSummary(crawl_run_id=run_id)
         seen_ids: set[str] = set()
@@ -879,6 +1270,8 @@ def reconcile_crawl(
                     cur, platform_id, platform_listing_id,
                     row.get("url"), crawled_at, run_id,
                 )
+                if region_id is not None:
+                    _upsert_listing_region(cur, listing_id, region_id, crawled_at, run_id)
 
                 prev_snap = _latest_snapshot(cur, listing_id)
                 if prev_snap is not None and prev_snap["content_hash"] == content_hash:
@@ -954,6 +1347,7 @@ def reconcile_crawl(
 
             _process_missing(
                 cur, platform_id, run_id, seen_ids, crawled_at, summary, dry_run_webhooks,
+                region_id=region_id,
             )
         except Exception as exc:
             status = "failed"

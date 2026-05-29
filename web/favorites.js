@@ -7,6 +7,9 @@
   let currentUserScope = null;
 
   function fk(id, source) { return String(source) + '::' + String(id); }
+  function entryKind(entry) {
+    return entry && entry.kind === 'dislike' ? 'dislike' : 'like';
+  }
   function scopedKey(base, user) {
     if (user && user.id !== undefined && user.id !== null) return base + ':user:' + String(user.id);
     return base + ':anonymous';
@@ -84,8 +87,8 @@
     window.dispatchEvent(new CustomEvent('favoritesSynced'));
     return { favorites: merged, deleted };
   }
-  
-  function save(favs, deleted = loadDeleted()) { 
+
+  function save(favs, deleted = loadDeleted()) {
     if (storageKeys) localStorage.setItem(storageKeys.favorites, JSON.stringify(favs));
     saveDeleted(deleted);
     syncToServer(favs, deleted);
@@ -155,10 +158,28 @@
       return load();
     });
 
-  function getAll() { return load(); }
-  function isFav(id, source) { const k = fk(id, source); return load().some(f => f.key === k); }
+  // ── Public queries ──────────────────────────────────────────────────────
+  // getAll() preserves the historical "likes only" semantics so callers that
+  // pre-date the dislike feature keep behaving the same way. New callers use
+  // getDislikes() or getAllEntries() when they want the wider view.
+  function getAll() { return load().filter(f => entryKind(f) === 'like'); }
+  function getDislikes() { return load().filter(f => entryKind(f) === 'dislike'); }
+  function getAllEntries() { return load(); }
+  function isFav(id, source) {
+    const k = fk(id, source);
+    return load().some(f => f.key === k && entryKind(f) === 'like');
+  }
+  function isDislike(id, source) {
+    const k = fk(id, source);
+    return load().some(f => f.key === k && entryKind(f) === 'dislike');
+  }
 
-  function add(listing) {
+  // ── Mutations ───────────────────────────────────────────────────────────
+  // Likes and dislikes share the same key namespace ({source}::{id}) so a
+  // listing can only be in one bucket at a time. Toggling from like to
+  // dislike upserts the entry with kind='dislike'; the server merge sees a
+  // newer savedAt for the same key and replaces the older one.
+  function upsert(listing, kind) {
     const favs = load();
     const deleted = loadDeleted();
     const k = fk(listing.id, listing.source);
@@ -166,12 +187,23 @@
     const i = favs.findIndex(f => f.key === k);
     const entry = {
       key: k, id: listing.id, source: listing.source,
-      data: listing, savedAt: new Date().toISOString(), rating: null, notes: '',
+      data: listing, savedAt: new Date().toISOString(),
+      kind,
+      rating: null, notes: '',
     };
-    if (i >= 0) { entry.rating = favs[i].rating; entry.notes = favs[i].notes; favs[i] = entry; }
-    else favs.push(entry);
+    if (i >= 0) {
+      // Preserve user-entered metadata (rating/notes) across like<->dislike toggles.
+      entry.rating = favs[i].rating;
+      entry.notes = favs[i].notes;
+      favs[i] = entry;
+    } else {
+      favs.push(entry);
+    }
     save(favs, deleted);
   }
+
+  function add(listing) { upsert(listing, 'like'); }
+  function addDislike(listing) { upsert(listing, 'dislike'); }
 
   function remove(id, source) {
     const k = fk(id, source);
@@ -179,6 +211,10 @@
     deleted[k] = new Date().toISOString();
     save(load().filter(f => f.key !== k), deleted);
   }
+  // Removing a dislike is identical to remove() — tombstone the key. Kept as a
+  // distinct name so UI code reads as the user's intent ("undo the 👎") rather
+  // than the underlying storage mechanic.
+  function removeDislike(id, source) { remove(id, source); }
 
   function updateRating(id, source, rating) {
     const favs = load();
@@ -208,7 +244,12 @@
     const favs = load();
     const deleted = loadDeleted();
     delete deleted[fk(id, 'manual')];
-    favs.push({ key: fk(id, 'manual'), id, source: 'manual', data: listing, savedAt: new Date().toISOString(), rating: null, notes: data.notes || '' });
+    favs.push({
+      key: fk(id, 'manual'), id, source: 'manual', data: listing,
+      savedAt: new Date().toISOString(),
+      kind: 'like',
+      rating: null, notes: data.notes || '',
+    });
     save(favs, deleted);
     return id;
   }
@@ -233,5 +274,12 @@
     }).then(r => r.json());
   }
 
-  window.Favorites = { getAll, isFav, add, remove, updateRating, updateNotes, addManual, addPhoto, getPhotos, deletePhoto, ready, refresh };
+  window.Favorites = {
+    getAll, getDislikes, getAllEntries,
+    isFav, isDislike,
+    add, addDislike, remove, removeDislike,
+    updateRating, updateNotes, addManual,
+    addPhoto, getPhotos, deletePhoto,
+    ready, refresh,
+  };
 })();

@@ -363,6 +363,14 @@ def first_deep(obj: Any, names: list[str]) -> Any:
 
 
 def parse_manwon_from_text(value: Any) -> float | None:
+    # Dict/list inputs would otherwise serialize via repr() and have every
+    # contained digit concatenated by to_number, producing astronomical floats
+    # that overflow PG BIGINT downstream. The Naver detail API surfaces this
+    # at articleDetail.maintenanceCost when it returns the historical
+    # costsByDate breakdown instead of a flat amount — handled separately
+    # by extract_naver_maintenance_amount before this point.
+    if isinstance(value, (dict, list)):
+        return None
     text = to_text(value).replace(",", "")
     if not text:
         return None
@@ -373,6 +381,34 @@ def parse_manwon_from_text(value: Any) -> float | None:
         return round1(amount)
     number = to_number(text)
     return round1(number / 10000) if number and number >= 10000 else number
+
+
+def extract_naver_maintenance_amount(raw: Any) -> Any:
+    """Normalize Naver detail-API management-cost field for parse_manwon_from_text.
+
+    The detail API at /api/articles/{no} returns one of two shapes:
+    1. articleDetail.monthlyManagementCost = int (e.g. 80000 — won/month).
+    2. articleDetail.maintenanceCost = dict
+       {costsByDate: [{basisYearMonth: '202602', totalPrice: '84697', ...}, ...]}
+       — the historical month-by-month invoice. costsByDate is newest-first;
+       pick [0].totalPrice as the current month's amount.
+
+    Returns the raw value unchanged for shape (1), the latest totalPrice for
+    shape (2), or None when the dict isn't in the expected shape — letting
+    the caller skip the field rather than overwriting with garbage.
+    """
+    if isinstance(raw, dict):
+        items = raw.get("costsByDate")
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict):
+                    total = item.get("totalPrice")
+                    if total not in (None, "", 0, "0"):
+                        return total
+        return None
+    if isinstance(raw, list):
+        return None
+    return raw
 
 
 def to_iso_date(value: Any, now: datetime | None = None) -> str:
@@ -2686,7 +2722,7 @@ def enrich_from_naver_detail(record: dict[str, Any], detail: dict[str, Any]) -> 
         "monthlyManagementCost", "managementCost", "maintenanceCost",
         "monthlyManageCost", "manageCost", "managementFee",
     ])
-    maintenance_value = parse_manwon_from_text(maintenance_raw)
+    maintenance_value = parse_manwon_from_text(extract_naver_maintenance_amount(maintenance_raw))
     if maintenance_value is not None:
         _set("maintenance_manwon", maintenance_value)
         rent_value = float_or_empty(record.get("rent_manwon"))
@@ -2813,8 +2849,13 @@ def _reconcile_after_crawl(platform_code: str, rows: list[dict[str, Any]], label
         print(f"[reconcile] {label}: skipped — reconcile module unavailable ({exc})", file=sys.stderr)
         return
     target_area = os.environ.get("RENTMAP_AREA_NAME") or None
+    # Region scoping happens inside reconcile_crawl now: it resolves the
+    # target_area slug to a region row and per-region tracking
+    # (listing_regions) drives both the missing-detection candidate set
+    # and gen-web's read filter. No more bbox approximation needed.
     try:
-        reconcile_csv_rows_safely(platform_code, rows, label=label, target_area=target_area)
+        reconcile_csv_rows_safely(platform_code, rows, label=label,
+                                  target_area=target_area)
     except Exception as exc:  # noqa: BLE001 — defensive
         print(f"[reconcile] {label}: outer guard caught {type(exc).__name__}: {exc}", file=sys.stderr)
 
@@ -2847,6 +2888,21 @@ def finalize_missing(args: argparse.Namespace) -> None:
 
 
 def _read_db_missing_candidates(platform_codes: list[str]) -> list[dict[str, Any]]:
+    """Find one row per listing that has at least one region marking it 'missing'.
+
+    Post-migration 012 the missing queue lives in listing_regions, not
+    listings — a listing missed by ERICA's crawl gets lr.current_status
+    flipped to 'missing' while listings.current_status stays put (because
+    AJOU's view might still be active). The retry-missing cron has to
+    look at the per-region rows or it would skip every freshly-flagged
+    item.
+
+    We DISTINCT on listing_id because the probe is a platform-level HTTP
+    check (does this URL still exist?) — running it twice for the same
+    listing because two regions both flagged it 'missing' is wasted work.
+    Plus a legacy DISTINCT branch for pre-migration items still flagged
+    in listings.current_status.
+    """
     from db import session  # type: ignore
 
     with session() as conn, conn.cursor() as cur:
@@ -2854,7 +2910,11 @@ def _read_db_missing_candidates(platform_codes: list[str]) -> list[dict[str, Any
             """
             SELECT
                 p.code AS platform_code,
-                l.platform_listing_id, l.source_url, l.current_status, l.miss_count,
+                l.platform_listing_id, l.source_url, l.current_status,
+                COALESCE((
+                    SELECT MAX(miss_count) FROM listing_regions
+                    WHERE listing_id = l.id AND current_status = 'missing'
+                ), l.miss_count) AS miss_count,
                 s.title, s.description, s.room_type_raw, s.address_raw,
                 s.lat, s.lng,
                 s.deposit_won, s.monthly_rent_won, s.maintenance_fee_won,
@@ -2874,7 +2934,13 @@ def _read_db_missing_candidates(platform_codes: list[str]) -> list[dict[str, Any
                 LIMIT 1
             ) s ON TRUE
             WHERE p.code = ANY(%s)
-              AND l.current_status = 'missing'
+              AND (
+                  l.current_status = 'missing'
+                  OR EXISTS (
+                      SELECT 1 FROM listing_regions
+                      WHERE listing_id = l.id AND current_status = 'missing'
+                  )
+              )
             ORDER BY p.code, l.id
             """,
             (platform_codes,),
@@ -3264,44 +3330,80 @@ def _db_row_to_csv_shape(row: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-def _read_db_active(platform_code: str, label: str) -> list[dict[str, str]]:
+def _read_db_active(platform_code: str, label: str,
+                    region_id: int | None = None) -> list[dict[str, str]]:
     """Pull active listings + their most recent snapshot from Postgres.
 
     Returns a list of CSV-shape dicts so the rest of gen_web doesn't care
     where the data came from. Returns [] (with a warning) when the DB is
     unreachable — the caller's CSV fallback kicks in.
+
+    ``region_id`` restricts the read to listings tagged for that region in
+    ``listing_regions``. Per-region rows are written by reconcile_crawl on
+    every crawl, so the AJOU page pulls AJOU's listings even if ERICA was
+    the last region to crawl the same platform. ``region_id=None`` is the
+    legacy unfiltered path — kept for manual CLI ad-hoc usage and the
+    cold-start before migration 012 is applied.
     """
     # Late import so the CSV-only path (--source csv) doesn't pay for psycopg.
     from db import session, DBConfigError  # type: ignore
 
     try:
         with session() as conn, conn.cursor() as cur:
-            cur.execute(
+            if region_id is not None:
+                sql = """
+                    SELECT
+                        l.platform_listing_id, l.source_url, lr.current_status,
+                        s.title, s.description, s.room_type_raw, s.address_raw,
+                        s.lat, s.lng,
+                        s.deposit_won, s.monthly_rent_won, s.maintenance_fee_won,
+                        s.expected_monthly_cost_won,
+                        s.supply_area_m2, s.exclusive_area_m2, s.area_raw,
+                        s.floor_raw, s.room_count, s.bathroom_count,
+                        s.direction, s.parking_raw, s.move_in_raw,
+                        s.approval_date, s.building_usage, s.structure_type,
+                        s.raw_normalized_json
+                    FROM listings l
+                    JOIN platforms p ON p.id = l.platform_id
+                    JOIN listing_regions lr
+                      ON lr.listing_id = l.id
+                     AND lr.region_id = %s
+                     AND lr.current_status = 'active'
+                    JOIN LATERAL (
+                        SELECT * FROM listing_snapshots
+                        WHERE listing_id = l.id
+                        ORDER BY captured_at DESC LIMIT 1
+                    ) s ON TRUE
+                    WHERE p.code = %s
+                    ORDER BY l.id
                 """
-                SELECT
-                    l.platform_listing_id, l.source_url, l.current_status,
-                    s.title, s.description, s.room_type_raw, s.address_raw,
-                    s.lat, s.lng,
-                    s.deposit_won, s.monthly_rent_won, s.maintenance_fee_won,
-                    s.expected_monthly_cost_won,
-                    s.supply_area_m2, s.exclusive_area_m2, s.area_raw,
-                    s.floor_raw, s.room_count, s.bathroom_count,
-                    s.direction, s.parking_raw, s.move_in_raw,
-                    s.approval_date, s.building_usage, s.structure_type,
-                    s.raw_normalized_json
-                FROM listings l
-                JOIN platforms p ON p.id = l.platform_id
-                JOIN LATERAL (
-                    SELECT * FROM listing_snapshots
-                    WHERE listing_id = l.id
-                    ORDER BY captured_at DESC LIMIT 1
-                ) s ON TRUE
-                WHERE p.code = %s
-                  AND l.current_status = 'active'
-                ORDER BY l.id
-                """,
-                (platform_code,),
-            )
+                params: list[Any] = [region_id, platform_code]
+            else:
+                sql = """
+                    SELECT
+                        l.platform_listing_id, l.source_url, l.current_status,
+                        s.title, s.description, s.room_type_raw, s.address_raw,
+                        s.lat, s.lng,
+                        s.deposit_won, s.monthly_rent_won, s.maintenance_fee_won,
+                        s.expected_monthly_cost_won,
+                        s.supply_area_m2, s.exclusive_area_m2, s.area_raw,
+                        s.floor_raw, s.room_count, s.bathroom_count,
+                        s.direction, s.parking_raw, s.move_in_raw,
+                        s.approval_date, s.building_usage, s.structure_type,
+                        s.raw_normalized_json
+                    FROM listings l
+                    JOIN platforms p ON p.id = l.platform_id
+                    JOIN LATERAL (
+                        SELECT * FROM listing_snapshots
+                        WHERE listing_id = l.id
+                        ORDER BY captured_at DESC LIMIT 1
+                    ) s ON TRUE
+                    WHERE p.code = %s
+                      AND l.current_status = 'active'
+                    ORDER BY l.id
+                """
+                params = [platform_code]
+            cur.execute(sql, params)
             rows = [_db_row_to_csv_shape(r) for r in cur.fetchall()]
             return rows
     except (DBConfigError, Exception) as exc:
@@ -3310,16 +3412,21 @@ def _read_db_active(platform_code: str, label: str) -> list[dict[str, str]]:
 
 
 def _read_for_gen_web(source: str, data_dir: Path, prefix: str, target_date: str,
-                       label: str, platform_code: str) -> list[dict[str, str]]:
+                       label: str, platform_code: str,
+                       region_id: int | None = None) -> list[dict[str, str]]:
     """Source selector for gen_web. ``source`` is 'db', 'csv', or 'auto'.
 
     auto = DB first, fall back to CSV if DB returns empty (cold start, or DB
     intentionally not provisioned). Default operating mode after the DB is in
     place; lets a freshly cloned repo still render pages from the seed CSVs.
+
+    ``region_id`` flows into the DB read so cross-region listings don't leak
+    into this region's data bundle. The CSV path is already region-scoped
+    via ``prefix`` (which embeds the slug), so it doesn't need the region_id.
     """
     if source == "csv":
         return _read_csv_lenient(data_dir, prefix, target_date, label)
-    db_rows = _read_db_active(platform_code, label)
+    db_rows = _read_db_active(platform_code, label, region_id=region_id)
     if source == "db":
         return db_rows
     # auto
@@ -3327,6 +3434,45 @@ def _read_for_gen_web(source: str, data_dir: Path, prefix: str, target_date: str
         return db_rows
     print(f"  [gen-web] {label}: DB empty, falling back to CSV")
     return _read_csv_lenient(data_dir, prefix, target_date, label)
+
+
+def _resolve_region_id_for_gen_web(slug: str, source: str) -> int | None:
+    """Map the slug from ``RENTMAP_AREA_NAME`` to a regions.id, or None.
+
+    Returns None on:
+    - ``source='csv'`` — the CSV reader is region-scoped via filename, the
+      DB JOIN would be redundant work.
+    - missing slug (legacy ajou default with no env), missing regions row
+      (slug doesn't match anything seeded), or DB unreachable — in all
+      three cases we fall through to the legacy unfiltered read.
+
+    Cached for the process lifetime (gen-web is short-lived; each
+    region's invocation gets its own python process via subprocess).
+    """
+    if source == "csv" or not slug:
+        return None
+    try:
+        from db import session, DBConfigError  # type: ignore
+    except ImportError:
+        return None
+    try:
+        with session() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id FROM regions WHERE slug = %s", (slug,))
+            row = cur.fetchone()
+            return row["id"] if row else None
+    except Exception as exc:  # noqa: BLE001 — defensive, fall back to legacy
+        print(f"  [gen-web] region lookup for {slug!r} failed ({exc!s}); "
+              f"falling back to platform-wide read")
+        return None
+
+
+_GEN_WEB_PLATFORMS: tuple[tuple[str, str, str, str, str], ...] = (
+    # (gen_web platform name, csv prefix base, label, platform_code, color)
+    ("dabang",  "dabang",     "dabang",  "dabang",     "#326CF9"),
+    ("daangn",  "daangn",     "daangn",  "daangn",     "#FF6F00"),
+    ("zigbang", "zigbang",    "zigbang", "zigbang",    "#EF4444"),
+    ("naver",   "naver_land", "naver",   "naver_land", "#03C75A"),
+)
 
 
 def gen_web(args: argparse.Namespace) -> None:
@@ -3338,43 +3484,61 @@ def gen_web(args: argparse.Namespace) -> None:
     tpl_index = (tpl_dir / "_tpl_index.html").read_text(encoding="utf-8")
 
     src = args.source
+    # Resolve the current region slug to its DB id so _read_db_active can
+    # JOIN listing_regions and pull only THIS region's listings. Without
+    # the per-region scoping the AJOU bundle would contain ERICA's
+    # dabang/zigbang/daangn whenever ERICA was the last region to crawl
+    # those platforms. None means "no approved region matches this slug"
+    # (e.g. running gen-web in a freshly cloned repo before any regions
+    # are seeded) — fall back to the legacy platform-wide read.
+    region_id = _resolve_region_id_for_gen_web(DEFAULT_AREA, src)
+
+    # ``--platform`` (multi) restricts which platforms get re-emitted. A
+    # source-specific crawl (e.g. naver) should only refresh its own data
+    # file; without this restriction gen-web would also rewrite the three
+    # other platform files using the now-stale cross-region active set.
+    # No flag → all four platforms (manual CLI / crawl-all default).
+    requested = set(getattr(args, "platforms", None) or ())
+    valid = {p[0] for p in _GEN_WEB_PLATFORMS}
+    unknown = requested - valid
+    if unknown:
+        print(f"  [gen-web] ignoring unknown --platform values: {sorted(unknown)}")
+        requested &= valid
+
     # Prefix tracks the same DEFAULT_AREA the crawlers wrote to so a region
     # crawl + gen-web in the same env (region_runner injects RENTMAP_AREA_NAME)
     # round-trips through the right files. Manual CLI invocations still get
     # "ajou" so legacy operator habits keep working.
-    dabang = _read_for_gen_web(src, data_dir, f"dabang_{DEFAULT_AREA}", args.date, "dabang", "dabang")
-    daangn = _read_for_gen_web(src, data_dir, f"daangn_{DEFAULT_AREA}", args.date, "daangn", "daangn")
-    zigbang = _read_for_gen_web(src, data_dir, f"zigbang_{DEFAULT_AREA}", args.date, "zigbang", "zigbang")
-    naver = _read_for_gen_web(src, data_dir, f"naver_land_{DEFAULT_AREA}", args.date, "naver", "naver_land")
-    print(f"Loaded ({src}): dabang={len(dabang)} daangn={len(daangn)} zigbang={len(zigbang)} naver={len(naver)}")
-
-    js_dabang = js_array([normal_common(r, "dabang") for r in dabang])
-    js_daangn = js_array([normal_daangn(r) for r in daangn])
-    js_zigbang = js_array([normal_common(r, "zigbang") for r in zigbang])
-    js_naver = js_array([normal_common(r, "naver") for r in naver])
-
-    # Platform templates no longer bake the data inline — they load
-    # ``data_<source>_<slug>.js`` at boot via region-data-loader.js so a
-    # single HTML page can render any approved region. We still pass "[]"
-    # to write_platform for backward compatibility with the legacy
-    # __DATA__ placeholder (template doesn't reference it anymore, so this
-    # is a no-op string replace).
-    write_platform(out_dir / "dabang.html", tpl_platform, "dabang", "#326CF9", "[]")
-    write_platform(out_dir / "daangn.html", tpl_platform, "daangn", "#FF6F00", "[]")
-    write_platform(out_dir / "zigbang.html", tpl_platform, "zigbang", "#EF4444", "[]")
-    write_platform(out_dir / "naver.html", tpl_platform, "naver", "#03C75A", "[]")
-
-    # Data files are per-region; the slug suffix matches the one
-    # region-data-loader.js asks for at runtime. region_runner sets
-    # RENTMAP_AREA_NAME to the region's slug before invoking gen-web, so
-    # one gen-web call per region writes one set of data files.
     slug = DEFAULT_AREA
-    (out_dir / f"data_dabang_{slug}.js").write_text(f"window.DATA_DABANG = {js_dabang};", encoding="utf-8")
-    (out_dir / f"data_daangn_{slug}.js").write_text(f"window.DATA_DAANGN = {js_daangn};", encoding="utf-8")
-    (out_dir / f"data_zigbang_{slug}.js").write_text(f"window.DATA_ZIGBANG = {js_zigbang};", encoding="utf-8")
-    (out_dir / f"data_naver_{slug}.js").write_text(f"window.DATA_NAVER = {js_naver};", encoding="utf-8")
+    loaded_counts: dict[str, int] = {}
+    for name, csv_base, label, platform_code, color in _GEN_WEB_PLATFORMS:
+        if requested and name not in requested:
+            continue
+        rows = _read_for_gen_web(
+            src, data_dir, f"{csv_base}_{DEFAULT_AREA}", args.date,
+            label, platform_code, region_id=region_id,
+        )
+        loaded_counts[name] = len(rows)
+        if name == "daangn":
+            js_payload = js_array([normal_daangn(r) for r in rows])
+        else:
+            js_payload = js_array([normal_common(r, name) for r in rows])
+        # Platform templates no longer bake the data inline — they load
+        # ``data_<source>_<slug>.js`` at boot via region-data-loader.js so a
+        # single HTML page can render any approved region. We still pass "[]"
+        # to write_platform for backward compatibility with the legacy
+        # __DATA__ placeholder (template doesn't reference it anymore, so this
+        # is a no-op string replace).
+        write_platform(out_dir / f"{name}.html", tpl_platform, name, color, "[]")
+        var_name = f"DATA_{name.upper()}"
+        (out_dir / f"data_{name}_{slug}.js").write_text(
+            f"window.{var_name} = {js_payload};", encoding="utf-8")
+
+    loaded_desc = " ".join(f"{k}={v}" for k, v in loaded_counts.items()) or "(no platforms)"
+    print(f"Loaded ({src}): {loaded_desc}")
     (out_dir / "index.html").write_text(tpl_index, encoding="utf-8")
-    print(f"Wrote web files to {out_dir} (region={slug})")
+    scope = ",".join(sorted(requested)) if requested else "all"
+    print(f"Wrote web files to {out_dir} (region={slug} platforms={scope})")
 
 
 def normal_common(r: dict[str, str], source: str) -> dict[str, Any]:
@@ -3597,6 +3761,19 @@ def build_parser() -> argparse.ArgumentParser:
             "when DB is empty/unreachable."
         ),
     )
+    p.add_argument(
+        "--platform",
+        dest="platforms",
+        action="append",
+        choices=("dabang", "daangn", "zigbang", "naver"),
+        help=(
+            "Restrict the refresh to the named platform(s). May be passed "
+            "multiple times. When omitted, all four platforms are rebuilt - "
+            "useful for a full manual refresh, but region_runner / crawl-all "
+            "pass the just-crawled platform here so the other three regions' "
+            "data files aren't overwritten with the cross-region active set."
+        ),
+    )
     p.set_defaults(func=gen_web)
 
     p = sub.add_parser("finalize-missing")
@@ -3719,7 +3896,17 @@ def _run_parallel_crawlers(
                 if gen_web_after_each:
                     print(f"[crawl-all] [{label}] gen-web refresh after crawler completion", flush=True)
                     try:
-                        gen_web(argparse.Namespace(data_dir=str(ROOT / "data"), out_dir=str(ROOT / "web"), date=date_for_gen_web, source="auto"))
+                        # Scope to the platform that just finished — otherwise
+                        # this rewrites every region's data_<src>_<slug>.js
+                        # with whatever's currently active in DB, leaking
+                        # other regions' listings into this region's bundle.
+                        gen_web(argparse.Namespace(
+                            data_dir=str(ROOT / "data"),
+                            out_dir=str(ROOT / "web"),
+                            date=date_for_gen_web,
+                            source="auto",
+                            platforms=[label],
+                        ))
                     except Exception as exc:
                         print(f"[crawl-all] [{label}] gen-web refresh failed: {exc}", file=sys.stderr, flush=True)
             except BaseException as exc:

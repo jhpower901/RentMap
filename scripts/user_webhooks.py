@@ -55,6 +55,10 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         "maxDepositManwon": row["max_deposit_manwon"],
         "maxRentManwon": row["max_rent_manwon"],
         "useAreaFilter": row["use_area_filter"],
+        # Empty list when the user hasn't picked any region — combined with
+        # use_area_filter=False this disables the location restriction
+        # entirely; both filters compose with OR inside _matches_webhook.
+        "regionIds": [int(x) for x in (row.get("region_ids") or [])],
         "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
         "updatedAt": row["updated_at"].isoformat() if row["updated_at"] else None,
     }
@@ -106,6 +110,35 @@ def _validate_platforms(platforms: Any) -> list[str]:
     return cleaned
 
 
+def _validate_region_ids(value: Any) -> list[int]:
+    """Coerce + dedupe a list of region ids.
+
+    Empty list is valid — it means "no region restriction" (the polygon
+    filter, if enabled, still applies). We don't cross-check against the
+    regions table here: a region row can be deleted out from under a
+    webhook, and we'd rather the orphan id be inert (never matches)
+    than block the CRUD operation. Matching path uses regions.id from
+    listing_regions so orphans drop naturally.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise WebhookError("invalid", "region_ids must be a list of integers")
+    out: list[int] = []
+    for v in value:
+        try:
+            n = int(v)
+        except (TypeError, ValueError) as exc:
+            raise WebhookError(
+                "invalid", f"region_ids contains non-integer {v!r}",
+            ) from exc
+        if n <= 0:
+            raise WebhookError("invalid", "region_ids entries must be positive")
+        if n not in out:
+            out.append(n)
+    return out
+
+
 def list_webhooks(user_id: int) -> list[dict[str, Any]]:
     with session() as conn, conn.cursor() as cur:
         cur.execute(
@@ -137,10 +170,12 @@ def create_webhook(
     max_deposit_manwon: int | None = None,
     max_rent_manwon: int | None = None,
     use_area_filter: bool = True,
+    region_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     url = _validate_url(webhook_url)
     etypes = _validate_event_types(event_types if event_types is not None else DEFAULT_EVENT_TYPES)
     plats = _validate_platforms(platforms if platforms is not None else DEFAULT_PLATFORMS)
+    rids = _validate_region_ids(region_ids)
     label_clean = str(label or "").strip()[:80]
 
     with session() as conn, conn.cursor() as cur:
@@ -157,13 +192,14 @@ def create_webhook(
             INSERT INTO user_webhooks (
                 user_id, label, webhook_url, is_active,
                 event_types, platforms,
-                max_deposit_manwon, max_rent_manwon, use_area_filter
+                max_deposit_manwon, max_rent_manwon, use_area_filter,
+                region_ids
             )
-            VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, TRUE, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (user_id, label_clean, url, etypes, plats,
-             max_deposit_manwon, max_rent_manwon, use_area_filter),
+             max_deposit_manwon, max_rent_manwon, use_area_filter, rids),
         )
         new_id = cur.fetchone()["id"]
         cur.execute("SELECT * FROM user_webhooks WHERE id = %s", (new_id,))
@@ -189,6 +225,7 @@ def update_webhook(
     max_deposit_manwon: Any = _UNSET,
     max_rent_manwon: Any = _UNSET,
     use_area_filter: Any = _UNSET,
+    region_ids: Any = _UNSET,
 ) -> dict[str, Any]:
     fields: list[str] = []
     values: list[Any] = []
@@ -213,6 +250,8 @@ def update_webhook(
         _set("max_rent_manwon", None if max_rent_manwon is None else int(max_rent_manwon))
     if use_area_filter is not _UNSET:
         _set("use_area_filter", bool(use_area_filter))
+    if region_ids is not _UNSET:
+        _set("region_ids", _validate_region_ids(region_ids))
 
     if not fields:
         raise WebhookError("invalid", "No changes requested")
@@ -265,6 +304,7 @@ def list_active_for_fanout() -> list[dict[str, Any]]:
                 w.event_types, w.platforms,
                 w.max_deposit_manwon, w.max_rent_manwon,
                 w.use_area_filter,
+                w.region_ids,
                 uaf.points_json,
                 uaf.enabled AS area_filter_enabled
             FROM user_webhooks w

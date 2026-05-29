@@ -71,17 +71,31 @@ def _run_rentmap(args: list[str], label: str, timeout_s: int) -> int | None:
 
 
 def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
+    """Count distinct listings flagged 'missing' anywhere.
+
+    Post-migration 012 the missing queue is per-region (listing_regions).
+    We DISTINCT on l.id so the retry cycle exit condition still fires
+    once we've recovered/removed every listing whose status mentions
+    'missing' in either the global listings row or any region row.
+    """
     try:
         sys.path.insert(0, str(ROOT / "scripts"))
         from db import session  # noqa: WPS433
         with session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT COUNT(*) AS n
+                SELECT COUNT(DISTINCT l.id) AS n
                 FROM listings l
                 JOIN platforms p ON p.id = l.platform_id
                 WHERE p.code = ANY(%s)
-                  AND l.current_status = 'missing'
+                  AND (
+                      l.current_status = 'missing'
+                      OR EXISTS (
+                          SELECT 1 FROM listing_regions
+                          WHERE listing_id = l.id
+                            AND current_status = 'missing'
+                      )
+                  )
                 """,
                 (list(platform_codes),),
             )
@@ -1481,6 +1495,11 @@ class WebhookCreateBody(BaseModel):
     maxDepositManwon: int | None = None
     maxRentManwon: int | None = None
     useAreaFilter: bool = True
+    # OR-composed with the polygon area filter inside the matcher: a listing
+    # passes the location group if it's tagged for ANY of these regions OR
+    # falls inside the user's saved polygon. Empty list + useAreaFilter=False
+    # disables the location restriction entirely.
+    regionIds: list[int] = []
 
 
 class WebhookUpdateBody(BaseModel):
@@ -1492,6 +1511,7 @@ class WebhookUpdateBody(BaseModel):
     maxDepositManwon: int | None = None
     maxRentManwon: int | None = None
     useAreaFilter: bool | None = None
+    regionIds: list[int] | None = None
 
 
 def _webhook_error_to_http(exc: webhook_store.WebhookError) -> HTTPException:
@@ -1519,6 +1539,7 @@ async def create_user_webhook(body: WebhookCreateBody,
             max_deposit_manwon=body.maxDepositManwon,
             max_rent_manwon=body.maxRentManwon,
             use_area_filter=body.useAreaFilter,
+            region_ids=body.regionIds,
         )
     except webhook_store.WebhookError as exc:
         raise _webhook_error_to_http(exc)
@@ -1544,6 +1565,8 @@ async def update_user_webhook(webhook_id: int, body: WebhookUpdateBody,
         kwargs["max_rent_manwon"] = body.maxRentManwon
     if body.useAreaFilter is not None:
         kwargs["use_area_filter"] = body.useAreaFilter
+    if body.regionIds is not None:
+        kwargs["region_ids"] = body.regionIds
     try:
         return webhook_store.update_webhook(webhook_id, user.id, **kwargs)
     except webhook_store.WebhookError as exc:

@@ -48,6 +48,36 @@ tr:hover td{background:#fafafa;cursor:pointer}
 .popup-img{width:100%;max-height:130px;object-fit:cover;border-radius:6px;margin:5px 0}
 .popup-meta{color:#555;font-size:12px}
 .heart-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;vertical-align:middle}
+/* Reaction column: like (❤️) + dislike (👎) side by side. The like button
+   relies on the 🤍 ↔ ❤️ glyph swap to signal state; dislike has only one
+   glyph, so we de-saturate it via grayscale when off and highlight with a
+   background pill when on. Opacity stays high so the icon is always legible. */
+.reaction-cell{text-align:center;white-space:nowrap;min-width:72px}
+/* Header width override: the platform HTML files keep the column header at
+   width:38px (just the ❤️ glyph). The body cell now holds both buttons,
+   so we widen the column from CSS to avoid a 1-glyph squeeze. */
+#tbl thead th:last-child{min-width:72px;width:auto}
+.reaction-btn{cursor:pointer;transition:filter .12s,background .15s,transform .12s;padding:2px 6px;border-radius:6px;line-height:1}
+.reaction-btn:hover{transform:scale(1.12)}
+/* Inactive dislike button: grayscale + light brightness so the glyph reads as
+   "off" without going darker than the surrounding row. */
+.fav-dislike-btn:not(.on){filter:grayscale(1) brightness(1.05) opacity(.55)}
+.fav-dislike-btn.on{filter:none;background:#f1f5f9}
+.fav-like-btn.on{background:#fee2e2}
+/* Disliked rows fade hard — still in the list (the user asked to record 👎,
+   not hide them) but well below 좋아요 candidates. */
+tr.row-disliked td{opacity:.28}
+tr.row-disliked .reaction-btn{opacity:1}
+tr.row-disliked:hover td{opacity:.55}
+/* Flash when a map marker click scrolls a row into view. */
+@keyframes rowFlash{0%{background:#fef9c3}100%{background:transparent}}
+tr.row-flash td{animation:rowFlash 1.2s ease-out}
+/* Bottom-of-panel close button for the row-expand detail block. Mirrors the
+   one favorites.html ships so a long panel can be dismissed without scrolling
+   back to the row header. */
+.detail-collapse-wrap{display:flex;justify-content:center;margin-top:14px;padding-top:12px;border-top:1px solid #f0f0f0}
+.detail-collapse{min-width:96px;justify-content:center;display:inline-flex;align-items:center;gap:4px;padding:5px 14px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;font-family:inherit}
+.detail-collapse:hover{background:#f0f0f0}
 /* Row-expand detail (click a table row → opens a sub-row with the rich
    info panel built by ListingInfo.buildSection). The .info-* classes are
    shared with favorites.html so the panel looks identical on both pages. */

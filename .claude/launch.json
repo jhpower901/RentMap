@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "3000", "--directory", "C:/Users/Ahnbujang/Nextcloud/git/RentMap"],
       "port": 3000
+    },
+    {
+      "name": "web-preview-local",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3001", "--directory", "C:/git/RentMap/web"],
+      "port": 3001
     }
   ]
 }

@@ -49,6 +49,14 @@ nav a.active-nav{background:#222;color:#fff}
 .link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
 .link-btn:hover{background:#eee}
 .heart-btn{background:none;border:none;font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;vertical-align:middle}
+/* Like + dislike popup buttons. Like swaps between 🤍 and ❤️ so the state is
+   already obvious; dislike has only 👎, so we de-saturate the off state via
+   grayscale and add a pill background when on. Mirrors platform-common.css. */
+.reaction-btn{cursor:pointer;transition:filter .12s,background .15s,transform .12s;padding:2px 6px;border-radius:6px;line-height:1}
+.reaction-btn:hover{transform:scale(1.12)}
+.fav-dis-pop:not(.on){filter:grayscale(1) brightness(.85)}
+.fav-dis-pop.on{filter:none;background:#e5e7eb}
+.fav-like-pop.on{background:#fee2e2}
 .area-btns{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
 .area-btns button{flex:1;min-width:0;padding:5px 8px;border:1px solid #ccc;background:#fff;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit}
 .area-btns button:hover{background:#f0f0f0}
@@ -111,7 +119,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="region-data-loader.js?v=20260526-region1"></script>
 <script src="listing-data-source.js?v=20260527-zigbang-img1"></script>
 <script src="auth.js?v=20260525-auth1"></script>
-<script src="favorites.js?v=20260526-user-guard"></script>
+<script src="favorites.js?v=20260529-dislike"></script>
 <script src="user-filters.js?v=20260527-filter1"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script>
@@ -264,6 +272,8 @@ function addMarkersForSource(src, rows) {
       ? '<img class="popup-img" src="' + r.img1 + '" onerror="this.style.display=\'none\'">'
       : '';
 
+    const isLike = window.Favorites && window.Favorites.isFav(r.id, src);
+    const isDis  = window.Favorites && window.Favorites.isDislike(r.id, src);
     m.bindPopup(
       '<div class="popup-title"><span class="badge badge-' + src + '">' + name + '</span> ' + (r.title || '') + '</div>' +
       imgHtml +
@@ -274,9 +284,10 @@ function addMarkersForSource(src, rows) {
       '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
         '<a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a> ' +
         '<a href="' + src + '.html" class="link-btn">' + name + ' 목록</a> ' +
-        '<button class="heart-btn" onclick="toggleFavFromPopup(\'' + r.id + '\',\'' + src + '\',this)">' +
-          (window.Favorites && window.Favorites.isFav(r.id, src) ? '❤️' : '🤍') +
+        '<button class="heart-btn reaction-btn fav-like-pop' + (isLike ? ' on' : '') + '" title="좋아요" onclick="toggleFavFromPopup(\'' + r.id + '\',\'' + src + '\',this)">' +
+          (isLike ? '❤️' : '🤍') +
         '</button>' +
+        '<button class="heart-btn reaction-btn fav-dis-pop' + (isDis ? ' on' : '') + '" title="싫어요" onclick="toggleDislikeFromPopup(\'' + r.id + '\',\'' + src + '\',this)">👎</button>' +
       '</div>'
     );
     allMarkers.push({ marker: m, src, data: r });
@@ -314,17 +325,45 @@ function applyFilter() {
   document.getElementById('totalCount').textContent = Object.values(shown).reduce((a, b) => a + b, 0);
 }
 
+// Sync popup glyph + .on class for whichever buttons exist in the open popup.
+// Because like/dislike share a key, toggling one can flip the other off — we
+// query both anchors against the popup the user clicked in.
+function refreshPopupReactionState(btn, id, src) {
+  const wrap = btn && btn.parentElement;
+  if (!wrap) return;
+  const like = wrap.querySelector('.fav-like-pop');
+  const dis  = wrap.querySelector('.fav-dis-pop');
+  const isLike = window.Favorites.isFav(id, src);
+  const isDis  = window.Favorites.isDislike(id, src);
+  if (like) {
+    like.textContent = isLike ? '❤️' : '🤍';
+    like.classList.toggle('on', isLike);
+  }
+  if (dis) dis.classList.toggle('on', isDis);
+}
+
 function toggleFavFromPopup(id, src, btn) {
   if (!window.Favorites) return;
   const entry = allMarkers.find(x => String(x.data.id) === String(id) && x.src === src);
   if (!entry) return;
   if (window.Favorites.isFav(id, src)) {
     window.Favorites.remove(id, src);
-    btn.textContent = '🤍';
   } else {
     window.Favorites.add(entry.data);
-    btn.textContent = '❤️';
   }
+  refreshPopupReactionState(btn, id, src);
+}
+
+function toggleDislikeFromPopup(id, src, btn) {
+  if (!window.Favorites) return;
+  const entry = allMarkers.find(x => String(x.data.id) === String(id) && x.src === src);
+  if (!entry) return;
+  if (window.Favorites.isDislike(id, src)) {
+    window.Favorites.removeDislike(id, src);
+  } else {
+    window.Favorites.addDislike(entry.data);
+  }
+  refreshPopupReactionState(btn, id, src);
 }
 
 // Wire up filter controls

@@ -150,6 +150,12 @@
         '<div class="popup-meta">' + esc(r.address || r.region || '') + '</div>' +
         '<div style="margin-top:6px"><a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a></div>'
       );
+      // Marker click ⇒ scroll the table to the matching row. We defer to a
+      // microtask so Leaflet's own popup-open handler fires first; otherwise
+      // the smooth scroll competes with the popup focus jump and feels jumpy.
+      m.on('click', () => {
+        setTimeout(() => scrollRowIntoView(r.id), 0);
+      });
       markerMap.set(r.id, { marker: m, data: r });
     });
 
@@ -249,7 +255,14 @@
       if (!html) return null;
       const tr = document.createElement('tr');
       tr.className = 'detail-row';
-      tr.innerHTML = '<td colspan="' + colspan + '" class="detail-cell">' + html + '</td>';
+      // The trailing .detail-collapse-wrap mirrors the favorites-page button so
+      // a long detail panel can be closed without scrolling back up to the row.
+      tr.innerHTML =
+        '<td colspan="' + colspan + '" class="detail-cell">' + html +
+        '<div class="detail-collapse-wrap">' +
+          '<button class="btn detail-collapse" type="button">접기</button>' +
+        '</div>' +
+        '</td>';
       // Lazy-load the price sparkline from /api/listings/.../price-history.
       // The placeholder inside the panel is already in the DOM, so we just
       // hand the cell to ListingInfo to find and fill it. Idempotent —
@@ -258,6 +271,36 @@
         window.ListingInfo.attachSparklines(tr, source);
       }
       return tr;
+    }
+
+    // Scroll the table row matching `id` into view + flash a highlight. Called
+    // when a map marker is clicked so the side-table jumps to the listing the
+    // user just inspected on the map.
+    function scrollRowIntoView(id) {
+      const tbody = document.getElementById('tbody');
+      if (!tbody) return;
+      const row = tbody.querySelector('tr[data-row-id="' + CSS.escape(String(id)) + '"]');
+      if (!row) return;
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.classList.add('row-flash');
+      setTimeout(() => row.classList.remove('row-flash'), 1400);
+    }
+
+    // Helper for the reaction-cell render path. Likes (`isFav`) and dislikes
+    // (`isDislike`) share a key namespace via Favorites.upsert — only one can
+    // be active at a time, so the two `.on` classes are also mutually
+    // exclusive. The .reaction-btn CSS in platform-common.css handles the
+    // muted/active styling.
+    function applyReactionState(tr, id, src) {
+      const like = tr.querySelector('.fav-like-btn');
+      const dis  = tr.querySelector('.fav-dislike-btn');
+      if (!like || !dis || !window.Favorites) return;
+      const isLike = window.Favorites.isFav(id, src);
+      const isDis  = window.Favorites.isDislike(id, src);
+      like.textContent = isLike ? '❤️' : '🤍';
+      like.classList.toggle('on', isLike);
+      dis.classList.toggle('on', isDis);
+      tr.classList.toggle('row-disliked', isDis);
     }
 
     function render() {
@@ -298,13 +341,17 @@
           '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.address || r.region || '-') + '</td>' +
           '<td class="agency-cell">' + esc(agencyLabel(r.agency, source)) + (r.phone ? '<br><span class="phone-small">' + esc(r.phone) + '</span>' : '') + '</td>' +
           '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
-          '<td style="text-align:center"><button class="heart-btn" data-fav-id="' + favId + '" data-fav-source="' + favSource + '">' +
-            (window.Favorites && window.Favorites.isFav(r.id, r.source) ? '❤️' : '🤍') +
-          '</button></td>';
+          '<td class="reaction-cell">' +
+            '<button class="heart-btn reaction-btn fav-like-btn" type="button" title="좋아요" ' +
+              'data-fav-id="' + favId + '" data-fav-source="' + favSource + '">🤍</button>' +
+            '<button class="heart-btn reaction-btn fav-dislike-btn" type="button" title="싫어요" ' +
+              'data-fav-id="' + favId + '" data-fav-source="' + favSource + '">👎</button>' +
+          '</td>';
+        applyReactionState(tr, r.id, r.source);
         tr.addEventListener('click', e => {
           // Clicks on the heart, links, or anything inside an already-open
           // detail row shouldn't trigger fly/toggle on the parent.
-          if (e.target.closest('.heart-btn, a, .detail-row')) return;
+          if (e.target.closest('.reaction-btn, a, .detail-row')) return;
           const entry = markerMap.get(r.id);
           if (entry && r.lat && r.lon) {
             map.flyTo([r.lat, r.lon], 17, { duration: 0.5 });
@@ -324,20 +371,45 @@
             tr.insertAdjacentElement('afterend', detail);
             openIds.add(r.id);
             tr.classList.add('row-open');
+            // Close button at the bottom of the detail panel — clicking it
+            // mirrors clicking the row header (collapses + scrolls the row
+            // back into view). Without this the user has to scroll back up
+            // to the row to close a long detail panel.
+            const closeBtn = detail.querySelector('.detail-collapse');
+            if (closeBtn) {
+              closeBtn.addEventListener('click', evt => {
+                evt.stopPropagation();
+                detail.remove();
+                openIds.delete(r.id);
+                tr.classList.remove('row-open');
+                tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              });
+            }
           }
         });
-        const heart = tr.querySelector('.heart-btn');
-        heart.addEventListener('click', e => {
+        const like = tr.querySelector('.fav-like-btn');
+        const dis  = tr.querySelector('.fav-dislike-btn');
+        like.addEventListener('click', e => {
           e.stopPropagation();
           if (!window.Favorites) return;
-          const id = heart.dataset.favId, src = heart.dataset.favSource;
+          const id = like.dataset.favId, src = like.dataset.favSource;
           if (window.Favorites.isFav(id, src)) {
             window.Favorites.remove(id, src);
-            heart.textContent = '🤍';
           } else {
             window.Favorites.add(r);
-            heart.textContent = '❤️';
           }
+          applyReactionState(tr, r.id, r.source);
+        });
+        dis.addEventListener('click', e => {
+          e.stopPropagation();
+          if (!window.Favorites) return;
+          const id = dis.dataset.favId, src = dis.dataset.favSource;
+          if (window.Favorites.isDislike(id, src)) {
+            window.Favorites.removeDislike(id, src);
+          } else {
+            window.Favorites.addDislike(r);
+          }
+          applyReactionState(tr, r.id, r.source);
         });
         tbody.appendChild(tr);
         // Re-attach the detail row if the user had this one open before the
@@ -347,6 +419,16 @@
           if (detail) {
             tbody.appendChild(detail);
             tr.classList.add('row-open');
+            const closeBtn = detail.querySelector('.detail-collapse');
+            if (closeBtn) {
+              closeBtn.addEventListener('click', evt => {
+                evt.stopPropagation();
+                detail.remove();
+                openIds.delete(r.id);
+                tr.classList.remove('row-open');
+                tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              });
+            }
           }
         }
       });

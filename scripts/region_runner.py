@@ -511,7 +511,20 @@ def _run_schedule_locked(schedule_id: int) -> None:
             # own; do it here so admin.html and the data pages see the
             # freshly written CSV without waiting for another scheduled
             # gen-web pass.
-            _run_rentmap(["gen-web"], env=env, timeout_s=5 * 60,
+            #
+            # Restrict to the platform(s) just crawled. Without --platform,
+            # gen-web pulls every platform's globally-active set from the DB
+            # and overwrites every data_<src>_<slug>.js — so a naver-only
+            # crawl would rewrite data_dabang_<slug>.js with whatever the
+            # last region crawled left active globally, which is exactly the
+            # cross-region leak we're fixing here.
+            gen_web_cmd = ["gen-web"]
+            for p in profile.get("platforms") or ():
+                # SOURCE_PROFILES use 'naver_land' (matches platforms.code);
+                # gen-web's --platform uses the short 'naver' label.
+                short = "naver" if p == "naver_land" else p
+                gen_web_cmd.extend(["--platform", short])
+            _run_rentmap(gen_web_cmd, env=env, timeout_s=5 * 60,
                          label=f"{label}/gen-web")
         # Fast missing-retry for whatever this crawl just touched.
         # Stays inside CRAWL_LOCK so it doesn't fight the next region's
