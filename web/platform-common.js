@@ -135,8 +135,18 @@
         : r.url;
       r.url = safeUrl(resolvedUrl);
       if (!r.lat || !r.lon) return;
-      const m = L.circleMarker([r.lat, r.lon], {
-        radius: 7, fillColor: agencyColor(r.agency), color: '#fff', weight: 2, fillOpacity: 0.85,
+      // Use a divIcon with a 44x44 invisible container around a small visual dot.
+      // L.circleMarker's hit area equals its radius — at radius 7 that's a 14px
+      // tap target, well under the mobile 44px minimum. divIcon keeps the dot
+      // visually the same while giving the touch target room to breathe.
+      const m = L.marker([r.lat, r.lon], {
+        icon: L.divIcon({
+          className: 'rentmap-marker',
+          iconSize: [44, 44],
+          iconAnchor: [22, 22],
+          popupAnchor: [0, -8],
+          html: '<span class="rentmap-marker-dot" style="background:' + agencyColor(r.agency) + '"></span>',
+        }),
       }).addTo(map);
       const imgHtml = r.img1
         ? '<img class="popup-img" src="' + esc(safeUrl(imageSrc(r.img1, source))) + '" onerror="this.style.display=\'none\'">'
@@ -148,6 +158,7 @@
         '<div class="popup-meta">관리비 ' + fmtRent(r.maint) + ' | 총 ' + fmtRent(r.total) + '</div>' +
         '<div class="popup-meta"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + agencyColor(r.agency) + ';vertical-align:middle;margin-right:4px"></span>' + esc(agencyLabel(r.agency, source)) + (r.phone ? ' ' + esc(r.phone) : '') + '</div>' +
         '<div class="popup-meta">' + esc(r.address || r.region || '') + '</div>' +
+        '<div class="popup-meta" style="font-family:monospace;color:#666">매물번호: ' + esc(r.id) + '</div>' +
         '<div style="margin-top:6px"><a href="' + r.url + '" target="_blank" class="link-btn">매물 보기</a></div>'
       );
       // Marker click ⇒ scroll the table to the matching row. We defer to a
@@ -224,8 +235,15 @@
     }
 
     function readLimit(id, fallback) {
-      const n = parseFloat(document.getElementById(id).value);
-      return Number.isFinite(n) ? n : fallback;
+      // PriceParser handles "2억", "2억500만", "20500", etc. The previous
+      // parseFloat() returned NaN for any input with 억/만 markers, so users
+      // who typed "2억" silently got the filter disabled (NaN comparisons
+      // are always false).
+      const raw = document.getElementById(id).value;
+      const parsed = window.PriceParser
+        ? window.PriceParser.parseManwonText(raw)
+        : (Number.isFinite(parseFloat(raw)) ? parseFloat(raw) : null);
+      return parsed == null ? fallback : parsed;
     }
 
     function getFiltered() {
@@ -294,6 +312,7 @@
     function applyReactionState(tr, id, src) {
       const like = tr.querySelector('.fav-like-btn');
       const dis  = tr.querySelector('.fav-dislike-btn');
+      const bm   = tr.querySelector('.bm-btn');
       if (!like || !dis || !window.Favorites) return;
       const isLike = window.Favorites.isFav(id, src);
       const isDis  = window.Favorites.isDislike(id, src);
@@ -301,6 +320,9 @@
       like.classList.toggle('on', isLike);
       dis.classList.toggle('on', isDis);
       tr.classList.toggle('row-disliked', isDis);
+      if (bm && window.Bookmarks) {
+        bm.classList.toggle('on', window.Bookmarks.isBookmarked(id, src));
+      }
     }
 
     function render() {
@@ -309,11 +331,10 @@
       const visibleIds = new Set(filtered.map(r => r.id));
 
       markerMap.forEach(({ marker, data }) => {
-        marker.setStyle(
-          visibleIds.has(data.id)
-            ? { fillOpacity: 0.85, opacity: 1 }
-            : { fillOpacity: 0.12, opacity: 0.3 }
-        );
+        // divIcon markers don't respond to setStyle; toggle a class on the
+        // marker element so the dot fades via CSS.
+        const el = marker.getElement();
+        if (el) el.classList.toggle('marker-dim', !visibleIds.has(data.id));
       });
 
       const tbody = document.getElementById('tbody');
@@ -340,18 +361,49 @@
           '<td>' + esc(r.floor || '-') + '</td>' +
           '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.address || r.region || '-') + '</td>' +
           '<td class="agency-cell">' + esc(agencyLabel(r.agency, source)) + (r.phone ? '<br><span class="phone-small">' + esc(r.phone) + '</span>' : '') + '</td>' +
+          // Listing number — needed when the user calls the agent ("아주 12345번 매물").
+          // Wrapped in a span so the user can long-press to copy on mobile; the
+          // copy button gives a one-tap path on desktop.
+          '<td class="listing-id-cell">' +
+            '<span class="listing-id-text" title="' + esc(r.id) + '">' + esc(r.id) + '</span>' +
+            '<button type="button" class="listing-id-copy" title="번호 복사" data-listing-id="' + esc(r.id) + '">📋</button>' +
+          '</td>' +
           '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
           '<td class="reaction-cell">' +
             '<button class="heart-btn reaction-btn fav-like-btn" type="button" title="좋아요" ' +
               'data-fav-id="' + favId + '" data-fav-source="' + favSource + '">🤍</button>' +
             '<button class="heart-btn reaction-btn fav-dislike-btn" type="button" title="싫어요" ' +
               'data-fav-id="' + favId + '" data-fav-source="' + favSource + '">👎</button>' +
+            '<button class="heart-btn reaction-btn bm-btn" type="button" title="북마크 (실사 기록용)" ' +
+              'data-fav-id="' + favId + '" data-fav-source="' + favSource + '">📌</button>' +
           '</td>';
         applyReactionState(tr, r.id, r.source);
+        const copyBtn = tr.querySelector('.listing-id-copy');
+        if (copyBtn) {
+          copyBtn.addEventListener('click', async e => {
+            e.stopPropagation();
+            const id = copyBtn.dataset.listingId || '';
+            try {
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(id);
+              } else {
+                // Fallback for older browsers / non-HTTPS
+                const ta = document.createElement('textarea');
+                ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+                document.body.removeChild(ta);
+              }
+              const orig = copyBtn.textContent;
+              copyBtn.textContent = '✓';
+              copyBtn.classList.add('copied');
+              setTimeout(() => { copyBtn.textContent = orig; copyBtn.classList.remove('copied'); }, 1200);
+            } catch (_) { /* swallow — user can still read the visible number */ }
+          });
+        }
         tr.addEventListener('click', e => {
           // Clicks on the heart, links, or anything inside an already-open
           // detail row shouldn't trigger fly/toggle on the parent.
-          if (e.target.closest('.reaction-btn, a, .detail-row')) return;
+          if (e.target.closest('.reaction-btn, a, .detail-row, .listing-id-copy')) return;
           const entry = markerMap.get(r.id);
           if (entry && r.lat && r.lon) {
             map.flyTo([r.lat, r.lon], 17, { duration: 0.5 });
@@ -389,6 +441,7 @@
         });
         const like = tr.querySelector('.fav-like-btn');
         const dis  = tr.querySelector('.fav-dislike-btn');
+        const bm   = tr.querySelector('.bm-btn');
         like.addEventListener('click', e => {
           e.stopPropagation();
           if (!window.Favorites) return;
@@ -411,6 +464,14 @@
           }
           applyReactionState(tr, r.id, r.source);
         });
+        if (bm) {
+          bm.addEventListener('click', e => {
+            e.stopPropagation();
+            if (!window.Bookmarks) return;
+            window.Bookmarks.toggle({ ...r, id: bm.dataset.favId, source: bm.dataset.favSource });
+            applyReactionState(tr, r.id, r.source);
+          });
+        }
         tbody.appendChild(tr);
         // Re-attach the detail row if the user had this one open before the
         // re-render (filter/sort cycle).
@@ -477,6 +538,9 @@
     // initial render uses the stale localStorage snapshot and never updates,
     // so a heart toggled on another device stays invisible until full reload.
     window.addEventListener('favoritesSynced', render);
+    // Same idea for bookmarks: re-render so the 📌 chip reflects whatever
+    // another tab/device wrote.
+    window.addEventListener('bookmarksSynced', render);
 
     // Refetch server state when the tab becomes visible again. The page may
     // have been backgrounded for hours while a phone added/removed a
@@ -484,9 +548,9 @@
     // signal that doesn't require polling. Favorites.refresh() handles the
     // GET, merge, and favoritesSynced dispatch which re-runs render() above.
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && window.Favorites && window.Favorites.refresh) {
-        window.Favorites.refresh();
-      }
+      if (document.visibilityState !== 'visible') return;
+      if (window.Favorites && window.Favorites.refresh) window.Favorites.refresh();
+      if (window.Bookmarks && window.Bookmarks.refresh) window.Bookmarks.refresh();
     });
 
     render();

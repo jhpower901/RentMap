@@ -266,6 +266,13 @@ RAW_KEEP_KEYS = {
         "published_at", "confirmed_at", "listing_age_text",
         "address_public_level",
     ),
+    "peterpan": (
+        "agency", "writer_type",
+        "building_form", "options",
+        "elevator", "pet_allowed",
+        "image_1", "image_2",
+        "published_at", "listing_age_text",
+    ),
 }
 
 

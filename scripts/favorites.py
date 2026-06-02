@@ -44,6 +44,7 @@ _SOURCE_TO_PLATFORM_CODE = {
     "daangn": "daangn",
     "zigbang": "zigbang",
     "naver": "naver_land",
+    "peterpan": "peterpan",
     # 'manual' has no matching platform; resolve_listing_id() returns None.
 }
 
@@ -136,13 +137,70 @@ def load_state(user_id: int) -> dict[str, Any]:
     return {"favorites": favorites, "deleted": deleted}
 
 
+def _pick_field(a: dict, b: dict, field: str, ts_field: str) -> Any:
+    """Pick `field` between two entries using their per-field timestamp.
+
+    Presence beats absence so a device that explicitly edited a field always
+    wins over one that never touched it (even if the latter's savedAt is newer
+    from an edit on a different field). When neither has the per-field stamp
+    — legacy entries — fall back to whole-entry savedAt.
+    """
+    a_ts = a.get(ts_field)
+    b_ts = b.get(ts_field)
+    if a_ts and b_ts:
+        return b.get(field) if _iso_time(b_ts) >= _iso_time(a_ts) else a.get(field)
+    if b_ts:
+        return b.get(field)
+    if a_ts:
+        return a.get(field)
+    if _iso_time(b.get("savedAt")) >= _iso_time(a.get("savedAt")):
+        return b.get(field)
+    return a.get(field)
+
+
+def _pick_max_ts(a_ts: Any, b_ts: Any) -> Any:
+    if a_ts and b_ts:
+        return b_ts if _iso_time(b_ts) >= _iso_time(a_ts) else a_ts
+    return b_ts or a_ts or None
+
+
+def _merge_entries(a: dict, b: dict) -> dict:
+    """Field-by-field merge of two same-key entries.
+
+    A concurrent rating edit on device A and notes edit on device B both
+    survive — without this the whole-entry savedAt tiebreak would let one
+    device's stale rating overwrite the other's update. data/kind come from
+    whichever side's savedAt is newer (entry-level base); rating and notes
+    are overlaid by their own timestamps.
+    """
+    base = b if _iso_time(b.get("savedAt")) >= _iso_time(a.get("savedAt")) else a
+    out = dict(base)
+    out["rating"] = _pick_field(a, b, "rating", "ratingUpdatedAt")
+    out["notes"] = _pick_field(a, b, "notes", "notesUpdatedAt")
+    r_ts = _pick_max_ts(a.get("ratingUpdatedAt"), b.get("ratingUpdatedAt"))
+    if r_ts:
+        out["ratingUpdatedAt"] = r_ts
+    n_ts = _pick_max_ts(a.get("notesUpdatedAt"), b.get("notesUpdatedAt"))
+    if n_ts:
+        out["notesUpdatedAt"] = n_ts
+    # firstVisitedAt is monotonic — earliest known visit wins.
+    a_fv = a.get("firstVisitedAt")
+    b_fv = b.get("firstVisitedAt")
+    if a_fv and b_fv:
+        out["firstVisitedAt"] = a_fv if _iso_time(a_fv) <= _iso_time(b_fv) else b_fv
+    elif a_fv or b_fv:
+        out["firstVisitedAt"] = a_fv or b_fv
+    return out
+
+
 def merge_payload(user_id: int, incoming: Any) -> dict[str, Any]:
     """Merge an incoming POST payload with current DB state and persist.
 
     Per-key resolution (scoped to this user):
       - Tombstones merge by max(deleted_at) per key.
-      - Favorites: latest savedAt wins per key. Tombstone with later timestamp
-        kills both sides.
+      - Favorites: same-key duplicates collapse via _merge_entries (field-level
+        merge by per-field timestamps). Tombstone with later timestamp kills
+        both sides.
     """
     incoming_state = normalize_payload(incoming)
     with session() as conn, conn.cursor() as cur:
@@ -187,8 +245,7 @@ def merge_payload(user_id: int, incoming: Any) -> dict[str, Any]:
             if _iso_time(merged_deleted.get(key)) >= _iso_time(entry.get("savedAt")):
                 continue
             prev = merged_favs.get(key)
-            if prev is None or _iso_time(entry.get("savedAt")) >= _iso_time(prev.get("savedAt")):
-                merged_favs[key] = entry
+            merged_favs[key] = _merge_entries(prev, entry) if prev else entry
 
         # ── Persist (full replace for this user; the merged result IS the source of truth) ─
         cur.execute("DELETE FROM favorites WHERE user_id = %s", (user_id,))

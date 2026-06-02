@@ -14,12 +14,13 @@ nav a.active-nav{background:#222 !important;color:#fff !important}
 .badge-daangn{background:#FF6F00}
 .badge-zigbang{background:#EF4444}
 .badge-naver{background:#03C75A}
+.badge-peterpan{background:#7C3AED}
 .page{max-width:1440px;margin:0 auto;padding:16px}
 h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
 .controls label{font-size:13px;display:flex;align-items:center;gap:4px}
-.controls input[type=number]{width:74px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
-.controls select,.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
+.controls input[type=number],.controls input.price-input{width:96px;padding:4px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
+.controls select,.controls input[type=text]:not(.price-input){padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px}
 .count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
 .layout{display:grid;grid-template-columns:1fr minmax(360px,400px);gap:14px;align-items:start}
 .layout>div:last-child{position:sticky;top:60px;align-self:start}
@@ -39,6 +40,14 @@ tr:hover td{background:#fafafa;cursor:pointer}
 .total-price{color:#c00;font-weight:700}
 .agency-cell{font-size:12px;line-height:1.5;max-width:140px}
 .phone-small{color:#666;font-size:11px}
+/* Listing-number cell. The user reads/calls the agent with this ID, so we
+   show it in a monospace font for at-a-glance accuracy and surface a small
+   copy button for one-tap dialing prep. */
+.listing-id-cell{font-family:'Menlo','Consolas',monospace;font-size:12px;color:#444;white-space:nowrap;line-height:1.3}
+.listing-id-text{user-select:all}
+.listing-id-copy{border:none;background:transparent;cursor:pointer;font-size:13px;padding:2px 6px;margin-left:4px;border-radius:4px;color:#888;min-width:32px;min-height:28px;vertical-align:middle}
+.listing-id-copy:hover{background:#eef2ff;color:#3730a3}
+.listing-id-copy.copied{color:#15803d}
 .link-btn{display:inline-block;padding:3px 10px;border:1px solid #ccc;border-radius:5px;font-size:12px;white-space:nowrap}
 .link-btn:hover{background:#eee}
 .note-warn{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.6}
@@ -52,11 +61,11 @@ tr:hover td{background:#fafafa;cursor:pointer}
    relies on the 🤍 ↔ ❤️ glyph swap to signal state; dislike has only one
    glyph, so we de-saturate it via grayscale when off and highlight with a
    background pill when on. Opacity stays high so the icon is always legible. */
-.reaction-cell{text-align:center;white-space:nowrap;min-width:72px}
+.reaction-cell{text-align:center;white-space:nowrap;min-width:108px}
 /* Header width override: the platform HTML files keep the column header at
-   width:38px (just the ❤️ glyph). The body cell now holds both buttons,
-   so we widen the column from CSS to avoid a 1-glyph squeeze. */
-#tbl thead th:last-child{min-width:72px;width:auto}
+   width:38px (just the ❤️ glyph). The body cell now holds three buttons
+   (좋아요/싫어요/북마크), so we widen the column from CSS to avoid a squeeze. */
+#tbl thead th:last-child{min-width:108px;width:auto}
 .reaction-btn{cursor:pointer;transition:filter .12s,background .15s,transform .12s;padding:2px 6px;border-radius:6px;line-height:1}
 .reaction-btn:hover{transform:scale(1.12)}
 /* Inactive dislike button: grayscale + light brightness so the glyph reads as
@@ -64,6 +73,11 @@ tr:hover td{background:#fafafa;cursor:pointer}
 .fav-dislike-btn:not(.on){filter:grayscale(1) brightness(1.05) opacity(.55)}
 .fav-dislike-btn.on{filter:none;background:#f1f5f9}
 .fav-like-btn.on{background:#fee2e2}
+/* Bookmark button: pin glyph, slightly different muted state so it doesn't
+   look like just another dislike button. On state uses indigo to match the
+   bookmark page accent. */
+.bm-btn:not(.on){filter:grayscale(1) brightness(1.05) opacity(.55)}
+.bm-btn.on{filter:none;background:#e0e7ff}
 /* Disliked rows fade hard — still in the list (the user asked to record 👎,
    not hide them) but well below 좋아요 candidates. */
 tr.row-disliked td{opacity:.28}
@@ -105,3 +119,9 @@ tr.detail-row:hover td{background:#fcfcfd;cursor:default}
 .price-spark--up{color:#dc2626}
 .price-spark--down{color:#16a34a}
 .price-spark--flat{color:#6b7280}
+/* Map markers: invisible 44x44 hit area wraps a small visible dot so touch
+   targets meet the 44px minimum without enlarging the visual marker. */
+.rentmap-marker{background:transparent !important;border:0 !important;display:flex !important;align-items:center;justify-content:center;cursor:pointer}
+.rentmap-marker-dot{display:block;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.18);transition:transform .12s,opacity .15s;pointer-events:none}
+.rentmap-marker:hover .rentmap-marker-dot{transform:scale(1.18)}
+.rentmap-marker.marker-dim .rentmap-marker-dot{opacity:.25;border-color:rgba(255,255,255,.7)}

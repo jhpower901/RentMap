@@ -23,7 +23,7 @@ nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
 nav a:hover{background:#f0f0f0}
 nav a.active-nav{background:#222;color:#fff}
 .badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
-.badge-dabang{background:#326CF9}.badge-daangn{background:#FF6F00}.badge-zigbang{background:#EF4444}.badge-naver{background:#03C75A}.badge-manual{background:#607D8B}
+.badge-dabang{background:#326CF9}.badge-daangn{background:#FF6F00}.badge-zigbang{background:#EF4444}.badge-naver{background:#03C75A}.badge-manual{background:#607D8B}.badge-peterpan{background:#7C3AED}
 .page{max-width:1180px;margin:0 auto;padding:16px}
 .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
 .controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;flex:1;min-width:140px}
@@ -54,6 +54,58 @@ nav a.active-nav{background:#222;color:#fff}
 .btn-toggle-kind{border-color:#cbd5e1}
 .btn-toggle-kind:hover{background:#eef2ff}
 
+/* Visit indicator — set the moment a user first stars / uploads a photo on
+   a favorite. The number is recomputed each render so it always reflects
+   the chronological order *within the currently displayed slice*. That's
+   why a card numbered "1번" under "오늘 방문" might be "3번" under "전체"
+   if there were earlier visits on other days. */
+.visit-pill{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:#dbeafe;color:#1d4ed8;white-space:nowrap}
+.visit-pill .vn{font-size:12px}
+.visit-pill .vd{font-weight:500;color:#3b82f6;font-size:10px}
+.visit-pill.not-visited{background:#f1f5f9;color:#94a3b8}
+/* ▲/▼ buttons next to the visit pill — only rendered on the 오늘 view so
+   the user can rearrange the "방을 본 순서" before consulting the agent.
+   44x36 hit area keeps the touch target above iOS minimums even while
+   the glyphs themselves stay compact. */
+.visit-arrows{display:inline-flex;gap:2px;align-items:center}
+.visit-arrow{min-width:32px;min-height:32px;width:32px;height:32px;padding:0;border:1px solid #c7d2fe;background:#fff;color:#3730a3;border-radius:5px;cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;font-family:inherit}
+.visit-arrow:hover:not([disabled]){background:#eef2ff}
+.visit-arrow[disabled]{opacity:.35;cursor:not-allowed}
+.fav-card.is-visited{border-left:3px solid #3b82f6}
+.fav-card.is-visited.is-dislike{border-left-color:#94a3b8}
+.fav-group-header.day{background:#eff6ff;border-left-color:#3b82f6;color:#1d4ed8}
+.fav-group-header.day .gcnt{color:#1d4ed8}
+.fav-group-header.day.no-visit{background:#f8fafc;border-left-color:#cbd5e1;color:#64748b}
+.fav-group-header.day.no-visit .gcnt{color:#94a3b8}
+
+/* Compare modal — wide table with sticky first column so users can scroll
+   sideways through visited rooms without losing the row labels. Body lock
+   keeps mobile from double-scrolling the underlying favorite list. */
+.compare-overlay{position:fixed;inset:0;background:#0006;z-index:1100;display:flex;align-items:stretch;justify-content:center;padding:18px}
+.compare-overlay.hidden{display:none}
+.compare-modal{background:#fff;border-radius:12px;padding:14px;width:100%;max-width:1200px;max-height:100%;display:flex;flex-direction:column;box-shadow:0 4px 24px #0004}
+.compare-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.compare-head h2{font-size:16px;font-weight:700;flex:1;min-width:0}
+.compare-head .compare-meta{font-size:12px;color:#666}
+.compare-scroll{flex:1 1 auto;overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa}
+.compare-table{border-collapse:separate;border-spacing:0;font-size:12px;width:max-content;min-width:100%}
+.compare-table th,.compare-table td{padding:8px 10px;vertical-align:top;border-bottom:1px solid #eef2f7;background:#fff;text-align:left;white-space:nowrap}
+.compare-table thead th{position:sticky;top:0;background:#f1f5f9;font-weight:700;z-index:3;font-size:12px}
+.compare-table th.row-label,.compare-table td.row-label{position:sticky;left:0;background:#f8fafc;font-weight:700;color:#475569;z-index:2;min-width:88px;text-align:left}
+.compare-table thead th.row-label{z-index:4;background:#e2e8f0}
+.compare-table td.col-val{min-width:160px;max-width:240px;white-space:normal;word-break:break-word}
+.compare-table td.col-val.is-num{font-variant-numeric:tabular-nums;color:#111}
+.compare-table td.col-val .col-sub{font-size:11px;color:#888;display:block;margin-top:2px}
+.compare-table td.col-val.notes{white-space:pre-wrap;max-height:160px;overflow:auto;font-size:12px;line-height:1.45;color:#333}
+.compare-best{background:#fef3c7!important;color:#92400e;font-weight:700}
+.compare-rank{display:inline-block;padding:1px 6px;border-radius:8px;background:#dbeafe;color:#1d4ed8;font-weight:700;margin-right:4px}
+.compare-link{display:inline-block;margin-top:4px;font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:5px;color:#1d4ed8;text-decoration:none}
+.compare-link:hover{background:#eef2ff}
+.compare-empty{padding:40px;text-align:center;color:#94a3b8;font-size:13px}
+.btn-compare{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+.btn-compare:hover{background:#1e40af}
+.btn-compare[disabled]{opacity:.5;cursor:not-allowed;background:#94a3b8;border-color:#94a3b8}
+
 /* Favorite map */
 .fav-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,400px);gap:14px;align-items:start}
 .fav-list-pane{min-width:0}
@@ -79,6 +131,16 @@ nav a.active-nav{background:#222;color:#fff}
 .fav-card{background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 4px #0002;overflow:hidden}
 .fav-header{padding:11px 14px;display:flex;align-items:flex-start;gap:8px;cursor:pointer;flex-wrap:wrap}
 .fav-header:hover{background:#fafafa}
+/* Thumbnail at the start of each card header. Sized to match a stock listing
+   thumb — small enough to keep the row compact, large enough that the user
+   can recognise the room while scrolling a long list. */
+.fav-thumb{width:72px;height:54px;object-fit:cover;border-radius:6px;flex-shrink:0;display:block;background:#eee}
+.fav-thumb-empty{display:flex;align-items:center;justify-content:center;color:#bbb;font-size:18px}
+/* Listing number chip in fav-sub — monospace + tap-to-copy. */
+.fav-listing-no{display:inline-block;font-family:'Menlo','Consolas',monospace;font-size:11px;color:#3730a3;background:#eef2ff;padding:1px 7px;border-radius:8px;margin-left:6px;cursor:pointer;user-select:all}
+.fav-listing-no:hover{background:#e0e7ff}
+.fav-listing-no.copied{background:#dcfce7;color:#15803d}
+.fav-listing-no.copied::after{content:' ✓'}
 .fav-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
 .fav-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
 .fav-price{font-size:13px;color:#c00;font-weight:700;white-space:nowrap}
@@ -198,6 +260,8 @@ nav a.active-nav{background:#222;color:#fff}
   .fav-group-header{min-width:0;max-width:100%;overflow:hidden}
   .fav-card{min-width:0;margin-bottom:8px;border-radius:8px}
   .fav-header{padding:8px 10px;gap:6px}
+  .fav-thumb{width:56px;height:42px;border-radius:5px}
+  .fav-listing-no{font-size:10px;padding:1px 5px}
   .fav-title{max-width:100%;min-width:0;font-size:13px;flex:1 1 auto}
   .fav-price{font-size:12px}
   .fav-sub{font-size:11px;margin-top:1px}
@@ -232,6 +296,14 @@ nav a.active-nav{background:#222;color:#fff}
   .gallery-overlay{padding:8px}
   .gallery-img{max-height:82vh}
   .gallery-btn{width:38px;height:38px;font-size:24px}
+  .visit-pill{font-size:10px;padding:1px 6px}
+  .visit-pill .vn{font-size:11px}
+  .visit-pill .vd{font-size:9px}
+  .compare-overlay{padding:6px}
+  .compare-modal{padding:8px;border-radius:8px}
+  .compare-head h2{font-size:14px}
+  .compare-table th,.compare-table td{padding:6px 8px;font-size:11px}
+  .compare-table td.col-val{min-width:130px;max-width:180px}
 }
 </style>
 </head>
@@ -240,19 +312,22 @@ nav a.active-nav{background:#222;color:#fff}
   <span class="brand">아주대 월세</span>
   <a href="index.html">지도</a>
   <a href="favorites.html" class="active-nav">❤️ 좋아요</a>
+  <a href="bookmarks.html">📌 북마크</a>
   <a href="dabang.html"><span class="badge badge-dabang">다방</span></a>
   <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
   <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
   <a href="naver.html"><span class="badge badge-naver">네이버</span></a>
+  <a href="peterpan.html"><span class="badge badge-peterpan">피터팬</span></a>
   <a href="webhook-settings.html">🔔 알림</a>
   <span id="userInfo"></span>
 </nav>
 
 <div class="page">
   <div class="controls">
-    <div class="view-toggle" role="tablist" aria-label="좋아요 / 싫어요 보기">
+    <div class="view-toggle" role="tablist" aria-label="좋아요 / 싫어요 / 오늘 보기">
       <button type="button" data-view="like" class="active" role="tab" aria-selected="true">❤️ 좋아요 <span id="cntLike">0</span></button>
       <button type="button" data-view="dislike" role="tab" aria-selected="false">👎 싫어요 <span id="cntDislike">0</span></button>
+      <button type="button" data-view="today" role="tab" aria-selected="false" title="오늘 별점/사진 추가한 매물">🚶 오늘 <span id="cntToday">0</span></button>
     </div>
     <input type="text" id="search" placeholder="검색 (제목, 주소, 중개사...)">
     <label style="font-size:13px;display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer">
@@ -260,9 +335,11 @@ nav a.active-nav{background:#222;color:#fff}
     </label>
     <select id="groupBy" title="그룹 보기">
       <option value="agency" selected>중개사별</option>
+      <option value="visit">🚶 방문 순서</option>
       <option value="">전체 보기</option>
     </select>
     <span id="areaCtl"></span>
+    <button class="btn btn-compare" id="compareBtn" title="현재 목록의 방문 매물 비교표">📊 비교 <span id="cntCompare">0</span></button>
     <button class="btn btn-primary" id="addBtn">+ 매물 추가</button>
     <span class="count" id="countLabel">0건</span>
   </div>
@@ -316,6 +393,22 @@ nav a.active-nav{background:#222;color:#fff}
   </div>
 </div>
 
+<div class="compare-overlay hidden" id="compareOverlay">
+  <div class="compare-modal">
+    <div class="compare-head">
+      <h2>📊 방문 매물 비교</h2>
+      <span class="compare-meta" id="compareMeta"></span>
+      <button class="btn" id="compareClose">닫기</button>
+    </div>
+    <div class="compare-scroll" id="compareScroll">
+      <div class="compare-empty" id="compareEmpty">
+        방문 기록(별점·사진)이 있는 매물이 있어야 비교할 수 있습니다.<br>
+        매물 카드를 펼쳐 별점이나 사진을 한 번이라도 추가해 보세요.
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="gallery-overlay hidden" id="galleryOverlay">
   <button class="gallery-btn gallery-close" id="galleryClose" title="닫기">×</button>
   <button class="gallery-btn gallery-prev" id="galleryPrev" title="이전">‹</button>
@@ -326,7 +419,7 @@ nav a.active-nav{background:#222;color:#fff}
 
 <script src="region-data-loader.js?v=20260526-region1"></script>
 <script src="auth.js?v=20260525-auth1"></script>
-<script src="favorites.js?v=20260529-dislike"></script>
+<script src="favorites.js?v=20260602-fieldmerge"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script src="listing-info.js?v=20260527-naverurl"></script>
 <script>
@@ -353,6 +446,14 @@ let favoriteMarkerLayer = null;
 let favoriteMarkers = new Map();
 let suppressSyncRenderUntil = 0;
 
+// Cache of visitNumber per fav.key for the current render so buildCard can
+// look it up without computing again. Rebuilt at the top of every renderList.
+let visitNumberByKey = new Map();
+const photoBackfillTried = new Set();
+// Snapshot of the latest filtered slice — compare modal renders from this so
+// "what you see in the list" = "what gets compared".
+let currentFilteredView = [];
+
 function suppressSyncRender(ms = 1500) {
   suppressSyncRenderUntil = Math.max(suppressSyncRenderUntil, Date.now() + ms);
 }
@@ -378,6 +479,75 @@ function fmtRent(v) { return v == null ? '-' : v + '만'; }
 
 function safeId(fav) {
   return (fav.source + '_' + String(fav.id)).replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function firstVisitedTime(fav) {
+  const t = Date.parse(fav && fav.firstVisitedAt);
+  return Number.isFinite(t) ? t : null;
+}
+
+function isVisited(fav) {
+  return firstVisitedTime(fav) != null;
+}
+
+function dayBucketKey(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  // Local day boundaries — matches what the user thinks of as "today"
+  // regardless of UTC offset.
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function todayBucket() {
+  return dayBucketKey(Date.now());
+}
+
+function dayLabel(bucketKey) {
+  if (!bucketKey) return '미방문';
+  const today = todayBucket();
+  if (bucketKey === today) return '오늘';
+  const [y, m, d] = bucketKey.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  const days = Math.round((new Date(ty, tm - 1, td).getTime() - new Date(y, m - 1, d).getTime()) / 86400000);
+  if (days === 1) return '어제';
+  if (days === 2) return '그저께';
+  return bucketKey;
+}
+
+// Backfill firstVisitedAt for older entries: if a favorite already has any
+// rating star but no firstVisitedAt, fall back to savedAt — it's the best
+// proxy we have for entries that existed before the visit feature shipped.
+// Idempotent and runs once on render.
+function backfillVisitedFromRatings() {
+  const entries = (window.Favorites.getAllEntries && window.Favorites.getAllEntries()) || [];
+  entries.forEach(fav => {
+    if (fav.firstVisitedAt) return;
+    const r = fav.rating || {};
+    const hasStar = Object.values(r).some(v => Number(v) > 0);
+    if (!hasStar) return;
+    // savedAt is when the favorite was added, which is at worst an upper bound
+    // of "when interaction first happened" since rating can only be set after.
+    window.Favorites.markVisited(fav.id, fav.source, fav.savedAt);
+  });
+}
+
+// When a card opens we lazy-fetch its photos. If the user had uploaded photos
+// before firstVisitedAt existed, the earliest photo's addedAt (server returns
+// ctime as float seconds) is a more accurate stamp than savedAt. Use only when
+// firstVisitedAt is still missing after the rating-based backfill.
+function maybeBackfillFromPhotos(fav, photos) {
+  if (!photos || !photos.length) return;
+  if (firstVisitedTime(fav) != null) return;
+  if (photoBackfillTried.has(fav.key)) return;
+  photoBackfillTried.add(fav.key);
+  const earliest = photos.reduce((acc, p) => {
+    const t = Number(p.addedAt) * 1000;
+    return Number.isFinite(t) && (acc == null || t < acc) ? t : acc;
+  }, null);
+  if (earliest == null) return;
+  const iso = new Date(earliest).toISOString();
+  window.Favorites.markVisited(fav.id, fav.source, iso);
+  fav.firstVisitedAt = iso;
 }
 
 function displayAgency(fav) {
@@ -550,8 +720,9 @@ function buildCard(fav) {
     : `<span class="score-chip none">미평가</span>`;
 
   const isDislike = fav.kind === 'dislike';
+  const visited = isVisited(fav);
   const card = document.createElement('div');
-  card.className = 'fav-card' + (isDislike ? ' is-dislike' : '');
+  card.className = 'fav-card' + (isDislike ? ' is-dislike' : '') + (visited ? ' is-visited' : '');
   card.dataset.favKey = fav.key;
   // 좋아요 → 싫어요 (and back) toggle. Stays a single button so the row
   // header doesn't sprout a third control next to 제거/🔗.
@@ -559,16 +730,49 @@ function buildCard(fav) {
   const kindPill = isDislike
     ? '<span class="kind-pill kind-dislike">싫어요</span>'
     : '<span class="kind-pill">좋아요</span>';
+  let visitPillHtml = '';
+  if (visited) {
+    const num = visitNumberByKey.get(fav.key);
+    const dayLbl = dayLabel(dayBucketKey(firstVisitedTime(fav)));
+    visitPillHtml = `<span class="visit-pill" title="방문 ${dayLbl}">🚶 <span class="vn">${num != null ? num + '번' : '방문'}</span><span class="vd">${esc(dayLbl)}</span></span>`;
+  } else {
+    visitPillHtml = '<span class="visit-pill not-visited" title="아직 별점/사진을 추가하지 않았습니다">🕒 미방문</span>';
+  }
+  // Visit-order arrows: only on the 오늘 view. They reorder today's bucket
+  // exclusively, so the controls don't appear on like/dislike views where the
+  // sort axis isn't visit-related.
+  const showVisitArrows = favoritesView === 'today' && visited;
+  const visitArrowsHtml = showVisitArrows
+    ? '<span class="visit-arrows">' +
+        '<button class="visit-arrow visit-up" type="button" title="위로 이동">▲</button>' +
+        '<button class="visit-arrow visit-down" type="button" title="아래로 이동">▼</button>' +
+      '</span>'
+    : '';
+  // Thumbnail: prefer the listing's stock image (loads instantly from the data
+  // bundle). User-uploaded photos still appear in the detail panel below; the
+  // header thumb is just a "which room was this?" cue for skimming the list.
+  const thumbUrl = safeUrl(d.img1 || d.image_1 || '');
+  const thumbHtml = thumbUrl
+    ? `<img class="fav-thumb" src="${esc(thumbUrl)}" loading="lazy" decoding="async" alt="" onerror="this.outerHTML='<div class=\\'fav-thumb fav-thumb-empty\\'>📷</div>'">`
+    : '<div class="fav-thumb fav-thumb-empty">📷</div>';
+  // Listing number — shown beside the address so the user can read it off
+  // to an agent without expanding the detail panel.
+  const listingNoHtml = d.id != null && d.id !== ''
+    ? `<span class="fav-listing-no" title="매물번호 (탭하여 복사)" data-listing-id="${esc(d.id)}">#${esc(d.id)}</span>`
+    : '';
   card.innerHTML = `
     <div class="fav-header">
+      ${thumbHtml}
       <div class="fav-main">
         <span class="badge" style="background:${srcColor}">${esc(srcName)}</span>
         ${kindPill}
+        ${visitPillHtml}
+        ${visitArrowsHtml}
         <span class="fav-title">${esc(d.title || d.address || '제목없음')}</span>
         ${statusHtml}
         ${scoreHtml}
         <span class="fav-price">보${fmtDep(d.deposit)} / 월${fmtRent(d.rent)}</span>
-        <span class="fav-sub">${esc(d.address || d.region || '')}</span>
+        <span class="fav-sub">${esc(d.address || d.region || '')} ${listingNoHtml}</span>
       </div>
       <div class="fav-actions">
         ${(() => {
@@ -597,6 +801,29 @@ function buildCard(fav) {
   if (link) link.addEventListener('click', e => e.stopPropagation());
   card.querySelector('.fav-toggle-kind').addEventListener('click', e => doToggleKind(e, fav));
   card.querySelector('.fav-remove').addEventListener('click', e => doRemove(e, fav.id, fav.source));
+  const upBtn = card.querySelector('.visit-up');
+  const downBtn = card.querySelector('.visit-down');
+  if (upBtn) upBtn.addEventListener('click', e => { e.stopPropagation(); moveTodayVisit(fav, -1); });
+  if (downBtn) downBtn.addEventListener('click', e => { e.stopPropagation(); moveTodayVisit(fav, 1); });
+  const listingNoEl = card.querySelector('.fav-listing-no');
+  if (listingNoEl) {
+    listingNoEl.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = listingNoEl.dataset.listingId || '';
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(id);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        listingNoEl.classList.add('copied');
+        setTimeout(() => listingNoEl.classList.remove('copied'), 1100);
+      } catch (_) { /* swallow */ }
+    });
+  }
   return card;
 }
 
@@ -609,10 +836,65 @@ function appendFavCard(parent, fav) {
   }
 }
 
-// 'like' | 'dislike' — switched by the view-toggle buttons in the controls bar.
-// Persisted in localStorage so revisiting the page lands on the same view.
+// 'like' | 'dislike' | 'today' — switched by the view-toggle buttons in the
+// controls bar. Persisted in localStorage so revisiting the page lands on
+// the same view.
 const VIEW_KEY = 'rentmap.favoritesView';
-let favoritesView = localStorage.getItem(VIEW_KEY) === 'dislike' ? 'dislike' : 'like';
+const ALLOWED_VIEWS = new Set(['like', 'dislike', 'today']);
+const storedView = localStorage.getItem(VIEW_KEY);
+let favoritesView = ALLOWED_VIEWS.has(storedView) ? storedView : 'like';
+
+// Sort comparator for visit-ordered lists. Manual visitOrder (set via the
+// ▲/▼ buttons on the 오늘 view) wins; entries without one fall back to
+// firstVisitedTime. Mixed groups put pinned entries first.
+function compareByVisit(a, b) {
+  const ao = Number(a.visitOrder);
+  const bo = Number(b.visitOrder);
+  const ah = Number.isFinite(ao);
+  const bh = Number.isFinite(bo);
+  if (ah && bh) return ao - bo;
+  if (ah && !bh) return -1;
+  if (!ah && bh) return 1;
+  return (firstVisitedTime(a) || 0) - (firstVisitedTime(b) || 0);
+}
+
+function assignVisitNumbers(entries) {
+  // Number per *day* bucket — "today's 1st room, today's 2nd room,
+  // yesterday's 1st room, …" — because that's how people actually remember
+  // a viewing trip. Earlier draft used global ordering which left today's
+  // first room labelled "3번" when there were earlier visits days ago.
+  visitNumberByKey = new Map();
+  const buckets = new Map();
+  entries.filter(isVisited).forEach(e => {
+    const k = dayBucketKey(firstVisitedTime(e));
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(e);
+  });
+  buckets.forEach(list => {
+    list.sort(compareByVisit)
+      .forEach((e, i) => visitNumberByKey.set(e.key, i + 1));
+  });
+}
+
+// Move the today-bucket entry up or down by one slot. Reorders the *entire*
+// today bucket (not just the currently filtered view) so a hidden search/area
+// filter doesn't silently re-shuffle invisible rows.
+function moveTodayVisit(fav, delta) {
+  const todayKey = todayBucket();
+  const todayEntries = (Favorites.getAllEntries() || []).filter(f => {
+    const t = firstVisitedTime(f);
+    return t != null && dayBucketKey(t) === todayKey;
+  });
+  todayEntries.sort(compareByVisit);
+  const idx = todayEntries.findIndex(f => f.key === fav.key);
+  if (idx < 0) return;
+  const target = idx + delta;
+  if (target < 0 || target >= todayEntries.length) return;
+  const swapped = todayEntries.slice();
+  const [item] = swapped.splice(idx, 1);
+  swapped.splice(target, 0, item);
+  Favorites.updateVisitOrder(swapped.map(f => f.key));
+}
 
 function renderList() {
   document.querySelectorAll('.fav-card.open').forEach(card => {
@@ -623,16 +905,25 @@ function renderList() {
   const groupBy = document.getElementById('groupBy').value;
   const likes = Favorites.getAll();
   const dislikes = Favorites.getDislikes();
+  const today = todayBucket();
+  const todayList = (Favorites.getAllEntries() || []).filter(fav => {
+    const t = firstVisitedTime(fav);
+    return t != null && dayBucketKey(t) === today;
+  });
   // Counts in the toggle are global — they ignore search/area filters so the
   // user always sees the absolute size of each bucket.
   document.getElementById('cntLike').textContent = likes.length;
   document.getElementById('cntDislike').textContent = dislikes.length;
+  document.getElementById('cntToday').textContent = todayList.length;
   document.querySelectorAll('.view-toggle button').forEach(btn => {
     const on = btn.dataset.view === favoritesView;
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-selected', on ? 'true' : 'false');
   });
-  const favs = favoritesView === 'dislike' ? dislikes : likes;
+  let favs;
+  if (favoritesView === 'dislike') favs = dislikes;
+  else if (favoritesView === 'today') favs = todayList;
+  else favs = likes;
   const filtered = favs.filter(fav => {
     const d = freshData(fav);
     if (hideGone && availability(fav) === 'gone') return false;
@@ -644,6 +935,16 @@ function renderList() {
     return true;
   });
 
+  // Compute visit numbers off the *visible* slice so the cards stay
+  // consistent with whatever the user is currently looking at.
+  assignVisitNumbers(filtered);
+  currentFilteredView = filtered;
+  const visitedCount = filtered.filter(isVisited).length;
+  const compareBtn = document.getElementById('compareBtn');
+  const compareCount = document.getElementById('cntCompare');
+  if (compareCount) compareCount.textContent = visitedCount;
+  if (compareBtn) compareBtn.disabled = visitedCount === 0;
+
   document.getElementById('countLabel').textContent = filtered.length + '건';
   renderFavoriteMap(filtered, favs.length);
   const listEl = document.getElementById('favList');
@@ -652,14 +953,28 @@ function renderList() {
 
   if (!favs.length) {
     emptyEl.style.display = '';
-    emptyEl.innerHTML = favoritesView === 'dislike'
-      ? '싫어요한 매물이 없습니다.<br>각 플랫폼 페이지에서 👎 버튼으로 추가하세요.'
-      : '좋아요한 매물이 없습니다.<br>각 플랫폼 페이지에서 ❤️ 버튼으로 추가하세요.';
+    if (favoritesView === 'dislike') {
+      emptyEl.innerHTML = '싫어요한 매물이 없습니다.<br>각 플랫폼 페이지에서 👎 버튼으로 추가하세요.';
+    } else if (favoritesView === 'today') {
+      emptyEl.innerHTML = '오늘 방문 기록(별점·사진)이 있는 매물이 없습니다.<br>매물 카드를 펼쳐 별점을 매기거나 사진을 올리면 자동으로 여기에 표시돼요.';
+    } else {
+      emptyEl.innerHTML = '좋아요한 매물이 없습니다.<br>각 플랫폼 페이지에서 ❤️ 버튼으로 추가하세요.';
+    }
     return;
   }
   emptyEl.style.display = 'none';
 
-  if (groupBy === 'agency') {
+  // The 오늘 view is the *only* view where ▲/▼ buttons appear, and reordering
+  // only makes sense against a single flat list. Skip groupBy here so a stray
+  // groupBy='agency' (the default) doesn't bucket cards and silently disable
+  // the visit-order swap on the row the user just clicked.
+  if (favoritesView === 'today') {
+    [...filtered]
+      .sort(compareByVisit)
+      .forEach(fav => appendFavCard(listEl, fav));
+  } else if (groupBy === 'visit') {
+    renderVisitGroups(listEl, filtered);
+  } else if (groupBy === 'agency') {
     const groups = new Map();
     filtered.forEach(fav => {
       const key = displayAgency(fav);
@@ -687,6 +1002,192 @@ function renderList() {
   } else {
     filtered.forEach(fav => appendFavCard(listEl, fav));
   }
+}
+
+function renderVisitGroups(listEl, filtered) {
+  const buckets = new Map();
+  const unvisited = [];
+  filtered.forEach(fav => {
+    const t = firstVisitedTime(fav);
+    if (t == null) { unvisited.push(fav); return; }
+    const k = dayBucketKey(t);
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(fav);
+  });
+  // Newest day at the top — matches how the user mentally pages through
+  // "today / yesterday / older".
+  const dayKeys = [...buckets.keys()].sort((a, b) => b.localeCompare(a));
+  dayKeys.forEach(k => {
+    const list = buckets.get(k).sort((a, b) => firstVisitedTime(a) - firstVisitedTime(b));
+    const wrap = document.createElement('div');
+    wrap.className = 'fav-group';
+    const header = document.createElement('div');
+    header.className = 'fav-group-header day';
+    header.innerHTML =
+      `<span>🚶 ${esc(dayLabel(k))} 방문</span>` +
+      `<span class="gphone">${esc(k)}</span>` +
+      `<span class="gcnt">${list.length}건</span>`;
+    wrap.appendChild(header);
+    list.forEach(fav => appendFavCard(wrap, fav));
+    listEl.appendChild(wrap);
+  });
+  if (unvisited.length) {
+    const wrap = document.createElement('div');
+    wrap.className = 'fav-group';
+    const header = document.createElement('div');
+    header.className = 'fav-group-header day no-visit';
+    header.innerHTML =
+      `<span>🕒 미방문</span>` +
+      `<span class="gphone">별점·사진을 추가하면 자동 분류돼요</span>` +
+      `<span class="gcnt">${unvisited.length}건</span>`;
+    wrap.appendChild(header);
+    unvisited.forEach(fav => appendFavCard(wrap, fav));
+    listEl.appendChild(wrap);
+  }
+}
+
+// ── Compare modal ──────────────────────────────────────────────────────────
+// Takes the currently filtered + visited entries, sorts by first-visit, and
+// drops each into its own column. Row labels (보증금, 별점, …) freeze on the
+// left while the value columns scroll — that's the only way side-by-side
+// comparison stays usable on a phone-sized viewport.
+function bestIndices(vals, mode) {
+  if (!mode) return new Set();
+  const nums = vals.map(v => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  });
+  const valid = nums.filter(v => v != null);
+  if (valid.length < 2) return new Set();
+  const best = mode === 'min' ? Math.min(...valid) : Math.max(...valid);
+  // Avoid highlighting when *every* room has the same value — there's no winner.
+  if (valid.every(v => v === best)) return new Set();
+  const out = new Set();
+  nums.forEach((v, i) => { if (v === best) out.add(i); });
+  return out;
+}
+
+function compareRow(label, vals, opts) {
+  opts = opts || {};
+  const formatter = opts.format || (v => v == null || v === '' ? '-' : esc(String(v)));
+  const isNum = !!opts.numeric;
+  const best = bestIndices(vals, opts.best);
+  const cells = vals.map((v, i) => {
+    const classes = ['col-val'];
+    if (isNum) classes.push('is-num');
+    if (opts.notes) classes.push('notes');
+    if (best.has(i)) classes.push('compare-best');
+    return `<td class="${classes.join(' ')}">${formatter(v, i)}</td>`;
+  }).join('');
+  return `<tr><td class="row-label">${esc(label)}</td>${cells}</tr>`;
+}
+
+function buildCompareTable(rooms) {
+  const headerCols = rooms.map((fav, i) => {
+    const d = freshData(fav);
+    const num = visitNumberByKey.get(fav.key) || (i + 1);
+    const dayLbl = dayLabel(dayBucketKey(firstVisitedTime(fav)));
+    const srcName = SRC_NAME[fav.source] || fav.source;
+    return `<th>
+      <div><span class="compare-rank">${num}번</span>${esc(srcName)}</div>
+      <div class="col-sub" style="font-weight:500;color:#666;font-size:11px">${esc(dayLbl)}</div>
+    </th>`;
+  }).join('');
+
+  const datas = rooms.map(fav => freshData(fav));
+  const scores = rooms.map(fav => calcScore(fav.rating));
+  const num = key => datas.map(d => {
+    const v = Number(d[key]);
+    return Number.isFinite(v) ? v : null;
+  });
+  const fmtMan = v => v == null ? '-' : esc(String(v)) + '만';
+  const fmtArea = v => v == null || v === '' ? '-' : esc(String(v)) + 'm²';
+  const fmtMonthly = (rent, maint) => {
+    const r = Number(rent);
+    const m = Number(maint);
+    if (!Number.isFinite(r) && !Number.isFinite(m)) return '-';
+    return ((Number.isFinite(r) ? r : 0) + (Number.isFinite(m) ? m : 0)) + '만';
+  };
+
+  const monthlyVals = datas.map(d => {
+    const r = Number(d.rent), m = Number(d.maint);
+    if (!Number.isFinite(r) && !Number.isFinite(m)) return null;
+    return (Number.isFinite(r) ? r : 0) + (Number.isFinite(m) ? m : 0);
+  });
+
+  const rowsHtml = [
+    compareRow('출처', datas.map(d => SRC_NAME[d.source] || d.source || '-')),
+    compareRow('제목', datas.map(d => d.title || d.address || '제목없음')),
+    compareRow('주소', datas.map(d => d.address || d.region || '-')),
+    compareRow('중개사', rooms.map(displayAgency)),
+    compareRow('전화', datas.map(d => d.phone || '-')),
+    compareRow('보증금', num('deposit'), { numeric: true, best: 'min', format: v => fmtMan(v) }),
+    compareRow('월세', num('rent'), { numeric: true, best: 'min', format: v => fmtMan(v) }),
+    compareRow('관리비', num('maint'), { numeric: true, best: 'min', format: v => fmtMan(v) }),
+    compareRow('월 부담 (월세+관리)', monthlyVals, { numeric: true, best: 'min', format: v => fmtMan(v) }),
+    compareRow('면적', datas.map(d => d.area), { numeric: true, best: 'max', format: fmtArea }),
+    compareRow('층', datas.map(d => d.floor || '-')),
+    compareRow('방유형', datas.map((d, i) => displayType(d, rooms[i].source) || '-')),
+    compareRow('별점 종합', scores, {
+      numeric: true,
+      best: 'max',
+      format: v => v == null ? '미평가' : '★ ' + v.toFixed(1) + ' / 5',
+    }),
+    ...CRITERIA.map(c => compareRow(
+      c.label,
+      rooms.map(fav => (fav.rating && fav.rating[c.key]) || null),
+      { numeric: true, best: 'max', format: v => v == null ? '-' : '★ ' + v + ' / 5' }
+    )),
+    compareRow('메모', rooms.map(fav => fav.notes || ''), {
+      notes: true,
+      format: v => v ? esc(v) : '<span style="color:#bbb">-</span>',
+    }),
+    compareRow('링크', rooms.map(fav => {
+      const d = freshData(fav);
+      const url = safeUrl(window.ListingInfo.resolveListingUrl(d.url, fav.source, d));
+      return url
+        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="compare-link">매물 보기 ↗</a>`
+        : '-';
+    }), { format: v => v }),
+  ].join('');
+
+  return `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th class="row-label">항목</th>
+          ${headerCols}
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  `;
+}
+
+function openCompareModal() {
+  const rooms = (currentFilteredView || [])
+    .filter(isVisited)
+    .sort((a, b) => firstVisitedTime(a) - firstVisitedTime(b));
+  const overlay = document.getElementById('compareOverlay');
+  const scroll = document.getElementById('compareScroll');
+  const meta = document.getElementById('compareMeta');
+  if (!rooms.length) {
+    scroll.innerHTML = `<div class="compare-empty">
+      방문 기록(별점·사진)이 있는 매물이 있어야 비교할 수 있습니다.<br>
+      매물 카드를 펼쳐 별점을 매기거나 사진을 한 번이라도 추가해 보세요.
+    </div>`;
+    meta.textContent = '비교 가능한 매물 0건';
+  } else {
+    scroll.innerHTML = buildCompareTable(rooms);
+    meta.textContent = `${rooms.length}건 비교 · 노란색 칸이 항목별 최적값`;
+  }
+  overlay.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeCompareModal() {
+  document.getElementById('compareOverlay').classList.add('hidden');
+  document.body.style.overflow = '';
 }
 
 function renderDetail(card, fav, sid) {
@@ -747,6 +1248,11 @@ function renderDetail(card, fav, sid) {
   Favorites.getPhotos(fav.id, fav.source).then(photos => {
     const grid = document.getElementById('pg_' + sid);
     if (grid) photos.forEach(p => insertPhotoThumb(grid, p.photoKey, p.url, fav.id, fav.source, sid));
+    // Backfill firstVisitedAt from photo timestamps if the entry never got one
+    // (e.g. user uploaded photos before this feature existed). Doesn't trigger
+    // a re-render — the visit pill will refresh the next time something else
+    // re-renders the list (sync, toggle, etc.).
+    maybeBackfillFromPhotos(fav, photos);
   });
 
   // Upload
@@ -946,12 +1452,23 @@ document.getElementById('manualSave').addEventListener('click', () => {
 document.getElementById('search').addEventListener('input', renderList);
 document.getElementById('hideGone').addEventListener('change', renderList);
 
-// View toggle: 좋아요 ⇄ 싫어요. We clear openFavKeys when switching so the
-// previously expanded card doesn't auto-open on the other side (different
+document.getElementById('compareBtn').addEventListener('click', openCompareModal);
+document.getElementById('compareClose').addEventListener('click', closeCompareModal);
+document.getElementById('compareOverlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('compareOverlay')) closeCompareModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('compareOverlay').classList.contains('hidden')) {
+    closeCompareModal();
+  }
+});
+
+// View toggle: 좋아요 ⇄ 싫어요 ⇄ 오늘. We clear openFavKeys when switching so
+// the previously expanded card doesn't auto-open on the other side (different
 // listings entirely).
 document.querySelectorAll('.view-toggle button').forEach(btn => {
   btn.addEventListener('click', () => {
-    const next = btn.dataset.view === 'dislike' ? 'dislike' : 'like';
+    const next = ALLOWED_VIEWS.has(btn.dataset.view) ? btn.dataset.view : 'like';
     if (next === favoritesView) return;
     favoritesView = next;
     localStorage.setItem(VIEW_KEY, favoritesView);
@@ -980,13 +1497,26 @@ function isEditingFavoriteDetail() {
 
 window.addEventListener('favoritesSynced', () => {
   if (Date.now() < suppressSyncRenderUntil || isEditingFavoriteDetail()) return;
+  backfillVisitedFromRatings();
   renderList();
+});
+
+// Pull latest server state when the tab regains focus. Without this, a device
+// that kept the tab open in the background can edit on top of stale local data
+// and overwrite a sibling device's changes on POST. Skips while the user is
+// actively editing so a refresh mid-typing doesn't clobber unsaved input.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (isEditingFavoriteDetail()) return;
+  if (window.Favorites && window.Favorites.refresh) window.Favorites.refresh();
 });
 
 if (window.AreaFilter) {
   AreaFilter.mountControl(document.getElementById('areaCtl'));
   AreaFilter.subscribe(renderList);
 }
+
+backfillVisitedFromRatings();
 
 // Load EVERY approved region's listing data (not just the active region)
 // so favorites cards can show metadata regardless of which region the

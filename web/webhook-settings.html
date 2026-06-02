@@ -17,7 +17,7 @@ nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
 nav a:hover{background:#f0f0f0}
 nav a.active-nav{background:#222;color:#fff}
 .badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
-.badge-dabang{background:#326CF9}.badge-daangn{background:#FF6F00}.badge-zigbang{background:#EF4444}.badge-naver{background:#03C75A}
+.badge-dabang{background:#326CF9}.badge-daangn{background:#FF6F00}.badge-zigbang{background:#EF4444}.badge-naver{background:#03C75A}.badge-peterpan{background:#7C3AED}
 
 .page{max-width:800px;margin:0 auto;padding:20px 16px}
 h2{font-size:18px;font-weight:700;margin-bottom:4px}
@@ -84,10 +84,12 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
   <span class="brand">아주대 월세</span>
   <a href="index.html">지도</a>
   <a href="favorites.html">❤️ 좋아요</a>
+  <a href="bookmarks.html">📌 북마크</a>
   <a href="dabang.html"><span class="badge badge-dabang">다방</span></a>
   <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
   <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
   <a href="naver.html"><span class="badge badge-naver">네이버</span></a>
+  <a href="peterpan.html"><span class="badge badge-peterpan">피터팬</span></a>
   <a href="webhook-settings.html" class="active-nav">🔔 알림</a>
   <span id="userInfo"></span>
 </nav>
@@ -158,13 +160,13 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
       <div class="check-group" id="fRegionIds">
         <span style="color:#888;font-size:12px">지역 목록을 불러오는 중…</span>
       </div>
-      <small>면적 필터와 OR로 결합돼요. 지역 + 폴리곤 둘 다 비우면 모든 지역 알림.</small>
+      <small>면적 필터와 AND로 결합돼요 — 지역 + 폴리곤 둘 다 설정 시 둘 다 만족해야 알림. 둘 다 비우면 지역 제한 없이 모든 알림.</small>
     </div>
 
     <div class="form-group" style="margin-top:14px">
       <label class="toggle-row">
         <input type="checkbox" id="fUseAreaFilter" checked>
-        면적 필터 사용 (내 면적 폴리곤 범위 안의 매물도 포함)
+        면적 필터 사용 (내 면적 폴리곤 범위 안의 매물만)
       </label>
     </div>
 
@@ -237,10 +239,17 @@ function renderRegionList(ids) {
 
 async function loadRegions() {
   try {
-    const res = await fetch('/api/regions');
-    if (!res.ok) throw new Error('fetch failed');
-    const list = await res.json();
+    const res = await fetch('/api/regions', { credentials: 'same-origin', cache: 'no-store' });
+    if (!res.ok) throw new Error('fetch failed: ' + res.status);
+    // /api/regions returns {regions: [...]} — not a bare array. Other
+    // pages (platform-common.js / region-data-loader.js) already unwrap
+    // it the same way; this matches that convention so the cache populates.
+    const payload = await res.json();
+    const list = (payload && payload.regions) || [];
     REGIONS_BY_ID = {};
+    // Non-admin /api/regions already filters to status='approved' on the
+    // backend, but the .filter() here guards against an admin caller (who
+    // sees all statuses) so they don't accidentally tag a pending region.
     const approved = list.filter(r => r.status === 'approved');
     approved.forEach(r => { REGIONS_BY_ID[r.id] = r; });
     const el = document.getElementById('fRegionIds');

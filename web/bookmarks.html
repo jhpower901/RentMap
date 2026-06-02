@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>북마크 - 아주대 월세</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
+a{color:inherit;text-decoration:none}
+nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
+nav a:hover{background:#f0f0f0}
+nav a.active-nav{background:#222;color:#fff}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:700;color:#fff;vertical-align:middle}
+.badge-dabang{background:#326CF9}.badge-daangn{background:#FF6F00}.badge-zigbang{background:#EF4444}.badge-naver{background:#03C75A}.badge-manual{background:#607D8B}.badge-peterpan{background:#7C3AED}
+.page{max-width:1180px;margin:0 auto;padding:16px}
+h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;background:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 1px 3px #0001}
+.controls input[type=text]{padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;flex:1;min-width:140px}
+.count{font-size:13px;color:#666;font-weight:600;margin-left:auto}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;font-family:inherit;line-height:1.4}
+.btn:hover{background:#f0f0f0}
+.btn-danger{border-color:#ffcccc;color:#c00}
+.btn-danger:hover{background:#fff0f0}
+.btn-primary{background:#222;color:#fff;border-color:#222}
+.btn-primary:hover{background:#333}
+
+/* Bookmark card — flat list, no grouping. Order pill on the left is the
+   visit sequence (1번, 2번, ...) — the *point* of the bookmark feature. */
+.bm-card{background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 4px #0002;overflow:hidden;display:flex;align-items:stretch}
+.bm-order-rail{flex:0 0 auto;width:60px;background:#eef2ff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:10px 4px;border-right:1px solid #e0e7ff}
+.bm-order-num{font-size:22px;font-weight:700;color:#3730a3;line-height:1}
+.bm-order-label{font-size:10px;color:#6366F1;font-weight:600}
+.bm-order-arrows{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.bm-arrow{width:28px;height:24px;min-width:44px;min-height:36px;padding:0;border:1px solid #c7d2fe;background:#fff;color:#4338ca;border-radius:5px;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;font-family:inherit}
+.bm-arrow:hover:not([disabled]){background:#eef2ff}
+.bm-arrow[disabled]{opacity:.4;cursor:not-allowed}
+.bm-body{flex:1 1 auto;min-width:0}
+.bm-header{padding:11px 14px;display:flex;align-items:flex-start;gap:8px;cursor:pointer;flex-wrap:wrap}
+.bm-header:hover{background:#fafafa}
+.bm-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
+.bm-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+.bm-price{font-size:13px;color:#c00;font-weight:700;white-space:nowrap}
+.bm-sub{font-size:12px;color:#888;flex-basis:100%;margin-top:2px}
+.bm-actions{display:flex;gap:5px;align-items:center;flex-shrink:0}
+.expand-arrow{font-size:12px;color:#bbb;margin-left:2px;transition:transform .2s;align-self:center}
+.bm-card.open .expand-arrow{transform:rotate(180deg)}
+
+/* Detail */
+.bm-detail{display:none;border-top:1px solid #f0f0f0;padding:14px 16px}
+.bm-card.open .bm-detail{display:block}
+.sec{margin-top:14px;padding-top:12px;border-top:1px solid #f0f0f0}
+.sec:first-child{margin-top:0;padding-top:0;border-top:none}
+.sec-title{font-size:13px;font-weight:700;color:#555;margin-bottom:8px}
+
+/* Listing info — same classes favorites.html uses */
+.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 14px;margin-bottom:4px}
+.info-item{display:flex;font-size:13px;line-height:1.4}
+.info-key{color:#888;width:60px;flex-shrink:0;font-weight:600}
+.info-val{color:#222;flex:1;word-break:break-all}
+.info-long{margin-top:10px;padding-top:8px;border-top:1px dashed #eee}
+.info-long:first-child{margin-top:0;padding-top:0;border-top:none}
+.info-long-key{font-size:12px;color:#666;font-weight:700;margin-bottom:4px}
+.info-long-val{font-size:13px;color:#333;line-height:1.55;white-space:pre-wrap;word-break:break-word;background:#fafafa;border-radius:6px;padding:8px 10px}
+.info-tags{display:flex;flex-wrap:wrap;gap:4px}
+.info-tag{font-size:11px;background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.info-tag.sec{background:#fef3c7;color:#92400e}
+
+/* Bookmark note */
+.bm-note-area{width:100%;min-height:80px;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit;resize:vertical;line-height:1.5}
+.bm-note-area:focus{outline:none;border-color:#6366F1;box-shadow:0 0 0 2px #c7d2fe}
+.note-save-hint{font-size:11px;color:#888;margin-top:4px;text-align:right}
+
+/* Checklist */
+.check-list{display:flex;flex-direction:column;gap:6px}
+.check-item{display:flex;align-items:center;gap:8px;padding:6px 8px;background:#fafafa;border-radius:6px}
+.check-item input[type=checkbox]{width:18px;height:18px;cursor:pointer;flex-shrink:0;accent-color:#6366F1}
+.check-item-label{flex:1;font-size:13px;cursor:pointer}
+.check-item.done .check-item-label{color:#888;text-decoration:line-through}
+.check-item-del{border:none;background:none;color:#bbb;font-size:14px;cursor:pointer;padding:4px 6px;line-height:1;border-radius:4px;min-width:32px;min-height:32px}
+.check-item-del:hover{color:#c00;background:#fee2e2}
+.check-add-row{display:flex;gap:6px;margin-top:8px}
+.check-add-row input{flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit}
+.check-add-row input:focus{outline:none;border-color:#6366F1}
+.check-presets{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.check-preset{padding:3px 9px;border:1px dashed #c7d2fe;background:#fff;color:#4338ca;border-radius:12px;font-size:11px;cursor:pointer;font-family:inherit}
+.check-preset:hover{background:#eef2ff}
+
+/* Photos — same look favorites.html uses */
+.photo-grid{display:flex;flex-wrap:wrap;gap:8px}
+.photo-item{position:relative;width:90px;height:68px;flex-shrink:0}
+.photo-item img{width:100%;height:100%;object-fit:cover;border-radius:6px;display:block;cursor:pointer}
+.photo-del{position:absolute;top:2px;right:2px;background:#0009;color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
+.photo-add{width:90px;height:68px;border:2px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#bbb;cursor:pointer;background:#fafafa;flex-shrink:0}
+.photo-add:hover{border-color:#888;color:#666}
+
+.empty-msg{text-align:center;padding:48px 24px;color:#aaa;line-height:1.6}
+
+.detail-collapse-wrap{display:flex;justify-content:center;margin-top:14px;padding-top:12px;border-top:1px solid #f0f0f0}
+.detail-collapse{min-width:96px;justify-content:center}
+
+@media(max-width:760px){
+  body{font-size:13px}
+  .page{padding:10px}
+  h1{font-size:17px}
+  .bm-card{flex-direction:row}
+  .bm-order-rail{width:48px;padding:8px 2px}
+  .bm-order-num{font-size:18px}
+  .bm-arrow{width:36px;min-width:36px;height:32px;min-height:32px;font-size:13px}
+  .bm-header{padding:8px 10px;gap:6px}
+  .bm-title{max-width:100%;font-size:13px}
+  .bm-price{font-size:12px}
+  .bm-sub{font-size:11px}
+  .bm-actions .btn{padding:4px 8px;font-size:12px}
+  .info-key{width:52px;font-size:11px}
+  .info-item{font-size:12px}
+  .photo-add{width:74px;height:56px;font-size:18px}
+  .photo-item{width:74px;height:56px}
+}
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">아주대 월세</span>
+  <a href="index.html">지도</a>
+  <a href="favorites.html">❤️ 좋아요</a>
+  <a href="bookmarks.html" class="active-nav">📌 북마크</a>
+  <a href="dabang.html"><span class="badge badge-dabang">다방</span></a>
+  <a href="daangn.html"><span class="badge badge-daangn">당근</span></a>
+  <a href="zigbang.html"><span class="badge badge-zigbang">직방</span></a>
+  <a href="naver.html"><span class="badge badge-naver">네이버</span></a>
+  <a href="webhook-settings.html">🔔 알림</a>
+  <span id="userInfo"></span>
+</nav>
+
+<div class="page">
+  <h1>📌 북마크 <span style="font-size:13px;font-weight:400;color:#666">— 직접 둘러본 매물 순서대로 기록</span></h1>
+  <div class="controls">
+    <input type="text" id="search" placeholder="검색 (제목, 주소, 메모...)">
+    <span class="count" id="countLabel">0건</span>
+  </div>
+  <div id="bmList"></div>
+  <p id="emptyMsg" class="empty-msg" style="display:none">
+    북마크한 매물이 없습니다.<br>
+    각 플랫폼 페이지에서 <b>📌</b> 버튼으로 추가하세요.<br>
+    <span style="font-size:12px;color:#bbb">좋아요(관심표시)와 별개로, 실제로 본 방을 순서대로 기록할 때 씁니다.</span>
+  </p>
+</div>
+
+<script src="region-data-loader.js?v=20260526-region1"></script>
+<script src="auth.js?v=20260525-auth1"></script>
+<script src="favorites.js?v=20260602-fieldmerge"></script>
+<script src="bookmarks.js?v=20260602-bm1"></script>
+<script src="listing-info.js?v=20260527-naverurl"></script>
+<script>
+const SRC_COLOR = { dabang:'#326CF9', daangn:'#FF6F00', zigbang:'#EF4444', naver:'#03C75A', manual:'#607D8B', peterpan:'#7C3AED' };
+const SRC_NAME  = { dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버', manual:'직접추가', peterpan:'피터팬' };
+const DATA_KEY  = { dabang:'DATA_DABANG', daangn:'DATA_DAANGN', zigbang:'DATA_ZIGBANG', naver:'DATA_NAVER', peterpan:'DATA_PETERPAN' };
+
+// Suggested checklist items the user can click to append — picked to cover
+// the things people forget during a hurried in-person tour.
+const CHECK_PRESETS = ['주차 확인', '햇빛 확인', '수압 확인', '곰팡이 확인', '소음 확인', '벌레 흔적', '보안(현관) 확인'];
+
+const openKeys = new Set();
+const noteDebounce = new Map();
+
+const esc = (window.ListingInfo && window.ListingInfo.esc) || (s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'));
+function safeUrl(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, window.location.href);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch (_) {}
+  return '';
+}
+
+function fmtDep(v) {
+  if (v == null) return '-';
+  return v >= 10000 ? (v/10000).toFixed(1).replace(/\.0$/,'') + '억' : v + '만';
+}
+function fmtRent(v) { return v == null ? '-' : v + '만'; }
+
+// Use the live data bundle if it loaded, so detail panel reflects fresh fields.
+function freshData(bm) {
+  const base = bm.data || {};
+  const k = DATA_KEY[bm.source];
+  if (!k || !window[k]) return base;
+  const live = window[k].find(r => String(r.id) === String(bm.id));
+  return live ? { ...base, ...live } : base;
+}
+
+function safeId(bm) {
+  return (bm.source + '_' + String(bm.id)).replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function buildCard(bm, idx, total) {
+  const d = freshData(bm);
+  const sid = safeId(bm);
+  const srcColor = SRC_COLOR[bm.source] || '#888';
+  const srcName = SRC_NAME[bm.source] || bm.source;
+  const card = document.createElement('div');
+  card.className = 'bm-card';
+  card.dataset.bmKey = bm.key;
+  card.innerHTML = `
+    <div class="bm-order-rail">
+      <span class="bm-order-num">${idx + 1}</span>
+      <span class="bm-order-label">번째</span>
+      <div class="bm-order-arrows">
+        <button class="bm-arrow bm-up" type="button" title="위로" ${idx === 0 ? 'disabled' : ''}>▲</button>
+        <button class="bm-arrow bm-down" type="button" title="아래로" ${idx === total - 1 ? 'disabled' : ''}>▼</button>
+      </div>
+    </div>
+    <div class="bm-body">
+      <div class="bm-header">
+        <div class="bm-main">
+          <span class="badge" style="background:${srcColor}">${esc(srcName)}</span>
+          <span class="bm-title">${esc(d.title || d.address || '제목없음')}</span>
+          <span class="bm-price">보${fmtDep(d.deposit)} / 월${fmtRent(d.rent)}</span>
+          <span class="bm-sub">${esc(d.address || d.region || '')}</span>
+        </div>
+        <div class="bm-actions">
+          ${(() => {
+            const linkUrl = safeUrl(window.ListingInfo ? window.ListingInfo.resolveListingUrl(d.url, bm.source, d) : d.url);
+            return linkUrl ? `<a href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer" class="btn" style="padding:4px 8px">🔗</a>` : '';
+          })()}
+          <button class="btn btn-danger bm-remove" type="button" style="padding:4px 8px">제거</button>
+        </div>
+        <span class="expand-arrow">▼</span>
+      </div>
+      <div class="bm-detail" id="det_${sid}"></div>
+    </div>
+  `;
+  card.querySelector('.bm-up').addEventListener('click', e => { e.stopPropagation(); Bookmarks.move(bm.id, bm.source, -1); render(); });
+  card.querySelector('.bm-down').addEventListener('click', e => { e.stopPropagation(); Bookmarks.move(bm.id, bm.source, 1); render(); });
+  card.querySelector('.bm-remove').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!confirm((idx + 1) + '번째 매물을 북마크에서 제거할까요?')) return;
+    Bookmarks.remove(bm.id, bm.source);
+    render();
+  });
+  const link = card.querySelector('.bm-actions a');
+  if (link) link.addEventListener('click', e => e.stopPropagation());
+  card.querySelector('.bm-header').addEventListener('click', () => {
+    const isOpen = card.classList.toggle('open');
+    if (isOpen) {
+      openKeys.add(bm.key);
+      renderDetail(card, bm, sid);
+    } else {
+      openKeys.delete(bm.key);
+    }
+  });
+  return card;
+}
+
+function renderDetail(card, bm, sid) {
+  const d = freshData(bm);
+  const target = card.querySelector('.bm-detail');
+  if (!target) return;
+  const listingHtml = window.ListingInfo ? window.ListingInfo.buildSection(d, bm.source) : '';
+  target.innerHTML = `
+    ${listingHtml}
+    <div class="sec">
+      <div class="sec-title">📝 메모</div>
+      <textarea class="bm-note-area" id="note_${sid}" placeholder="이 방을 보고 느낀 점, 중개사 약속, 조건..."></textarea>
+      <div class="note-save-hint" id="noteHint_${sid}">자동 저장</div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">✅ 체크리스트</div>
+      <div class="check-list" id="checks_${sid}"></div>
+      <div class="check-add-row">
+        <input type="text" id="checkAdd_${sid}" placeholder="새 항목 입력 후 Enter">
+        <button class="btn" type="button" id="checkAddBtn_${sid}">추가</button>
+      </div>
+      <div class="check-presets" id="presets_${sid}"></div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">📷 사진 (좋아요 페이지와 공유)</div>
+      <div class="photo-grid" id="photos_${sid}">
+        <label class="photo-add">+<input type="file" accept="image/*" capture="environment" id="photoUpload_${sid}" style="display:none"></label>
+      </div>
+    </div>
+    <div class="detail-collapse-wrap">
+      <button class="btn detail-collapse" type="button">접기</button>
+    </div>
+  `;
+  // ── Note (debounced save) ──
+  const noteEl = document.getElementById('note_' + sid);
+  noteEl.value = bm.note || '';
+  noteEl.addEventListener('input', () => {
+    clearTimeout(noteDebounce.get(bm.key));
+    const hint = document.getElementById('noteHint_' + sid);
+    if (hint) hint.textContent = '저장 중...';
+    noteDebounce.set(bm.key, setTimeout(() => {
+      Bookmarks.updateNote(bm.id, bm.source, noteEl.value);
+      if (hint) hint.textContent = '자동 저장됨 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    }, 500));
+  });
+
+  // ── Checklist ──
+  renderChecklist(bm, sid);
+  const addEl = document.getElementById('checkAdd_' + sid);
+  const addBtn = document.getElementById('checkAddBtn_' + sid);
+  const submitNew = () => {
+    const v = addEl.value.trim();
+    if (!v) return;
+    const current = (Bookmarks.get(bm.id, bm.source) || {}).checklist || [];
+    Bookmarks.updateChecklist(bm.id, bm.source, [...current, { label: v, done: false }]);
+    addEl.value = '';
+    renderChecklist(bm, sid);
+  };
+  addBtn.addEventListener('click', submitNew);
+  addEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submitNew(); } });
+  const presetEl = document.getElementById('presets_' + sid);
+  CHECK_PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'check-preset';
+    btn.textContent = '+ ' + p;
+    btn.addEventListener('click', () => {
+      const current = (Bookmarks.get(bm.id, bm.source) || {}).checklist || [];
+      if (current.some(c => c.label === p)) return;  // skip duplicates
+      Bookmarks.updateChecklist(bm.id, bm.source, [...current, { label: p, done: false }]);
+      renderChecklist(bm, sid);
+    });
+    presetEl.appendChild(btn);
+  });
+
+  // ── Photos ──
+  renderPhotos(bm, sid);
+  const photoUpload = document.getElementById('photoUpload_' + sid);
+  photoUpload.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await Bookmarks.addPhoto(bm.id, bm.source, file);
+      renderPhotos(bm, sid);
+    } catch (err) {
+      alert('사진 업로드 실패: ' + err.message);
+    } finally {
+      photoUpload.value = '';
+    }
+  });
+
+  const closeBtn = target.querySelector('.detail-collapse');
+  closeBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    card.classList.remove('open');
+    openKeys.delete(bm.key);
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+}
+
+function renderChecklist(bm, sid) {
+  const wrap = document.getElementById('checks_' + sid);
+  if (!wrap) return;
+  const current = (Bookmarks.get(bm.id, bm.source) || {}).checklist || [];
+  if (!current.length) {
+    wrap.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0">아직 항목 없음. 아래에서 추가하거나 추천 항목 클릭.</div>';
+    return;
+  }
+  wrap.innerHTML = '';
+  current.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'check-item' + (item.done ? ' done' : '');
+    row.innerHTML = `
+      <input type="checkbox" id="chk_${sid}_${i}" ${item.done ? 'checked' : ''}>
+      <label class="check-item-label" for="chk_${sid}_${i}">${esc(item.label)}</label>
+      <button class="check-item-del" type="button" title="제거">×</button>
+    `;
+    row.querySelector('input').addEventListener('change', e => {
+      const next = current.map((it, idx) => idx === i ? { ...it, done: e.target.checked } : it);
+      Bookmarks.updateChecklist(bm.id, bm.source, next);
+      renderChecklist(bm, sid);
+    });
+    row.querySelector('.check-item-del').addEventListener('click', () => {
+      const next = current.filter((_, idx) => idx !== i);
+      Bookmarks.updateChecklist(bm.id, bm.source, next);
+      renderChecklist(bm, sid);
+    });
+    wrap.appendChild(row);
+  });
+}
+
+async function renderPhotos(bm, sid) {
+  const grid = document.getElementById('photos_' + sid);
+  if (!grid) return;
+  // Keep the add-button; clear existing items first
+  grid.querySelectorAll('.photo-item').forEach(el => el.remove());
+  try {
+    const photos = await Bookmarks.getPhotos(bm.id, bm.source);
+    photos.forEach(p => {
+      const item = document.createElement('div');
+      item.className = 'photo-item';
+      item.innerHTML = `
+        <img src="${esc(p.url)}" alt="" loading="lazy">
+        <button class="photo-del" type="button" title="제거">×</button>
+      `;
+      item.querySelector('.photo-del').addEventListener('click', async ev => {
+        ev.stopPropagation();
+        if (!confirm('이 사진을 제거할까요?')) return;
+        await Bookmarks.deletePhoto(bm.id, bm.source, p.photoKey);
+        renderPhotos(bm, sid);
+      });
+      item.querySelector('img').addEventListener('click', () => window.open(p.url, '_blank'));
+      grid.insertBefore(item, grid.querySelector('.photo-add'));
+    });
+  } catch (err) {
+    console.warn('Photo load failed:', err);
+  }
+}
+
+function render() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const all = Bookmarks.getAll();
+  const filtered = q
+    ? all.filter(bm => {
+        const d = freshData(bm);
+        const hay = [d.title, d.address, d.agency, d.region, bm.note].join(' ').toLowerCase();
+        return hay.includes(q);
+      })
+    : all;
+  document.getElementById('countLabel').textContent = filtered.length + '건';
+  const listEl = document.getElementById('bmList');
+  const emptyEl = document.getElementById('emptyMsg');
+  listEl.innerHTML = '';
+  if (!filtered.length) {
+    emptyEl.style.display = '';
+    if (all.length && q) {
+      emptyEl.innerHTML = '검색 결과가 없습니다.';
+    }
+    return;
+  }
+  emptyEl.style.display = 'none';
+  filtered.forEach((bm, idx) => {
+    const card = buildCard(bm, idx, filtered.length);
+    listEl.appendChild(card);
+    if (openKeys.has(bm.key)) {
+      card.classList.add('open');
+      renderDetail(card, bm, safeId(bm));
+    }
+  });
+}
+
+document.getElementById('search').addEventListener('input', render);
+window.addEventListener('bookmarksSynced', render);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && window.Bookmarks && window.Bookmarks.refresh) {
+    window.Bookmarks.refresh();
+  }
+});
+
+// Load region data for whatever the active region is so freshData() can
+// hydrate stale snapshots. Errors are non-fatal — without it the cards
+// just show the saved-at-bookmark-time payload.
+if (window.RegionData) {
+  RegionData.loadAll(['dabang', 'daangn', 'zigbang', 'naver'], render);
+}
+
+Bookmarks.ready.then(render);
+</script>
+</body>
+</html>

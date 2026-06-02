@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>price-parser.js 테스트</title>
+<style>
+body{font-family:'Noto Sans KR',sans-serif;background:#f5f7fa;color:#222;padding:20px;font-size:14px;max-width:800px;margin:0 auto}
+h1{font-size:18px;margin-bottom:12px}
+.summary{padding:10px 14px;border-radius:8px;margin-bottom:14px;font-weight:700}
+.summary.ok{background:#dcfce7;color:#15803d}
+.summary.fail{background:#fee2e2;color:#b91c1c}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px #0001}
+th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;border-bottom:2px solid #e0e0e0}
+td{padding:7px 10px;border-top:1px solid #f0f0f0;font-size:13px;font-family:'Consolas',monospace}
+td.label{font-family:inherit}
+td.input{color:#1d4ed8}
+td.expected{color:#666}
+td.actual.pass{color:#15803d;font-weight:600}
+td.actual.fail{color:#b91c1c;font-weight:700;background:#fef2f2}
+.status{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700}
+.status.pass{background:#dcfce7;color:#15803d}
+.status.fail{background:#fee2e2;color:#b91c1c}
+.note{margin-top:14px;font-size:12px;color:#666}
+</style>
+</head>
+<body>
+<h1>price-parser.js — parseManwonText 엣지 케이스 테스트</h1>
+<div id="summary" class="summary">실행 중...</div>
+<table>
+  <thead>
+    <tr><th>설명</th><th>입력</th><th>예상</th><th>실제</th><th style="width:60px">결과</th></tr>
+  </thead>
+  <tbody id="results"></tbody>
+</table>
+<div class="note">
+  단위는 모두 <b>만원</b>. 빈 입력/잘못된 입력은 <code>null</code> 반환 (필터 fallback으로 처리).<br>
+  새 케이스 추가는 이 파일의 <code>CASES</code> 배열에.
+</div>
+<script src="price-parser.js"></script>
+<script>
+const CASES = [
+  // 기본 — 숫자만
+  { desc: '빈 문자열',                        input: '',             expected: null  },
+  { desc: 'whitespace만',                     input: '   ',          expected: null  },
+  { desc: 'null',                             input: null,           expected: null  },
+  { desc: 'undefined',                        input: undefined,      expected: null  },
+  { desc: '0',                                input: '0',            expected: 0     },
+  { desc: '3000 (3000만원)',                  input: '3000',         expected: 3000  },
+  { desc: '30000 (3억)',                      input: '30000',        expected: 30000 },
+  { desc: '소수 1500.5',                      input: '1500.5',       expected: 1500.5 },
+  { desc: '콤마 포함 1,500',                  input: '1,500',        expected: 1500  },
+  { desc: '콤마+한글 2,000만',                input: '2,000만',      expected: 2000  },
+  { desc: '앞뒤 공백',                        input: '  3000  ',     expected: 3000  },
+
+  // 억/만 표기
+  { desc: '2억',                              input: '2억',          expected: 20000 },
+  { desc: '2억 (공백 포함)',                  input: '2 억',         expected: 20000 },
+  { desc: '500만',                            input: '500만',        expected: 500   },
+  { desc: '2억 500만',                        input: '2억 500만',    expected: 20500 },
+  { desc: '2억500만 (공백X)',                 input: '2억500만',     expected: 20500 },
+  { desc: '2억500만원 (원 포함)',             input: '2억500만원',   expected: 20500 },
+  { desc: '2억500 (만 생략 — 만 가정)',       input: '2억500',       expected: 20500 },
+  { desc: '1.5억',                            input: '1.5억',        expected: 15000 },
+  { desc: '1.5억 200만',                      input: '1.5억 200만',  expected: 15200 },
+  { desc: '0.5억',                            input: '0.5억',        expected: 5000  },
+  { desc: '10억',                             input: '10억',         expected: 100000 },
+  { desc: '10억 9999만',                      input: '10억 9999만',  expected: 109999 },
+
+  // 잘못된 입력
+  { desc: 'abc',                              input: 'abc',          expected: null  },
+  { desc: '!@#',                              input: '!@#',          expected: null  },
+
+  // 사용자 보고 케이스 — "2억 500만원"이 잘 파싱되어야 함
+  { desc: '버그 보고 케이스: 2억 500만원',    input: '2억 500만원',  expected: 20500 },
+];
+
+const tbody = document.getElementById('results');
+let pass = 0, fail = 0;
+
+CASES.forEach(({ desc, input, expected }) => {
+  const actual = window.PriceParser.parseManwonText(input);
+  const ok = actual === expected || (Number.isNaN(actual) && Number.isNaN(expected));
+  if (ok) pass++; else fail++;
+  const tr = document.createElement('tr');
+  const inputDisp = input === null ? 'null' : input === undefined ? 'undefined' : JSON.stringify(input);
+  tr.innerHTML = `
+    <td class="label">${desc}</td>
+    <td class="input">${inputDisp}</td>
+    <td class="expected">${expected === null ? 'null' : expected}</td>
+    <td class="actual ${ok ? 'pass' : 'fail'}">${actual === null ? 'null' : actual}</td>
+    <td><span class="status ${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</span></td>
+  `;
+  tbody.appendChild(tr);
+});
+
+const summary = document.getElementById('summary');
+summary.textContent = `${pass} pass / ${fail} fail (총 ${CASES.length}개)`;
+summary.classList.add(fail === 0 ? 'ok' : 'fail');
+</script>
+</body>
+</html>

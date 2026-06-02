@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RentMap DB 관리툴</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app-shell">
+  <nav class="app-nav">
+    <span class="brand">RentMap DB-Tool</span>
+    <button class="tab active" data-tab="users">사용자</button>
+    <button class="tab" data-tab="favorites">좋아요</button>
+    <button class="tab" data-tab="listings">매물</button>
+    <button class="tab" data-tab="events">이벤트 큐</button>
+    <button class="tab" data-tab="regions">지역/스케줄</button>
+    <button class="tab" data-tab="audit">감사 로그</button>
+    <div class="me">
+      <span id="meLabel">…</span>
+      <button class="logout" id="logoutBtn">로그아웃</button>
+    </div>
+  </nav>
+
+  <main class="page">
+    <!-- ── Users ──────────────────────────────────────────────────────── -->
+    <section class="pane active" id="pane-users">
+      <div class="notice" id="noticeUsers"></div>
+      <div class="split">
+        <div class="section">
+          <div class="section-head">
+            <h2>계정</h2>
+            <button class="btn sm" id="refreshUsers">새로고침</button>
+          </div>
+          <div class="section-body">
+            <details>
+              <summary class="muted" style="cursor:pointer;margin-bottom:8px">새 계정 만들기</summary>
+              <form class="grid-2" id="userCreateForm" style="margin-top:8px">
+                <label class="field">아이디<input name="username" required minlength="2" maxlength="64"></label>
+                <label class="field">표시 이름<input name="display_name" maxlength="80"></label>
+                <label class="field">초기 비밀번호<input name="password" type="password" required minlength="6"></label>
+                <label class="field" style="justify-self:end"><span>관리자</span><input name="is_admin" type="checkbox" style="width:18px;height:18px;margin-top:6px"></label>
+                <div style="grid-column:1/-1"><button class="btn primary" type="submit">계정 생성</button></div>
+              </form>
+            </details>
+            <div class="toolbar" style="margin-top:12px">
+              <input id="userSearch" class="grow" placeholder="아이디/이름 검색">
+              <span class="muted" id="userCount">0명</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>ID</th><th>아이디</th><th>찜</th><th>세션</th><th>상태</th></tr></thead>
+              <tbody id="userRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <h2 id="userDetailTitle">사용자를 선택하세요</h2>
+            <span class="muted" id="userDetailSub"></span>
+          </div>
+          <div class="section-body" id="userDetail">
+            <div class="empty">왼쪽 목록에서 계정을 선택하면 상세 정보가 표시됩니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Favorites ──────────────────────────────────────────────────── -->
+    <section class="pane" id="pane-favorites">
+      <div class="notice" id="noticeFavorites"></div>
+      <div class="section">
+        <div class="section-head">
+          <h2>좋아요 / 싫어요 조회 · 이전 · 일괄 삭제</h2>
+          <span class="muted">모든 변경은 audit_log에 기록</span>
+        </div>
+        <div class="section-body">
+          <div class="toolbar">
+            <label class="field">대상 사용자
+              <select id="favUserSelect"></select>
+            </label>
+            <label class="field">종류
+              <select id="favKindFilter">
+                <option value="all">전체</option>
+                <option value="like">좋아요만</option>
+                <option value="dislike">싫어요만</option>
+              </select>
+            </label>
+            <label class="field">소스 필터
+              <select id="favSourceFilter">
+                <option value="">(전체)</option>
+                <option>dabang</option><option>daangn</option>
+                <option>zigbang</option><option>naver_land</option>
+                <option>manual</option>
+              </select>
+            </label>
+            <label class="field grow">검색<input id="favSearch" placeholder="key / entry 내용 부분 검색"></label>
+            <button class="btn" id="favReload">불러오기</button>
+            <span class="muted" id="favStatus"></span>
+          </div>
+          <div class="toolbar" style="margin-top:4px">
+            <button class="btn" id="favTransferBtn">선택 항목 이전</button>
+            <button class="btn" id="favTransferAllBtn">필터 결과 전체 이전</button>
+            <button class="btn danger" id="favBulkDeleteBtn">선택 항목 삭제</button>
+            <button class="btn warn" id="favDeleteAllBtn">필터 결과 전체 삭제</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:30px"><input type="checkbox" id="favSelectAll"></th>
+              <th>종류</th><th>키</th><th>소스</th><th>매물번호</th>
+              <th>제목</th><th>저장일시</th>
+            </tr></thead>
+            <tbody id="favRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Listings ───────────────────────────────────────────────────── -->
+    <section class="pane" id="pane-listings">
+      <div class="notice" id="noticeListings"></div>
+      <div class="section">
+        <div class="section-head">
+          <h2>매물 조회 / 상태 정정</h2>
+          <span class="muted">크롤 스냅샷 자체는 편집 불가 — current_status만 수정</span>
+        </div>
+        <div class="section-body">
+          <div class="toolbar">
+            <label class="field">플랫폼<select id="listPlatform"></select></label>
+            <label class="field">지역<select id="listRegion"></select></label>
+            <label class="field">상태<select id="listStatus"></select></label>
+            <label class="field grow">검색(매물번호/URL)<input id="listSearch" placeholder="abc123"></label>
+            <button class="btn" id="listReload">불러오기</button>
+            <button class="btn" id="listBulkStatusBtn">선택 일괄 상태 변경</button>
+            <span class="muted" id="listStatusMsg"></span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th style="width:30px"><input type="checkbox" id="listSelectAll"></th>
+              <th>ID</th><th>플랫폼</th><th>매물번호</th>
+              <th>상태</th><th>miss</th>
+              <th>마지막 확인</th><th>스냅샷</th><th></th>
+            </tr></thead>
+            <tbody id="listRows"></tbody>
+          </table>
+        </div>
+        <div class="section-body muted" id="listPager"></div>
+      </div>
+    </section>
+
+    <!-- ── Events ────────────────────────────────────────────────────── -->
+    <section class="pane" id="pane-events">
+      <div class="notice" id="noticeEvents"></div>
+      <div class="section">
+        <div class="section-head">
+          <h2>웹훅 발송 큐</h2>
+          <span class="muted">재시도 / 발송 완료 마킹 / 미발송 이벤트</span>
+        </div>
+        <div class="section-body">
+          <div class="toolbar">
+            <label class="field">상태
+              <select id="evStatus">
+                <option value="">전체</option>
+                <option value="pending">pending</option>
+                <option value="failed" selected>failed</option>
+                <option value="sent">sent</option>
+                <option value="suppressed">suppressed</option>
+              </select>
+            </label>
+            <button class="btn" id="evReload">불러오기</button>
+            <button class="btn" id="evBulkRetryBtn">필터 결과 일괄 재시도</button>
+            <button class="btn warn" id="evBulkMarkSentBtn">필터 결과 일괄 발송완료 처리</button>
+            <span class="muted" id="evStatusMsg"></span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>ID</th><th>이벤트</th><th>유저 웹훅</th><th>상태</th>
+              <th>시도</th><th>다음 시도</th><th>마지막 오류</th><th></th>
+            </tr></thead>
+            <tbody id="evRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section" style="margin-top:14px">
+        <div class="section-head">
+          <h2>미팬아웃 이벤트 (참고용)</h2>
+          <button class="btn sm" id="evUnfannedReload">불러오기</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>ID</th><th>플랫폼</th><th>매물번호</th><th>유형</th><th>발생</th><th>적재</th>
+            </tr></thead>
+            <tbody id="evUnfannedRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Regions ────────────────────────────────────────────────────── -->
+    <section class="pane" id="pane-regions">
+      <div class="notice" id="noticeRegions"></div>
+      <div class="section">
+        <div class="section-head">
+          <h2>크롤 지역</h2>
+          <button class="btn sm" id="regReload">새로고침</button>
+        </div>
+        <div class="section-body">
+          <details>
+            <summary class="muted" style="cursor:pointer">새 지역 추가</summary>
+            <form class="grid-3" id="regCreateForm" style="margin-top:10px">
+              <label class="field">슬러그<input name="slug" required maxlength="63" pattern="[a-z0-9][a-z0-9_-]{1,62}"></label>
+              <label class="field">이름<input name="name" required maxlength="80"></label>
+              <label class="field">상태
+                <select name="status">
+                  <option value="pending" selected>pending</option>
+                  <option value="approved">approved</option>
+                  <option value="disabled">disabled</option>
+                </select>
+              </label>
+              <label class="field">중심 위도<input name="center_lat" type="number" step="0.000001" required></label>
+              <label class="field">중심 경도<input name="center_lng" type="number" step="0.000001" required></label>
+              <label class="field">반경(km)<input name="radius_km" type="number" step="0.1" min="0.1" max="50" required></label>
+              <div style="grid-column:1/-1"><button class="btn primary" type="submit">생성</button></div>
+            </form>
+          </details>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>슬러그/이름</th><th>중심/반경</th><th>상태</th>
+              <th>스케줄</th><th>listing_regions</th><th></th>
+            </tr></thead>
+            <tbody id="regRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Audit ──────────────────────────────────────────────────────── -->
+    <section class="pane" id="pane-audit">
+      <div class="notice" id="noticeAudit"></div>
+      <div class="section">
+        <div class="section-head">
+          <h2>감사 로그</h2>
+          <span class="muted">행정 작업 흔적 + 단일행 변경 롤백</span>
+        </div>
+        <div class="section-body">
+          <div class="toolbar">
+            <label class="field">대상 테이블<input id="auditTable" placeholder="users / favorites / listings ..."></label>
+            <label class="field">액션<input id="auditAction" placeholder="update_user 등"></label>
+            <label class="field"><span>롤백 안 된 것만</span><input id="auditUnreverted" type="checkbox" style="width:18px;height:18px;margin-top:6px"></label>
+            <button class="btn" id="auditReload">불러오기</button>
+            <span class="muted" id="auditStatusMsg"></span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr>
+              <th>ID</th><th>시각</th><th>actor</th><th>액션</th>
+              <th>대상</th><th>변경</th><th>롤백</th>
+            </tr></thead>
+            <tbody id="auditRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+<div class="toast-wrap" id="toastRoot"></div>
+
+<script src="app.js" defer></script>
+</body>
+</html>

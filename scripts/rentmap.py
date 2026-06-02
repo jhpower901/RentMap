@@ -179,6 +179,17 @@ NAVER_COLUMNS = [
     "image_1", "image_2", "crawl_note",
 ]
 
+PETERPAN_COLUMNS = [
+    "source", "listing_no", "url", "agency", "writer_type",
+    "region", "address", "latitude", "longitude", "title",
+    "deposit_manwon", "rent_manwon", "maintenance_manwon", "total_monthly_manwon",
+    "room_type", "building_form", "area_m2", "supply_area_m2", "exclusive_area_m2",
+    "floor", "parking", "elevator", "pet_allowed",
+    "published_at", "listing_age_text",
+    "options",
+    "image_1", "image_2", "crawl_note",
+]
+
 
 def print(*args, **kwargs):  # noqa: A001 — shadow builtins.print within this module only
     """Prepend HH:MM:SS to every print() call in rentmap.py."""
@@ -3436,6 +3447,263 @@ def _read_for_gen_web(source: str, data_dir: Path, prefix: str, target_date: str
     return _read_csv_lenient(data_dir, prefix, target_date, label)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Peterpan (https://www.peterpanz.com) — anonymous JSON API, similar pattern
+# to Dabang/Zigbang. No Playwright needed.
+#
+# Endpoint:
+#   GET https://api.peterpanz.com/houses/area/pc
+#     ?filter=checkLatitude:<min>~<max>||checkLongitude:<min>~<max>||buildingType=<koreantype>
+#     &pageSize=<n>&pageIndex=<n>&filter_version=5.1&response_version=5.3
+#
+# The `filter` param uses a custom "key:val~val||key:val||k=v" serialization —
+# pairs joined by "||". We build it explicitly rather than urlencoding a dict.
+#
+# Response shape:
+#   { houses: { recommend: { image: [room...] }, direct: { image: [...] }, ... } }
+# Each room has hidx, info.{subject,thumbnail,created_at,supplied_size,real_size},
+# type.{contract_type,building_type,building_form}, price.{deposit,monthly_fee,maintenance_cost},
+# floor.{target,total,floor_text}, location.{coordinate,address},
+# attribute.{userType,peterVerified,safeDirectTrade}, images.S[].path,
+# additional_options.{have_parking_lot,have_elevator,allow_pet,is_full_option,...}
+#
+# We crawl 빌라/주택, 오피스텔, 방/거실 (월세 매물 위주). 아파트는 별도 endpoint
+# (/houses/area/apt/agency/pc) — 월세 비율이 매우 낮아 현재 스코프에서 제외.
+# ─────────────────────────────────────────────────────────────────────────────
+
+PETERPAN_API_LIST = "https://api.peterpanz.com/houses/area/pc"
+PETERPAN_BUILDING_TYPES = ("빌라/주택", "오피스텔", "방/거실")
+PETERPAN_PAGE_SIZE = 50
+PETERPAN_MAX_PAGES = 30  # 30 × 50 × 3 buildingTypes = ~4500 rooms cap
+
+
+def _peterpan_filter_param(min_lat: float, max_lat: float,
+                           min_lng: float, max_lng: float,
+                           building_type: str) -> str:
+    """Build the custom `key:val~val||key:val||k=v` filter string."""
+    return "||".join([
+        f"checkLatitude:{min_lat:.6f}~{max_lat:.6f}",
+        f"checkLongitude:{min_lng:.6f}~{max_lng:.6f}",
+        f"buildingType={building_type}",
+    ])
+
+
+def _peterpan_flatten_rooms(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """The `houses` object groups rooms by recommend/direct/agency/...; flatten
+    those into a single list. Group structure is `{ groupName: { image: [...] } }`."""
+    houses = payload.get("houses") or {}
+    if not isinstance(houses, dict):
+        return []
+    out: list[dict[str, Any]] = []
+    for group in houses.values():
+        if not isinstance(group, dict):
+            continue
+        rooms = group.get("image")
+        if isinstance(rooms, list):
+            out.extend(r for r in rooms if isinstance(r, dict))
+    return out
+
+
+def _peterpan_room_to_row(room: dict[str, Any]) -> dict[str, Any] | None:
+    """Map one peterpan room JSON → CSV row dict. Returns None if the row is
+    missing essential fields (hidx, lat/lng) or isn't a 월세 listing."""
+    hidx = to_text(room.get("hidx"))
+    if not hidx:
+        return None
+
+    info = room.get("info") or {}
+    type_data = room.get("type") or {}
+    price = room.get("price") or {}
+    floor_data = room.get("floor") or {}
+    loc = room.get("location") or {}
+    coord = loc.get("coordinate") or {}
+    addr = loc.get("address") or {}
+    attr = room.get("attribute") or {}
+    additional = room.get("additional_options") or {}
+
+    # Filter to monthly rent. Peterpan contract_type values include 월세, 전세, 매매.
+    contract = to_text(type_data.get("contract_type"))
+    if "월세" not in contract:
+        return None
+
+    lat = to_number(coord.get("latitude"))
+    lng = to_number(coord.get("longitude"))
+    if lat is None or lng is None:
+        return None
+
+    user_type = to_text(attr.get("userType"))
+    agency_label = "DIRECT" if user_type == "user" else (to_text(attr.get("agencyName")) or "BROKER")
+
+    # Prices are already in 만원 units on this API (matches deposit values like
+    # "1000" for 1000만원). The 'price' object's deposit/monthly_fee/maintenance_cost
+    # are floats / ints — pass through num_or_none-style coercion.
+    deposit_man = to_number(price.get("deposit"))
+    rent_man = to_number(price.get("monthly_fee"))
+    maint_man = to_number(price.get("maintenance_cost"))
+    total = None
+    if rent_man is not None:
+        total = round1(rent_man + (maint_man or 0))
+
+    # Address concat: sido + sigungu + dong + (optional jibun number)
+    address_parts = [to_text(addr.get(k)) for k in ("sido", "sigungu", "dong") if addr.get(k)]
+    jibun = to_text(addr.get("jibun") or addr.get("addressNumber"))
+    if jibun:
+        address_parts.append(jibun)
+    address_str = " ".join(p for p in address_parts if p).strip()
+
+    # Floor: prefer floor_text ("3/15"), else build from target/total
+    floor_text = to_text(floor_data.get("floor_text"))
+    if not floor_text:
+        tgt = floor_data.get("target")
+        tot = floor_data.get("total")
+        if tgt is not None and tot is not None:
+            floor_text = f"{tgt}/{tot}"
+
+    images = []
+    raw_images = (room.get("images") or {}).get("S")
+    if isinstance(raw_images, list):
+        for img in raw_images:
+            if isinstance(img, dict) and img.get("path"):
+                images.append(to_text(img["path"]))
+    img1 = images[0] if len(images) > 0 else ""
+    img2 = images[1] if len(images) > 1 else ""
+
+    options_parts: list[str] = []
+    if additional.get("have_parking_lot"): options_parts.append("주차")
+    if additional.get("have_elevator"): options_parts.append("엘리베이터")
+    if additional.get("is_full_option"): options_parts.append("풀옵션")
+    if additional.get("allow_pet"): options_parts.append("반려동물")
+    if attr.get("peterVerified"): options_parts.append("피터팬확인")
+    if attr.get("safeDirectTrade"): options_parts.append("안심직거래")
+    if attr.get("withoutFee"): options_parts.append("중개수수료없음")
+
+    published_at = to_text(info.get("created_at"))
+
+    return {
+        "source": "peterpan",
+        "listing_no": hidx,
+        "url": f"https://www.peterpanz.com/house/{hidx}",
+        "agency": agency_label,
+        "writer_type": user_type,
+        "region": to_text(addr.get("dong")),
+        "address": address_str,
+        "latitude": lat,
+        "longitude": lng,
+        "title": to_text(info.get("subject")),
+        "deposit_manwon": deposit_man if deposit_man is not None else "",
+        "rent_manwon": rent_man if rent_man is not None else "",
+        "maintenance_manwon": maint_man if maint_man is not None else "",
+        "total_monthly_manwon": total if total is not None else "",
+        "room_type": to_text(type_data.get("building_form")) or to_text(type_data.get("building_type")),
+        "building_form": to_text(type_data.get("building_form")),
+        "area_m2": to_text(info.get("supplied_size") or info.get("real_size") or ""),
+        "supply_area_m2": to_text(info.get("supplied_size") or ""),
+        "exclusive_area_m2": to_text(info.get("real_size") or ""),
+        "floor": floor_text,
+        "parking": "가능" if additional.get("have_parking_lot") else "",
+        "elevator": "있음" if additional.get("have_elevator") else "",
+        "pet_allowed": "가능" if additional.get("allow_pet") else "",
+        "published_at": published_at,
+        "listing_age_text": days_ago_text(published_at) if published_at else "",
+        "options": "; ".join(options_parts),
+        "image_1": img1,
+        "image_2": img2,
+        "crawl_note": "",
+    }
+
+
+def crawl_peterpan(args: argparse.Namespace) -> None:
+    started = time.monotonic()
+    _log_crawl_start(
+        "peterpan",
+        args,
+        extra=(
+            f"source=peterpan-api "
+            f"max_deposit={_fmt_limit(args.max_deposit)} max_rent={_fmt_limit(args.max_rent)}"
+        ),
+    )
+    session = requests.Session()
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": UA,
+        "Referer": "https://www.peterpanz.com/villa",
+        "Origin": "https://www.peterpanz.com",
+        "Cache-Control": "no-cache",
+    }
+
+    raw_rooms: list[dict[str, Any]] = []
+    seen_hidx: set[str] = set()
+
+    for bt in PETERPAN_BUILDING_TYPES:
+        page = 1
+        while page <= PETERPAN_MAX_PAGES:
+            filter_str = _peterpan_filter_param(args.min_lat, args.max_lat,
+                                                args.min_lng, args.max_lng, bt)
+            # Build URL with safe characters preserved for the custom filter
+            # serialization (the ':', '~', '||', and Korean text). Encoded only
+            # for things that would actually break the URL.
+            params = urlencode({
+                "filter": filter_str,
+                "pageSize": PETERPAN_PAGE_SIZE,
+                "pageIndex": page,
+                "filter_version": "5.1",
+                "response_version": "5.3",
+                "order_by": "newest",
+            }, safe=":~|")
+            url = f"{PETERPAN_API_LIST}?{params}"
+            try:
+                payload = request_json(session, url, headers=headers)
+            except Exception as exc:
+                print(f"[crawl:peterpan] fetch failed bt={bt} page={page}: {exc}", flush=True)
+                break
+
+            rooms = _peterpan_flatten_rooms(payload)
+            if not rooms:
+                break
+
+            new_rooms = []
+            for r in rooms:
+                hidx = to_text(r.get("hidx"))
+                if hidx and hidx not in seen_hidx:
+                    seen_hidx.add(hidx)
+                    new_rooms.append(r)
+            raw_rooms.extend(new_rooms)
+            print(f"[crawl:peterpan] bt={bt} page={page} fetched={len(rooms)} new={len(new_rooms)} total={len(raw_rooms)}",
+                  flush=True)
+
+            # Stop paginating when the page wasn't full (no more results)
+            if len(rooms) < PETERPAN_PAGE_SIZE:
+                break
+            page += 1
+            time.sleep(0.15)
+
+    if not raw_rooms:
+        raise RuntimeError("No Peterpan rooms found in the requested bbox.")
+
+    records: list[dict[str, Any]] = []
+    for room in raw_rooms:
+        row = _peterpan_room_to_row(room)
+        if not row:
+            continue
+        # Price-cap filter (client-side; the API doesn't honor a filter param)
+        dep = row.get("deposit_manwon")
+        rent = row.get("rent_manwon")
+        if isinstance(dep, (int, float)) and args.max_deposit and dep > args.max_deposit:
+            continue
+        if isinstance(rent, (int, float)) and args.max_rent and rent > args.max_rent:
+            continue
+        records.append(row)
+
+    records.sort(key=lambda r: (
+        to_text(r.get("region")),
+        float_or_inf(r.get("total_monthly_manwon")),
+        float_or_inf(r.get("rent_manwon")),
+    ))
+    write_csv(Path(args.output_csv), records, PETERPAN_COLUMNS)
+    _reconcile_after_crawl("peterpan", records, "peterpan")
+    _log_crawl_done("peterpan", len(records), args.output_csv, time.monotonic() - started)
+
+
 def _resolve_region_id_for_gen_web(slug: str, source: str) -> int | None:
     """Map the slug from ``RENTMAP_AREA_NAME`` to a regions.id, or None.
 
@@ -3468,10 +3736,11 @@ def _resolve_region_id_for_gen_web(slug: str, source: str) -> int | None:
 
 _GEN_WEB_PLATFORMS: tuple[tuple[str, str, str, str, str], ...] = (
     # (gen_web platform name, csv prefix base, label, platform_code, color)
-    ("dabang",  "dabang",     "dabang",  "dabang",     "#326CF9"),
-    ("daangn",  "daangn",     "daangn",  "daangn",     "#FF6F00"),
-    ("zigbang", "zigbang",    "zigbang", "zigbang",    "#EF4444"),
-    ("naver",   "naver_land", "naver",   "naver_land", "#03C75A"),
+    ("dabang",   "dabang",     "dabang",   "dabang",     "#326CF9"),
+    ("daangn",   "daangn",     "daangn",   "daangn",     "#FF6F00"),
+    ("zigbang",  "zigbang",    "zigbang",  "zigbang",    "#EF4444"),
+    ("naver",    "naver_land", "naver",    "naver_land", "#03C75A"),
+    ("peterpan", "peterpan",   "peterpan", "peterpan",   "#7C3AED"),
 )
 
 
@@ -3746,6 +4015,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-detail", action="store_true")
     p.set_defaults(func=crawl_naver)
 
+    p = sub.add_parser("crawl-peterpan")
+    add_common_bbox(p)
+    p.add_argument("--max-deposit", type=int, default=default_max_deposit())
+    p.add_argument("--max-rent", type=int, default=default_max_rent())
+    p.add_argument("--output-csv", default=str(ROOT / "data" / f"peterpan_{DEFAULT_AREA}_{DEFAULT_DATE}.csv"))
+    p.set_defaults(func=crawl_peterpan)
+
     p = sub.add_parser("gen-web")
     p.add_argument("--data-dir", default=str(ROOT / "data"))
     p.add_argument("--out-dir", default=str(ROOT / "web"))
@@ -3765,12 +4041,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--platform",
         dest="platforms",
         action="append",
-        choices=("dabang", "daangn", "zigbang", "naver"),
+        choices=("dabang", "daangn", "zigbang", "naver", "peterpan"),
         help=(
             "Restrict the refresh to the named platform(s). May be passed "
-            "multiple times. When omitted, all four platforms are rebuilt - "
+            "multiple times. When omitted, all platforms are rebuilt - "
             "useful for a full manual refresh, but region_runner / crawl-all "
-            "pass the just-crawled platform here so the other three regions' "
+            "pass the just-crawled platform here so the other regions' "
             "data files aren't overwritten with the cross-region active set."
         ),
     )
@@ -3849,6 +4125,14 @@ def _daangn_args(date: str, bbox: tuple[float, float, float, float], max_deposit
         max_deposit=max_deposit, max_rent=max_rent,
         output_csv=_data_csv("daangn", date), skip_detail=False,
         center_lat=None, center_lng=None, radius_km=None,
+        **_bbox_kwargs(bbox),
+    )
+
+
+def _peterpan_args(date: str, bbox: tuple[float, float, float, float], max_deposit: int, max_rent: int) -> argparse.Namespace:
+    return argparse.Namespace(
+        max_deposit=max_deposit, max_rent=max_rent,
+        output_csv=_data_csv("peterpan", date),
         **_bbox_kwargs(bbox),
     )
 
@@ -3941,11 +4225,12 @@ def crawl_all(args: argparse.Namespace) -> None:
     # container (see scheduler_naver.py), and the inline path (--no-skip-naver)
     # is rare so the extra concurrency wouldn't help most callers.
     jobs: list[tuple[str, Any, argparse.Namespace]] = [
-        ("dabang",  crawl_dabang,  _dabang_args(args.date, bbox, max_deposit, max_rent)),
-        ("zigbang", crawl_zigbang, _zigbang_args(args.date, bbox, max_deposit, max_rent)),
+        ("dabang",   crawl_dabang,   _dabang_args(args.date, bbox, max_deposit, max_rent)),
+        ("zigbang",  crawl_zigbang,  _zigbang_args(args.date, bbox, max_deposit, max_rent)),
         # _daangn_args passes the actual bbox so out-of-radius listings fetched
         # by Daangn region-ID are excluded post-fetch.
-        ("daangn",  crawl_daangn,  _daangn_args(args.date, bbox, max_deposit, max_rent)),
+        ("daangn",   crawl_daangn,   _daangn_args(args.date, bbox, max_deposit, max_rent)),
+        ("peterpan", crawl_peterpan, _peterpan_args(args.date, bbox, max_deposit, max_rent)),
     ]
     errors = _run_parallel_crawlers(
         jobs,

@@ -8,10 +8,12 @@
 --
 -- region_ids adds an explicit region-membership filter. A listing matches
 -- iff its listing_regions row points at any of the listed regions. The
--- two location filters compose with OR semantics inside the matcher: a
--- listing passes the location group when it's in ANY listed region OR
--- inside the polygon. Setting neither lifts the location restriction
--- entirely (the prior default behaviour).
+-- two location filters compose with AND semantics inside the matcher:
+-- when both region_ids and a polygon are set, a listing must be tagged
+-- for ANY listed region AND fall inside the polygon. Region is the
+-- coarse "where", polygon is the fine "exactly where inside" — combining
+-- with AND lets a user say "AJOU but only the eastern dorm side I drew".
+-- Setting neither filter lifts the location restriction entirely.
 
 BEGIN;
 
@@ -20,8 +22,9 @@ ALTER TABLE user_webhooks
 
 COMMENT ON COLUMN user_webhooks.region_ids IS
     'Subscribe to specific regions by regions.id. Combines with use_area_filter '
-    'as OR — match if (any listed region tags the listing) OR (polygon covers '
-    'lat/lng). Empty array + use_area_filter=FALSE → no location restriction.';
+    'as AND — when both set, match only if (any listed region tags the listing) '
+    'AND (polygon covers lat/lng). Empty array + use_area_filter=FALSE → no '
+    'location restriction.';
 
 -- GIN index for the array overlap predicate in the matching path. Partial
 -- so it stays small on the all-empty-region_ids common case.

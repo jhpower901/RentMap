@@ -313,6 +313,7 @@ app = FastAPI(lifespan=lifespan)
 sys.path.insert(0, str(ROOT / "scripts"))
 import auth  # noqa: E402
 import favorites as fav_store  # noqa: E402
+import bookmarks as bookmark_store  # noqa: E402
 import area_filters as area_store  # noqa: E402
 import filter_preferences as filter_pref_store  # noqa: E402
 import invites as invite_store  # noqa: E402
@@ -1353,6 +1354,35 @@ async def save_favorites(request: Request, favorites: Any = Body(...),
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Bookmarks — separate axis from favorites. See scripts/bookmarks.py for the
+# wire format. The endpoints mirror /api/favorites so the client can use the
+# same "POST current state, server merges, returns canonical" loop. The
+# user-id header check is the same guard against a cross-account write.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/bookmarks/state")
+async def get_bookmarks_state(user: auth.User = Depends(auth.current_user)):
+    try:
+        return bookmark_store.load_state(user.id)
+    except Exception as e:
+        print(f"{_ts()} Error reading bookmarks: {e}")
+        return {"bookmarks": [], "deleted": {}}
+
+
+@app.post("/api/bookmarks")
+async def save_bookmarks(request: Request, bookmarks: Any = Body(...),
+                         user: auth.User = Depends(auth.current_user)):
+    posted_user_id = request.headers.get("x-rentmap-user-id")
+    if posted_user_id != str(user.id):
+        raise HTTPException(status_code=409, detail="Bookmarks sync user changed; reload required")
+    try:
+        return bookmark_store.merge_payload(user.id, bookmarks)
+    except Exception as e:
+        print(f"{_ts()} Error saving bookmarks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/photos")
 async def list_photos(id: str, source: str,
                       user: auth.User = Depends(auth.current_user)):
@@ -1495,9 +1525,9 @@ class WebhookCreateBody(BaseModel):
     maxDepositManwon: int | None = None
     maxRentManwon: int | None = None
     useAreaFilter: bool = True
-    # OR-composed with the polygon area filter inside the matcher: a listing
-    # passes the location group if it's tagged for ANY of these regions OR
-    # falls inside the user's saved polygon. Empty list + useAreaFilter=False
+    # AND-composed with the polygon area filter inside the matcher: when
+    # both are set, a listing must be tagged for ANY of these regions AND
+    # fall inside the user's polygon. Empty list + useAreaFilter=False
     # disables the location restriction entirely.
     regionIds: list[int] = []
 

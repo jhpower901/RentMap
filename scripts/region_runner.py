@@ -117,7 +117,7 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
     "all_light": {
         "cmd": ["crawl-all", "--skip-naver", "--gen-web-after-each"],
         "timeout": 50 * 60,
-        "platforms": ("dabang", "zigbang", "daangn"),
+        "platforms": ("dabang", "zigbang", "daangn", "peterpan"),
         "gen_web_after": False,  # crawl-all already does it
     },
     "naver": {
@@ -142,6 +142,12 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "cmd": ["crawl-daangn"],
         "timeout": 20 * 60,
         "platforms": ("daangn",),
+        "gen_web_after": True,
+    },
+    "peterpan": {
+        "cmd": ["crawl-peterpan"],
+        "timeout": 20 * 60,
+        "platforms": ("peterpan",),
         "gen_web_after": True,
     },
 }

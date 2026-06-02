@@ -4,6 +4,7 @@
     daangn: ["data/daangn_ajou_2026-05-22.csv", "../data/daangn_ajou_2026-05-22.csv"],
     zigbang: ["data/zigbang_ajou_2026-05-22.csv", "../data/zigbang_ajou_2026-05-22.csv"],
     naver: ["data/naver_land_ajou_2026-05-22.csv", "../data/naver_land_ajou_2026-05-22.csv"],
+    peterpan: ["data/peterpan_ajou_2026-05-22.csv", "../data/peterpan_ajou_2026-05-22.csv"],
   };
 
   function parseCsv(text) {
@@ -89,7 +90,7 @@
   }
 
   function normalizeListing(source, record) {
-    const listingId = firstValue(record, ["listing_no", "room_id", "item_id"]);
+    const listingId = firstValue(record, ["listing_no", "room_id", "item_id", "hidx"]);
     const region = source === "daangn"
       ? [record.region_depth2, record.region_depth3].filter(Boolean).join(" ")
       : firstValue(record, ["region"]);

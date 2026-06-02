@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>로그인 - RentMap DB 관리툴</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body class="login-body">
+<main class="login-card">
+  <h1>RentMap DB 관리툴</h1>
+  <p class="muted">관리자 계정으로만 로그인할 수 있습니다.</p>
+  <form id="loginForm">
+    <label>아이디
+      <input name="username" autocomplete="username" required minlength="1" maxlength="64">
+    </label>
+    <label>비밀번호
+      <input name="password" type="password" autocomplete="current-password" required minlength="1">
+    </label>
+    <button class="btn primary" type="submit">로그인</button>
+    <div class="login-error" id="loginError"></div>
+  </form>
+  <p class="muted small">
+    이 도구는 127.0.0.1에만 바인딩되어 있어 SSH 터널을 통해서만 접근합니다.<br>
+    모든 변경은 admin_audit_log에 기록되며, 일부 단순 변경은 롤백할 수 있습니다.
+  </p>
+</main>
+<script>
+(function () {
+  const form = document.getElementById('loginForm');
+  const err = document.getElementById('loginError');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.textContent = '';
+    const fd = new FormData(form);
+    try {
+      const r = await fetch('/api/tool/auth/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: fd.get('username'),
+          password: fd.get('password'),
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.detail || r.statusText);
+      const next = new URLSearchParams(location.search).get('next') || '/';
+      location.href = next.startsWith('/') ? next : '/';
+    } catch (ex) {
+      err.textContent = ex.message;
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -15,10 +15,12 @@
   <span class="brand">아주대 월세</span>
   <a href="index.html">지도</a>
   <a href="favorites.html" id="nav-favorites">❤️ 좋아요</a>
+  <a href="bookmarks.html" id="nav-bookmarks">📌 북마크</a>
   <a href="dabang.html" id="nav-dabang"><span class="badge badge-dabang">다방</span></a>
   <a href="daangn.html" id="nav-daangn"><span class="badge badge-daangn">당근</span></a>
   <a href="zigbang.html" id="nav-zigbang"><span class="badge badge-zigbang">직방</span></a>
   <a href="naver.html" id="nav-naver"><span class="badge badge-naver">네이버</span></a>
+  <a href="peterpan.html" id="nav-peterpan"><span class="badge badge-peterpan">피터팬</span></a>
   <a href="webhook-settings.html">🔔 알림</a>
   <span id="userInfo"></span>
 </nav>
@@ -26,8 +28,8 @@
   <h1><span id="page-badge" class="badge" style="font-size:16px;padding:4px 14px">...</span> <span id="page-title">매물 목록</span></h1>
   __EXTRA_NOTE__
   <div class="controls">
-    <label>보증금 최대 <input type="number" id="maxDeposit" value="3000" min="0" max="10000" step="100"> 만원</label>
-    <label>월세 최대 <input type="number" id="maxRent" value="60" min="0" max="200" step="5"> 만원</label>
+    <label>보증금 최대 <input type="text" class="price-input" id="maxDeposit" value="3000" inputmode="text" placeholder="3000 또는 2억500만" autocomplete="off"></label>
+    <label>월세 최대 <input type="text" class="price-input" id="maxRent" value="60" inputmode="numeric" placeholder="60" autocomplete="off"> 만원</label>
     <label>방 유형 <select id="typeFilter"><option value="">전체</option></select></label>
     <input type="text" id="search" placeholder="검색어...">
     <span id="areaCtl"></span>
@@ -49,8 +51,9 @@
             <th data-col="floor">층</th>
             <th data-col="address">주소</th>
             <th data-col="agency">중개</th>
+            <th data-col="id" style="min-width:90px">매물번호</th>
             <th>링크</th>
-            <th style="width:78px;text-align:center">❤️/👎</th>
+            <th style="width:110px;text-align:center">❤️/👎/📌</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
@@ -62,11 +65,13 @@
   </div>
 </div>
 <script src="auth.js?v=20260525-auth1"></script>
-<script src="favorites.js?v=20260529-dislike"></script>
+<script src="favorites.js?v=20260602-fieldmerge"></script>
+<script src="bookmarks.js?v=20260602-bm1"></script>
 <script src="user-filters.js?v=20260527-filter1"></script>
 <script src="area-filter.js?v=20260523-area1"></script>
 <script src="listing-info.js?v=20260527-naverurl"></script>
-<script src="platform-common.js?v=20260529-dislike"></script>
+<script src="price-parser.js?v=20260602-price1"></script>
+<script src="platform-common.js?v=20260602-bm1"></script>
 <script src="region-data-loader.js?v=20260526-region1"></script>
 <script>
 // Region data is loaded dynamically based on the active region (localStorage

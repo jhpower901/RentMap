@@ -68,13 +68,50 @@
     });
     return out;
   }
+  // Pick a field's value between two entries by its own timestamp. Presence
+  // beats absence so a device that explicitly edited a field always wins over
+  // a device that never touched it (even if the latter's savedAt is newer due
+  // to an edit on a different field). When neither side has the per-field
+  // timestamp — legacy entries — fall back to savedAt ordering.
+  function pickField(a, b, field, tsField) {
+    const aTs = a && a[tsField];
+    const bTs = b && b[tsField];
+    if (aTs && bTs) return Date.parse(bTs) >= Date.parse(aTs) ? b[field] : a[field];
+    if (bTs) return b[field];
+    if (aTs) return a[field];
+    return entryTime(b) >= entryTime(a) ? b[field] : a[field];
+  }
+  function pickMaxTs(aTs, bTs) {
+    if (aTs && bTs) return Date.parse(bTs) >= Date.parse(aTs) ? bTs : aTs;
+    return bTs || aTs || null;
+  }
+  // Two entries with the same key — merge field-by-field so a concurrent
+  // rating edit on device A and notes edit on device B both survive the round
+  // trip. The base (data/kind) is whichever side's savedAt is newer; rating
+  // and notes are overlaid by their own timestamps.
+  function mergeEntries(a, b) {
+    const base = entryTime(b) >= entryTime(a) ? b : a;
+    const out = { ...base };
+    out.rating = pickField(a, b, 'rating', 'ratingUpdatedAt');
+    out.notes = pickField(a, b, 'notes', 'notesUpdatedAt');
+    const rTs = pickMaxTs(a.ratingUpdatedAt, b.ratingUpdatedAt);
+    if (rTs) out.ratingUpdatedAt = rTs;
+    const nTs = pickMaxTs(a.notesUpdatedAt, b.notesUpdatedAt);
+    if (nTs) out.notesUpdatedAt = nTs;
+    // firstVisitedAt is monotonic — earliest known visit wins so we don't
+    // accidentally push it forward when devices set it independently.
+    const aFV = a.firstVisitedAt, bFV = b.firstVisitedAt;
+    if (aFV && bFV) out.firstVisitedAt = Date.parse(aFV) <= Date.parse(bFV) ? aFV : bFV;
+    else if (aFV || bFV) out.firstVisitedAt = aFV || bFV;
+    return out;
+  }
   function mergeFavorites(a, b, deleted) {
     const byKey = new Map();
     [...(a || []), ...(b || [])].forEach(entry => {
       if (!entry || !entry.key) return;
       if (deletedTime(deleted, entry.key) >= entryTime(entry)) return;
       const prev = byKey.get(entry.key);
-      if (!prev || entryTime(entry) >= entryTime(prev)) byKey.set(entry.key, entry);
+      byKey.set(entry.key, prev ? mergeEntries(prev, entry) : entry);
     });
     return [...byKey.values()].sort((x, y) => entryTime(y) - entryTime(x));
   }
@@ -216,16 +253,75 @@
   // than the underlying storage mechanic.
   function removeDislike(id, source) { remove(id, source); }
 
+  // Stamp the very first time the user did any on-site action (rating or
+  // photo). We never overwrite once set — the point is to capture the
+  // "first time I started interacting with this room" which is the closest
+  // proxy we have to a physical visit. Returns true if the entry was changed.
+  function markVisitedIfNeeded(id, source, atIso) {
+    const favs = load();
+    const i = favs.findIndex(f => f.key === fk(id, source));
+    if (i < 0) return false;
+    if (favs[i].firstVisitedAt) return false;
+    favs[i].firstVisitedAt = atIso || new Date().toISOString();
+    favs[i].savedAt = new Date().toISOString();
+    save(favs);
+    return true;
+  }
+
+  // Bump savedAt + the field-specific timestamp on every mutation. The
+  // per-field timestamps drive mergeEntries (concurrent edits to different
+  // fields both survive); savedAt stays useful as the tombstone reference
+  // and as the legacy fallback when one side has no per-field timestamps.
   function updateRating(id, source, rating) {
     const favs = load();
     const i = favs.findIndex(f => f.key === fk(id, source));
-    if (i >= 0) { favs[i].rating = rating; save(favs); }
+    if (i < 0) return;
+    const now = new Date().toISOString();
+    favs[i].rating = rating;
+    favs[i].ratingUpdatedAt = now;
+    favs[i].savedAt = now;
+    const hasStar = rating && Object.values(rating).some(v => Number(v) > 0);
+    if (hasStar && !favs[i].firstVisitedAt) {
+      favs[i].firstVisitedAt = now;
+    }
+    save(favs);
   }
 
   function updateNotes(id, source, notes) {
     const favs = load();
     const i = favs.findIndex(f => f.key === fk(id, source));
-    if (i >= 0) { favs[i].notes = notes; save(favs); }
+    if (i >= 0) {
+      const now = new Date().toISOString();
+      favs[i].notes = notes;
+      favs[i].notesUpdatedAt = now;
+      favs[i].savedAt = now;
+      save(favs);
+    }
+  }
+
+  // Assign a 1-based visitOrder to each entry whose key appears in
+  // `orderedKeys`. Used by the favorites '오늘' view's ▲/▼ buttons — the page
+  // computes the desired today-bucket order, then calls this with the key
+  // list so a manual reorder survives reloads + multi-device sync. Entries
+  // whose key isn't in the list are untouched (so reordering today doesn't
+  // perturb yesterday's numbers). The sort comparator on the page treats
+  // visitOrder as "user-pinned" and falls back to firstVisitedTime for
+  // entries that have never been touched.
+  function updateVisitOrder(orderedKeys) {
+    if (!Array.isArray(orderedKeys) || !orderedKeys.length) return;
+    const favs = load();
+    const now = new Date().toISOString();
+    const orderMap = new Map(orderedKeys.map((k, i) => [k, i + 1]));
+    favs.forEach(f => {
+      if (orderMap.has(f.key)) {
+        f.visitOrder = orderMap.get(f.key);
+        f.savedAt = now;
+      }
+    });
+    save(favs);
+    // Fire immediately so the page re-renders without waiting for the
+    // /api/favorites round-trip (matters offline + when the server is slow).
+    window.dispatchEvent(new CustomEvent('favoritesSynced'));
   }
 
   function addManual(data) {
@@ -260,7 +356,13 @@
     return fetch(`/api/photos?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}`, {
       method: 'POST',
       body: formData
-    }).then(r => r.json());
+    }).then(r => r.json()).then(res => {
+      // First photo upload is treated as the "I'm in this room" moment when
+      // the user hasn't given a star yet. Order of (rating-click vs photo)
+      // resolves naturally because markVisitedIfNeeded is a no-op once set.
+      markVisitedIfNeeded(id, source);
+      return res;
+    });
   }
 
   function getPhotos(id, source) {
@@ -278,8 +380,9 @@
     getAll, getDislikes, getAllEntries,
     isFav, isDislike,
     add, addDislike, remove, removeDislike,
-    updateRating, updateNotes, addManual,
+    updateRating, updateNotes, updateVisitOrder, addManual,
     addPhoto, getPhotos, deletePhoto,
+    markVisited: markVisitedIfNeeded,
     ready, refresh,
   };
 })();

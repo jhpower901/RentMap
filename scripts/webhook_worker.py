@@ -387,11 +387,15 @@ def _matches_webhook(
 ) -> bool:
     """Return True if the event passes all of the webhook's filters.
 
-    Filter composition:
-    - event_type / platforms / price caps: AND (must all match if set)
-    - Location group (region_ids + polygon): OR within — passes if ANY
-      configured location filter matches. Setting neither lifts the
-      location restriction entirely (the prior default).
+    Filter composition is AND across every set filter — including the
+    location group (region_ids and polygon). Region is the coarse "where",
+    polygon is the fine-grained "exactly where inside that", so combining
+    them with AND lets a user say e.g. "AJOU listings, but only the
+    eastern side I drew" without leaking the whole region.
+
+    Setting neither region_ids nor polygon lifts the location restriction
+    entirely (the prior default when use_area_filter was false and no
+    region_ids existed).
     """
     if event["event_type"] not in (webhook["event_types"] or []):
         return False
@@ -406,13 +410,15 @@ def _matches_webhook(
         if rent is not None and rent > webhook["max_rent_manwon"] * 10000:
             return False
 
-    region_ids = list(webhook.get("region_ids") or [])
-    polygon: list[list[float]] | None = None
-    polygon_enabled = bool(
-        webhook.get("use_area_filter") and webhook.get("area_filter_enabled")
-    )
-    if polygon_enabled:
+    region_ids = [int(r) for r in (webhook.get("region_ids") or [])]
+    if region_ids:
+        listing_regions = [int(r) for r in (event.get("listing_region_ids") or [])]
+        if not any(rid in region_ids for rid in listing_regions):
+            return False
+
+    if webhook.get("use_area_filter") and webhook.get("area_filter_enabled"):
         raw = webhook.get("points_json")
+        polygon: list[list[float]] | None = None
         if isinstance(raw, str):
             try:
                 polygon = json.loads(raw)
@@ -420,28 +426,17 @@ def _matches_webhook(
                 polygon = None
         elif isinstance(raw, list):
             polygon = raw
-    has_polygon = bool(polygon and len(polygon) >= 3)
-    has_region = bool(region_ids)
-
-    if not has_polygon and not has_region:
-        return True  # no location restriction
-
-    # Region match: ANY overlap between webhook's region_ids and the
-    # listing's listing_regions tags.
-    if has_region:
-        listing_regions = list(event.get("listing_region_ids") or [])
-        if any(int(rid) in region_ids for rid in listing_regions):
-            return True
-
-    # Polygon match: point-in-polygon against the user's saved polygon.
-    if has_polygon:
-        lat = event.get("lat")
-        lng = event.get("lng")
-        if lat is not None and lng is not None:
-            if _point_in_polygon(float(lat), float(lng), polygon):  # type: ignore[arg-type]
-                return True
-
-    return False
+        if polygon and len(polygon) >= 3:
+            lat = event.get("lat")
+            lng = event.get("lng")
+            # Listings with NULL lat/lng can't be polygon-tested; preserve
+            # the prior "pass-through on missing coords" behaviour so a
+            # platform that occasionally omits coords doesn't silently
+            # drop those notifications.
+            if lat is not None and lng is not None:
+                if not _point_in_polygon(float(lat), float(lng), polygon):
+                    return False
+    return True
 
 
 # Batch cap for fan-out to avoid long-held locks on the events table.
