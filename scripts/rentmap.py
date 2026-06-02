@@ -2488,19 +2488,51 @@ def parse_manwon(text: str) -> dict[str, float] | None:
 
 
 def parse_amount_manwon(value: Any) -> Any:
+    """Parse a Korean rent/deposit string ("1억", "1억 5,000", "5,000") into a
+    만원-unit float. Returns "" when the input is empty / has no parseable
+    digits — but 0 is a *valid* return (e.g. naver 전세 매물 rentPrc=0). Callers
+    must distinguish 0 from "" instead of truthiness-checking the result."""
     text = re.sub(r"\s+", "", to_text(value)).replace(",", "")
     if not text:
         return ""
     eok = re.search(r"([0-9.]+)억", text)
     rest = re.sub(r"[^0-9.]", "", re.sub(r"[0-9.]+억", "", text))
-    amount = (float(eok.group(1)) * 10000 if eok else 0) + (float(rest) if rest else 0)
-    return amount if amount > 0 else ""
+    if not eok and not rest:
+        return ""
+    return (float(eok.group(1)) * 10000 if eok else 0) + (float(rest) if rest else 0)
 
 
 def normalize_naver_article(article: dict[str, Any], source_url: str, center: dict[str, Any]) -> dict[str, Any]:
     deposit_text = first(article, ["dealOrWarrantPrc", "priceText"])
     parsed = parse_manwon(f"{first(article, ['tradeTypeName'])}{deposit_text}/{first(article, ['rentPrc'])}") or {}
-    rent = parsed.get("rent") or float_or_empty(str(first(article, ["rentPrc"])).replace(",", ""))
+
+    # Resolve rent — naver gives rentPrc='' or 0 for 전세/반전세 listings, but
+    # the older `parsed.get('rent') or fallback` collapsed both into ""
+    # because 0 is falsy. Symptom: 보증금 2억의 반전세 매물에서 월세가 빈
+    # 칸으로 빠져 사용자가 "값이 안 들어와" 보고. Distinguish None (parse
+    # failed) from 0 (parse succeeded with monthly-rent = 0).
+    parsed_rent = parsed.get("rent")
+    if parsed_rent is None:
+        rent_text = to_text(first(article, ["rentPrc"])).replace(",", "").strip()
+        if rent_text == "":
+            # rentPrc absent — coerce to 0 when the listing carries a deposit
+            # (전세/반전세 with month=0); leave "" when both are blank so the
+            # downstream filter still treats it as unknown.
+            rent = 0 if to_text(deposit_text) else ""
+        else:
+            rent = float_or_empty(rent_text)
+    else:
+        rent = parsed_rent
+
+    # Same problem for deposit: parse_manwon may yield {} for malformed inputs,
+    # in which case parse_amount_manwon was the fallback — but the old
+    # ``parsed.get('deposit') or fallback`` ignored 0 (월세 only listings).
+    parsed_deposit = parsed.get("deposit")
+    if parsed_deposit is None:
+        deposit_manwon = parse_amount_manwon(deposit_text)
+    else:
+        deposit_manwon = parsed_deposit
+
     maintenance_won = float_or_empty(first(article, ["monthlyManagementCost", "managementCost"])) or 0
     maintenance = round1(float(maintenance_won) / 10000) if maintenance_won else ""
     article_no = first(article, ["articleNo"])
@@ -2531,7 +2563,7 @@ def normalize_naver_article(article: dict[str, Any], source_url: str, center: di
         "longitude": lon,
         "address_public_level": "naver_dong_level_until_detail_enrichment",
         "title": first(article, ["articleFeatureDesc", "articleName"]),
-        "deposit_manwon": parsed.get("deposit") or parse_amount_manwon(deposit_text),
+        "deposit_manwon": deposit_manwon,
         "rent_manwon": rent,
         "maintenance_manwon": maintenance,
         "total_monthly_manwon": "" if rent == "" else round1(float(rent) + (float(maintenance) if maintenance != "" else 0)),
@@ -3453,14 +3485,29 @@ def _read_for_gen_web(source: str, data_dir: Path, prefix: str, target_date: str
 #
 # Endpoint:
 #   GET https://api.peterpanz.com/houses/area/pc
-#     ?filter=checkLatitude:<min>~<max>||checkLongitude:<min>~<max>||buildingType=<koreantype>
+#     ?filter=<filter-string>
 #     &pageSize=<n>&pageIndex=<n>&filter_version=5.1&response_version=5.3
 #
-# The `filter` param uses a custom "key:val~val||key:val||k=v" serialization —
-# pairs joined by "||". We build it explicitly rather than urlencoding a dict.
+# The filter-string serialization is custom, decoded from app.js's
+# acceptFilter()/filterResult() in peterpanz.com:
+#   - "range" filters: ``key:min~max`` joined by ``||``  (lat/lng/price/size)
+#   - "in" filters:    ``key;JSON-array``                (buildingType etc.)
+#   - tail ``||`` is stripped
+#   - the whole string is encodeURI-style: reserved chars (:, ~, ||, ;, [, ],
+#     /) stay literal; only Korean values get percent-encoded
+#
+# IMPORTANT: the API rejects (400 / 500) when reserved chars are
+# percent-encoded — we MUST keep them literal. requests' `params=` dict
+# urlencodes everything, so we build the query string by hand and pass it
+# as part of the URL.
+#
+# bbox key is ``latitude`` / ``longitude`` (NOT ``checkLatitude`` — that's
+# what an earlier survey claimed, but ``check`` is only a prefix for non-
+# bbox range keys like checkRealSize, checkDeposit, checkPrice).
 #
 # Response shape:
-#   { houses: { recommend: { image: [room...] }, direct: { image: [...] }, ... } }
+#   { houses: { recommend: { image: [room...] }, withoutFee: { image: [...] }, ... },
+#     totalCount: N, ... }
 # Each room has hidx, info.{subject,thumbnail,created_at,supplied_size,real_size},
 # type.{contract_type,building_type,building_form}, price.{deposit,monthly_fee,maintenance_cost},
 # floor.{target,total,floor_text}, location.{coordinate,address},
@@ -3472,7 +3519,12 @@ def _read_for_gen_web(source: str, data_dir: Path, prefix: str, target_date: str
 # ─────────────────────────────────────────────────────────────────────────────
 
 PETERPAN_API_LIST = "https://api.peterpanz.com/houses/area/pc"
-PETERPAN_BUILDING_TYPES = ("빌라/주택", "오피스텔", "방/거실")
+# Korean text values for the BUILDING_TYPE enum (see peterpanz.com app.js:
+# VILLA_AND_HOUSING_TEXT, OFFICETEL_TEXT, ONE_TWO_ROOM_TEXT).
+# STORE_AND_OFFICE ('상가/사무실') and APARTMENT are intentionally omitted —
+# we focus on residential monthly-rent listings; aparts have their own
+# endpoint (/houses/area/apt/agency/pc).
+PETERPAN_BUILDING_TYPES = ("빌라/주택", "오피스텔", "원/투룸")
 PETERPAN_PAGE_SIZE = 50
 PETERPAN_MAX_PAGES = 30  # 30 × 50 × 3 buildingTypes = ~4500 rooms cap
 
@@ -3480,12 +3532,44 @@ PETERPAN_MAX_PAGES = 30  # 30 × 50 × 3 buildingTypes = ~4500 rooms cap
 def _peterpan_filter_param(min_lat: float, max_lat: float,
                            min_lng: float, max_lng: float,
                            building_type: str) -> str:
-    """Build the custom `key:val~val||key:val||k=v` filter string."""
-    return "||".join([
-        f"checkLatitude:{min_lat:.6f}~{max_lat:.6f}",
-        f"checkLongitude:{min_lng:.6f}~{max_lng:.6f}",
-        f"buildingType={building_type}",
-    ])
+    """Build the custom filter string the peterpan API expects.
+
+    Format (see module docstring):
+      latitude:<min>~<max>||longitude:<min>~<max>||buildingType;["<value>"]
+
+    The Korean buildingType value is percent-encoded but the surrounding
+    structural chars (`:`, `~`, `||`, `;`, `[`, `]`, `/`) MUST stay literal —
+    if any of them gets encoded the server returns 400 (slash) or 500
+    (everything else). quote(..., safe='/') matches that exactly: encode
+    spaces / Korean only, keep `/` raw inside the value.
+    """
+    bt_encoded = quote(building_type, safe='/')
+    return (
+        f"latitude:{min_lat:.6f}~{max_lat:.6f}"
+        f"||longitude:{min_lng:.6f}~{max_lng:.6f}"
+        f'||buildingType;["{bt_encoded}"]'
+    )
+
+
+def _peterpan_request_json(session: requests.Session, url: str,
+                           headers: dict[str, str],
+                           timeout: int = 30) -> Any:
+    """GET a peterpan URL without letting requests percent-encode the query.
+
+    The peterpan filter string contains `||`, `;`, `[`, `]` as structural
+    separators — encoding any of them returns 500. requests.prepare_url()
+    re-quotes those by default (urllib3's requote_uri), so we override
+    PreparedRequest.url with the raw string after prepare_request() builds
+    everything else (headers / auth / cookies). The bypass is peterpan-only;
+    other crawlers' URLs are well-formed and need the normalization.
+    """
+    req = requests.Request("GET", url, headers=headers)
+    prepped = session.prepare_request(req)
+    prepped.url = url
+    resp = session.send(prepped, timeout=timeout)
+    resp.raise_for_status()
+    resp.encoding = "utf-8"
+    return resp.json()
 
 
 def _peterpan_flatten_rooms(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3534,12 +3618,20 @@ def _peterpan_room_to_row(room: dict[str, Any]) -> dict[str, Any] | None:
     user_type = to_text(attr.get("userType"))
     agency_label = "DIRECT" if user_type == "user" else (to_text(attr.get("agencyName")) or "BROKER")
 
-    # Prices are already in 만원 units on this API (matches deposit values like
-    # "1000" for 1000만원). The 'price' object's deposit/monthly_fee/maintenance_cost
-    # are floats / ints — pass through num_or_none-style coercion.
-    deposit_man = to_number(price.get("deposit"))
-    rent_man = to_number(price.get("monthly_fee"))
-    maint_man = to_number(price.get("maintenance_cost"))
+    # Peterpan returns prices in WON (e.g. deposit=100000000 for 1억). We
+    # store 만원 throughout the pipeline (matches CSV column names + DB +
+    # web filters), so divide by 10000. round1 collapses trailing .0s.
+    # 0 is a valid value (전세 매물 → monthly_fee=0) — keep it; only None
+    # collapses to None so downstream "missing data" filters still work.
+    def _to_manwon(value):
+        n = to_number(value)
+        if n is None:
+            return None
+        return round1(n / 10000)
+
+    deposit_man = _to_manwon(price.get("deposit"))
+    rent_man = _to_manwon(price.get("monthly_fee"))
+    maint_man = _to_manwon(price.get("maintenance_cost"))
     total = None
     if rent_man is not None:
         total = round1(rent_man + (maint_man or 0))
@@ -3639,20 +3731,23 @@ def crawl_peterpan(args: argparse.Namespace) -> None:
         while page <= PETERPAN_MAX_PAGES:
             filter_str = _peterpan_filter_param(args.min_lat, args.max_lat,
                                                 args.min_lng, args.max_lng, bt)
-            # Build URL with safe characters preserved for the custom filter
-            # serialization (the ':', '~', '||', and Korean text). Encoded only
-            # for things that would actually break the URL.
-            params = urlencode({
-                "filter": filter_str,
-                "pageSize": PETERPAN_PAGE_SIZE,
-                "pageIndex": page,
-                "filter_version": "5.1",
-                "response_version": "5.3",
-                "order_by": "newest",
-            }, safe=":~|")
-            url = f"{PETERPAN_API_LIST}?{params}"
+            # Build the query by hand: urlencode() would percent-encode the
+            # ':', '||', ';', '[', ']', '/' inside `filter_str` and the API
+            # returns 400/500 for any of those. `filter_str` already has the
+            # Korean value escaped (done in _peterpan_filter_param).
+            # No `order_by`: 'newest' returns 500 (not a valid enum), 'random'
+            # would break pagination dedup. Server's default order is fine —
+            # we dedup by hidx anyway.
+            query = (
+                f"filter={filter_str}"
+                f"&pageSize={PETERPAN_PAGE_SIZE}"
+                f"&pageIndex={page}"
+                "&filter_version=5.1"
+                "&response_version=5.3"
+            )
+            url = f"{PETERPAN_API_LIST}?{query}"
             try:
-                payload = request_json(session, url, headers=headers)
+                payload = _peterpan_request_json(session, url, headers)
             except Exception as exc:
                 print(f"[crawl:peterpan] fetch failed bt={bt} page={page}: {exc}", flush=True)
                 break

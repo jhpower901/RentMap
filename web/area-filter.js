@@ -261,6 +261,13 @@
         else if (act === 'cancel') endDraw(false);
       });
       map.getContainer().appendChild(banner);
+      // The banner sits inside the Leaflet map container, so a click on
+      // "한 점 취소"/완료/취소 would otherwise bubble to map.on('click'),
+      // adding a new polygon vertex at the banner's location — making the
+      // undo button look like it does nothing (net change: -1 +1). Disable
+      // propagation for both mouse and touch.
+      L.DomEvent.disableClickPropagation(banner);
+      L.DomEvent.disableScrollPropagation(banner);
       return banner;
     }
     function updateBanner() {

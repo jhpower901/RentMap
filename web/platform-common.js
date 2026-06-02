@@ -86,7 +86,7 @@
     // Branding
     document.documentElement.style.setProperty('--accent', accent);
     const pName = PLATFORM_NAMES[source] || source;
-    document.title = pName + ' - 아주대 월세 매물';
+    document.title = pName + ' - RentMap';
     const badgeEl = document.getElementById('page-badge');
     if (badgeEl) { badgeEl.textContent = pName; badgeEl.style.background = accent; }
     const titleEl = document.getElementById('page-title');
@@ -268,6 +268,29 @@
     // their open state across re-renders (filter changes, sort clicks, etc.).
     const openIds = new Set();
 
+    function wireListingIdCopy(root) {
+      const btn = root.querySelector('.listing-id-copy');
+      if (!btn) return;
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = btn.dataset.listingId || '';
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(id);
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+          const orig = btn.textContent;
+          btn.textContent = '✓';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1200);
+        } catch (_) { /* swallow — user can still read the visible number */ }
+      });
+    }
+
     function detailRowFor(r, colspan) {
       const html = window.ListingInfo ? window.ListingInfo.buildSection(r, source) : '';
       if (!html) return null;
@@ -288,6 +311,7 @@
       if (window.ListingInfo && window.ListingInfo.attachSparklines) {
         window.ListingInfo.attachSparklines(tr, source);
       }
+      wireListingIdCopy(tr);
       return tr;
     }
 
@@ -361,13 +385,6 @@
           '<td>' + esc(r.floor || '-') + '</td>' +
           '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.address || r.region || '-') + '</td>' +
           '<td class="agency-cell">' + esc(agencyLabel(r.agency, source)) + (r.phone ? '<br><span class="phone-small">' + esc(r.phone) + '</span>' : '') + '</td>' +
-          // Listing number — needed when the user calls the agent ("아주 12345번 매물").
-          // Wrapped in a span so the user can long-press to copy on mobile; the
-          // copy button gives a one-tap path on desktop.
-          '<td class="listing-id-cell">' +
-            '<span class="listing-id-text" title="' + esc(r.id) + '">' + esc(r.id) + '</span>' +
-            '<button type="button" class="listing-id-copy" title="번호 복사" data-listing-id="' + esc(r.id) + '">📋</button>' +
-          '</td>' +
           '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
           '<td class="reaction-cell">' +
             '<button class="heart-btn reaction-btn fav-like-btn" type="button" title="좋아요" ' +
@@ -378,32 +395,10 @@
               'data-fav-id="' + favId + '" data-fav-source="' + favSource + '">📌</button>' +
           '</td>';
         applyReactionState(tr, r.id, r.source);
-        const copyBtn = tr.querySelector('.listing-id-copy');
-        if (copyBtn) {
-          copyBtn.addEventListener('click', async e => {
-            e.stopPropagation();
-            const id = copyBtn.dataset.listingId || '';
-            try {
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(id);
-              } else {
-                // Fallback for older browsers / non-HTTPS
-                const ta = document.createElement('textarea');
-                ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
-                document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-                document.body.removeChild(ta);
-              }
-              const orig = copyBtn.textContent;
-              copyBtn.textContent = '✓';
-              copyBtn.classList.add('copied');
-              setTimeout(() => { copyBtn.textContent = orig; copyBtn.classList.remove('copied'); }, 1200);
-            } catch (_) { /* swallow — user can still read the visible number */ }
-          });
-        }
         tr.addEventListener('click', e => {
           // Clicks on the heart, links, or anything inside an already-open
           // detail row shouldn't trigger fly/toggle on the parent.
-          if (e.target.closest('.reaction-btn, a, .detail-row, .listing-id-copy')) return;
+          if (e.target.closest('.reaction-btn, a, .detail-row')) return;
           const entry = markerMap.get(r.id);
           if (entry && r.lat && r.lon) {
             map.flyTo([r.lat, r.lon], 17, { duration: 0.5 });

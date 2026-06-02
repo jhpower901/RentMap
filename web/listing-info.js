@@ -329,9 +329,21 @@
       ? `<div class="price-trend" data-listing-no="${esc(d.id)}"></div>`
       : "";
 
+    // Listing number — needed when the user calls the agent ("아주 12345번 매물").
+    // Lives in the detail panel so the table row stays compact; copy button
+    // wiring is attached by the host (platform-common.js wireListingIdCopy).
+    const listingIdHtml = d.id
+      ? `<div class="listing-id-row">
+           <span class="listing-id-label">매물번호</span>
+           <span class="listing-id-text" title="${esc(d.id)}">${esc(d.id)}</span>
+           <button type="button" class="listing-id-copy" title="번호 복사" data-listing-id="${esc(d.id)}">📋</button>
+         </div>`
+      : "";
+
     return `
       <div class="sec">
         <div class="sec-title">매물 정보</div>
+        ${listingIdHtml}
         ${gridHtml}
         ${sparkHtml}
         ${maintenanceHtml}${descHtml}${optsHtml}${secHtml}

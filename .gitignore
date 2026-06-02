@@ -38,11 +38,13 @@ web/dabang.html
 web/daangn.html
 web/zigbang.html
 web/naver.html
+web/peterpan.html
 web/index.html
 web/data_dabang_*.js
 web/data_daangn_*.js
 web/data_zigbang_*.js
 web/data_naver_*.js
+web/data_peterpan_*.js
 
 # Temporary files
 tmp/

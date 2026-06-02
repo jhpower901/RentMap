@@ -3,16 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>아주대 월세 매물</title>
+<title>RentMap</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta property="og:title" content="RentMap">
+<meta property="og:description" content="월세 매물 통합 지도">
+<meta property="og:image" content="og-image.svg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="platform-common.css?v=20260529-dislike">
+<link rel="stylesheet" href="platform-common.css?v=20260602-rentmap">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 <nav>
-  <span class="brand">아주대 월세</span>
+  <a href="index.html" class="brand"><img src="favicon.svg" alt="" class="brand-logo">RentMap</a>
   <a href="index.html">지도</a>
   <a href="favorites.html" id="nav-favorites">❤️ 좋아요</a>
   <a href="bookmarks.html" id="nav-bookmarks">📌 북마크</a>
@@ -51,7 +57,6 @@
             <th data-col="floor">층</th>
             <th data-col="address">주소</th>
             <th data-col="agency">중개</th>
-            <th data-col="id" style="min-width:90px">매물번호</th>
             <th>링크</th>
             <th style="width:110px;text-align:center">❤️/👎/📌</th>
           </tr>
@@ -68,10 +73,10 @@
 <script src="favorites.js?v=20260602-fieldmerge"></script>
 <script src="bookmarks.js?v=20260602-bm1"></script>
 <script src="user-filters.js?v=20260527-filter1"></script>
-<script src="area-filter.js?v=20260523-area1"></script>
-<script src="listing-info.js?v=20260527-naverurl"></script>
+<script src="area-filter.js?v=20260602-areaundo"></script>
+<script src="listing-info.js?v=20260602-listingid"></script>
 <script src="price-parser.js?v=20260602-price1"></script>
-<script src="platform-common.js?v=20260602-bm1"></script>
+<script src="platform-common.js?v=20260602-rentmap"></script>
 <script src="region-data-loader.js?v=20260526-region1"></script>
 <script>
 // Region data is loaded dynamically based on the active region (localStorage

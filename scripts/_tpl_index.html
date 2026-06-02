@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>아주대 월세 매물 통합지도</title>
+<title>RentMap</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta property="og:title" content="RentMap">
+<meta property="og:description" content="월세 매물 통합 지도">
+<meta property="og:image" content="og-image.svg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -14,7 +20,9 @@ html,body{height:100%;overflow:hidden}
 body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
 a{color:inherit;text-decoration:none}
 nav{display:flex;align-items:center;gap:4px;padding:8px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:relative;z-index:600}
-nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap}
+nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px}
+nav .brand:hover{background:#f0f0f0}
+nav .brand-logo{width:20px;height:20px;display:inline-block;vertical-align:middle}
 nav a{padding:5px 12px;border-radius:20px;font-size:13px;white-space:nowrap}
 nav a:hover{background:#f0f0f0}
 nav a.active-nav{background:#222;color:#fff}
@@ -70,11 +78,26 @@ nav a.active-nav{background:#222;color:#fff}
 .rentmap-marker{background:transparent !important;border:0 !important;display:flex !important;align-items:center;justify-content:center;cursor:pointer}
 .rentmap-marker-dot{display:block;width:12px;height:12px;border-radius:50%;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.18);transition:transform .12s,opacity .15s;pointer-events:none}
 .rentmap-marker:hover .rentmap-marker-dot{transform:scale(1.18)}
+/* Mobile-collapsible filter panel: the panel covers ~60% of a phone screen and
+   was blocking taps on every marker beneath it. On screens ≤768px the panel
+   collapses to just its toggle bar; tapping the bar expands the full panel. */
+.panel-toggle{display:none;align-items:center;gap:8px;padding:8px 12px;background:transparent;border:0;cursor:pointer;font:inherit;font-size:14px;font-weight:700;width:100%;border-radius:8px;color:inherit;min-height:40px}
+.panel-toggle:hover{background:#f0f0f0}
+.panel-toggle-icon{font-size:16px;line-height:1;width:18px;text-align:center}
+.panel-toggle-count{margin-left:auto;font-weight:700;color:#c00}
+@media (max-width:768px){
+  .panel{min-width:0;max-width:calc(100vw - 24px);padding:6px}
+  .panel-toggle{display:flex}
+  .panel.collapsed > :not(.panel-toggle){display:none !important}
+  .panel.collapsed{padding:0}
+  .panel.collapsed .panel-toggle{padding:10px 14px}
+  .panel:not(.collapsed) .panel-toggle{margin-bottom:6px;border-bottom:1px solid #eee;border-radius:0}
+}
 </style>
 </head>
 <body>
 <nav>
-  <span class="brand">아주대 월세</span>
+  <a href="index.html" class="brand"><img src="favicon.svg" alt="" class="brand-logo">RentMap</a>
   <a href="index.html" class="active-nav">지도</a>
   <a href="favorites.html">❤️ 좋아요</a>
   <a href="bookmarks.html">📌 북마크</a>
@@ -88,7 +111,12 @@ nav a.active-nav{background:#222;color:#fff}
 </nav>
 <div class="map-wrap">
   <div id="map"></div>
-  <div class="panel">
+  <div class="panel" id="filterPanel">
+    <button class="panel-toggle" id="panelToggleBtn" type="button" aria-label="필터 패널 토글">
+      <span class="panel-toggle-icon" id="panelToggleIcon">☰</span>
+      <span>필터</span>
+      <span class="panel-toggle-count" id="panelToggleCount">0</span>건
+    </button>
     <h2>통합 필터</h2>
     <label><input type="checkbox" id="chk_dabang" checked> <span class="badge badge-dabang">다방</span> <span id="cnt_dabang">-</span>건</label>
     <label><input type="checkbox" id="chk_daangn" checked> <span class="badge badge-daangn">당근</span> <span id="cnt_daangn">-</span>건</label>
@@ -134,7 +162,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="favorites.js?v=20260602-fieldmerge"></script>
 <script src="bookmarks.js?v=20260602-bm1"></script>
 <script src="user-filters.js?v=20260527-filter1"></script>
-<script src="area-filter.js?v=20260523-area1"></script>
+<script src="area-filter.js?v=20260602-areaundo"></script>
 <script src="price-parser.js?v=20260602-price1"></script>
 <script>
 const COLORS = { dabang: '#326CF9', daangn: '#FF6F00', zigbang: '#EF4444', naver: '#03C75A', peterpan: '#7C3AED' };
@@ -334,7 +362,7 @@ function applyFilter() {
   };
   const maxDep   = readLimit('maxDeposit', 9999);
   const maxRent  = readLimit('maxRent', 999);
-  const shown    = { dabang: 0, daangn: 0, zigbang: 0, naver: 0 };
+  const shown    = { dabang: 0, daangn: 0, zigbang: 0, naver: 0, peterpan: 0 };
 
   allMarkers.forEach(({ marker, src, data }) => {
     const chk    = document.getElementById('chk_' + src).checked;
@@ -457,6 +485,39 @@ function loadAllSources() {
   .finally(function () {
     RegionData.loadAll(['dabang', 'daangn', 'zigbang', 'naver', 'peterpan'], loadAllSources);
   });
+
+// Mobile-collapsible filter panel. On phones (≤768px) the panel covers ~60% of
+// the map and was blocking marker taps; collapse-by-default keeps the map
+// usable. matchMedia 'change' re-applies the default when the user rotates so
+// landscape phones don't end up stuck in the collapsed mode either.
+(function setupPanelToggle(){
+  const panel = document.getElementById('filterPanel');
+  const btn   = document.getElementById('panelToggleBtn');
+  const icon  = document.getElementById('panelToggleIcon');
+  const total = document.getElementById('totalCount');
+  const tc    = document.getElementById('panelToggleCount');
+  if (!panel || !btn || !icon) return;
+  const mql = window.matchMedia('(max-width: 768px)');
+  function refreshIcon() {
+    icon.textContent = panel.classList.contains('collapsed') ? '☰' : '▾';
+  }
+  function applyDefault() {
+    panel.classList.toggle('collapsed', mql.matches);
+    refreshIcon();
+  }
+  applyDefault();
+  if (mql.addEventListener) mql.addEventListener('change', applyDefault);
+  else if (mql.addListener) mql.addListener(applyDefault);
+  btn.addEventListener('click', () => {
+    panel.classList.toggle('collapsed');
+    refreshIcon();
+  });
+  if (total && tc) {
+    tc.textContent = total.textContent;
+    new MutationObserver(() => { tc.textContent = total.textContent; })
+      .observe(total, { childList: true, characterData: true, subtree: true });
+  }
+})();
 </script>
 </body>
 </html>

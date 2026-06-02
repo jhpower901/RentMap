@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>로그인 - RentMap</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta property="og:title" content="RentMap">
+<meta property="og:description" content="월세 매물 통합 지도">
+<meta property="og:image" content="og-image.svg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
@@ -12,6 +18,9 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Noto Sans KR',sans-serif;background:#f5f7fa;color:#222;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
 .card{background:#fff;border-radius:14px;padding:28px 24px;box-shadow:0 6px 22px #0001;width:100%;max-width:380px}
 h1{font-size:22px;font-weight:700;text-align:center;margin-bottom:4px}
+.brand-row{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:4px}
+.brand-logo-large{width:32px;height:32px;display:block}
+.brand-row h1{margin-bottom:0}
 .sub{text-align:center;color:#888;font-size:13px;margin-bottom:18px}
 .tabs{display:flex;border-bottom:1px solid #e6e8eb;margin-bottom:18px}
 .tab{flex:1;padding:9px 0;text-align:center;cursor:pointer;font-size:14px;font-weight:600;color:#888;border-bottom:2px solid transparent;margin-bottom:-1px}
@@ -29,8 +38,8 @@ input:focus{outline:none;border-color:#6366F1;box-shadow:0 0 0 3px #6366F133}
 </head>
 <body>
 <div class="card">
-  <h1>RentMap</h1>
-  <p class="sub">아주대 월세 매물 통합</p>
+  <div class="brand-row"><img src="favicon.svg" alt="" class="brand-logo-large"><h1>RentMap</h1></div>
+  <p class="sub">월세 매물 통합 지도</p>
 
   <div class="tabs">
     <div class="tab on" data-tab="login">로그인</div>
