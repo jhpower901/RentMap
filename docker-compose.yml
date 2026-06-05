@@ -112,6 +112,56 @@ services:
       - RENTMAP_NAVER_CORTARNOS=${RENTMAP_NAVER_CORTARNOS:-4111710100,4111710200,4111710300,4111710400,4111710500,4111710600,4111514000,4111514100,4111513300,4111513500,4111513800,4111513900,4111512000,4111313700,4111312600,4111113000,4111113400,4111113600,4111113900}
     restart: unless-stopped
 
+  # Standalone admin DB-tool. Separate process so an admin's hand-edit
+  # can't take the public site down; shares the same image (entrypoint
+  # override only). Reachable from outside ONLY through Caddy on the
+  # proxy network — no published port here. Local dev appends a
+  # ``127.0.0.1:8001:8001`` mapping via docker-compose.override.yml so a
+  # developer can hit it directly without an SSH tunnel.
+  #
+  # See docs/dbtool.md for the Caddyfile snippet (rentmap-db.anzam.kr →
+  # reverse_proxy rentmap-dbtool:8001) and the operator runbook
+  # (migration order, drift unblock, etc.).
+  rentmap-dbtool:
+    # Pin to the same image tag rentmap builds so ``docker compose build``
+    # produces one image instead of two identical ones (the Dockerfile +
+    # build context are identical between the two services — only the
+    # CMD differs). depends_on guarantees rentmap builds first.
+    image: rentmap-rentmap
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rentmap-dbtool
+    command: python scripts/dbtool/server.py
+    expose:
+      - "8001"
+    networks:
+      - proxy
+      - rentmap-db
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "14"
+    volumes:
+      - ./data:/app/data
+      - ./web:/app/web
+      - ./scripts:/app/scripts
+      - ./db:/app/db
+    environment:
+      - TZ=Asia/Seoul
+      - RENTMAP_DB_URL=${RENTMAP_DB_URL:-postgresql://rentmap:${POSTGRES_PASSWORD}@rentmap-postgres:5432/rentmap}
+      - PORT=8001
+      # 0.0.0.0 inside the container so both (a) the proxy-network
+      # reverse-proxy from Caddy and (b) the optional host-side
+      # 127.0.0.1:8001 mapping in override.yml can reach it. Public
+      # exposure is governed entirely by what's published in the
+      # ``ports:`` map — nothing here.
+      - RENTMAP_DBTOOL_BIND=0.0.0.0
+    restart: unless-stopped
+    depends_on:
+      - rentmap
+
 networks:
   proxy:
     external: true

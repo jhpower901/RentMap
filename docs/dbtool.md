@@ -14,7 +14,7 @@
 | 인증 | `scripts/dbtool/deps.py` | RentMap `users.is_admin=TRUE`만, 쿠키명 `rentmap_dbtool_session` |
 | 정적 페이지 | `web/dbtool/` | login.html, index.html(SPA), app.css, app.js |
 | 스키마 | `db/migrations/014_admin_audit_log.sql` | actor / target / before/after / reverse_sql |
-| 컨테이너 | `docker-compose.override.yml` 의 `rentmap-dbtool` | 같은 이미지 재사용 |
+| 컨테이너 | `docker-compose.yml` 의 `rentmap-dbtool` | 같은 이미지 재사용 (`image: rentmap-rentmap`) |
 
 탭 구성:
 
@@ -91,11 +91,21 @@ handle {
 
 DNS는 `rentmap-db.anzam.kr` → 서버 공인 IP 로 A 레코드 추가. Caddy가 첫 요청 때 ACME로 인증서 자동 발급.
 
-Caddy 컨테이너가 `proxy` 외부 네트워크에 붙어있어야 `rentmap-dbtool` 호스트네임이 풀립니다. `docker-compose.override.yml`은 이미 dbtool 서비스에 `proxy` 네트워크를 추가해뒀습니다.
+Caddy 컨테이너가 `proxy` 외부 네트워크에 붙어있어야 `rentmap-dbtool` 호스트네임이 풀립니다. `docker-compose.yml`의 `rentmap-dbtool` 서비스가 이미 `proxy` + `rentmap-db` 두 네트워크에 붙어있게 정의돼 있어서, `git pull` 후 `docker compose up -d` 만 하면 자동으로 양쪽 모두에 attach 됩니다.
 
 ### 3.2 SSH 터널 — Caddy 다운 시 / 운영자 선호
 
-`127.0.0.1:8001:8001` 호스트 바인딩은 그대로 두기 때문에 SSH 터널만 있으면 됩니다:
+`127.0.0.1:8001:8001` 호스트 바인딩이 `docker-compose.override.yml`(로컬 dev 전용, `.gitignore`)에 정의돼 있으면 SSH 터널로도 들어갈 수 있습니다. 운영 서버에 똑같이 override를 두려면 다음 한 블록만 추가:
+
+```yaml
+# /opt/docker/RentMap/docker-compose.override.yml
+services:
+  rentmap-dbtool:
+    ports:
+      - "127.0.0.1:8001:8001"
+```
+
+이 후:
 
 ```sh
 # 로컬 PC에서
@@ -125,16 +135,18 @@ git pull --ff-only
 bash scripts/deploy.sh
 ```
 
-새로 들어가는 파일:
+새로 들어오는 파일 (git pull 결과):
 
 ```
 db/migrations/017_region_schedules_peterpan.sql
 db/migrations/018_user_webhooks_region_ids_comment_and.sql
 scripts/dbtool/                  (디렉터리 전체)
 web/dbtool/                      (디렉터리 전체)
-docker-compose.override.yml      (rentmap-dbtool 서비스 추가)
+docker-compose.yml               (rentmap-dbtool 서비스 추가됨)
 docs/dbtool.md                   (이 문서)
 ```
+
+`docker-compose.override.yml`은 `.gitignore` 라 운영 서버 본인 것이 그대로 유지됩니다. ports 매핑이 필요 없으면(=Caddy로만 접근) 손댈 것 없음.
 
 ### 4.2 마이그레이션 적용 — deploy.sh와 별
 
