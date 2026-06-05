@@ -267,11 +267,13 @@ RAW_KEEP_KEYS = {
         "address_public_level",
     ),
     "peterpan": (
-        "agency", "writer_type",
+        "agency", "agent_name", "agent_phone", "writer_type",
         "building_form", "options",
         "elevator", "pet_allowed",
+        "maintenance_detail", "maintenance_basis", "maintenance_items",
+        "road_address", "jibun_address",
         "image_1", "image_2",
-        "published_at", "listing_age_text",
+        "published_at", "confirmed_at", "listing_age_text",
     ),
 }
 
