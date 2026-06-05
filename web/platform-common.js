@@ -112,6 +112,22 @@
     const centerMarker = L.marker([37.280062, 127.043688]).addTo(map).bindPopup('<b>아주대학교 정문</b>');
     window.addEventListener('resize', () => map.invalidateSize());
 
+    // Marker cluster group — the previous render() flagged 8000+ markers in
+    // place via a CSS dim class and left them all in the DOM, so every filter
+    // tick walked the full set. Routing markers through L.markerClusterGroup
+    // means only the markers whose cluster is currently expanded land in the
+    // DOM, and render() only addLayers/removeLayers the diff.
+    const clusterGroup = L.markerClusterGroup({
+      chunkedLoading: true,
+      chunkInterval: 50,
+      chunkDelay: 50,
+      maxClusterRadius: 60,
+      showCoverageOnHover: false,
+      spiderfyOnMaxZoom: true,
+    });
+    clusterGroup.addTo(map);
+    const visibleMarkers = new Set();
+
     // Recenter on the active region so switching regions moves the viewport.
     fetch('/api/regions', { credentials: 'same-origin', cache: 'no-store' })
       .then(r => r.ok ? r.json() : { regions: [] })
@@ -139,6 +155,8 @@
       // L.circleMarker's hit area equals its radius — at radius 7 that's a 14px
       // tap target, well under the mobile 44px minimum. divIcon keeps the dot
       // visually the same while giving the touch target room to breathe.
+      // No .addTo(map) — render() decides which markers live in clusterGroup
+      // so the initial filter pass + subsequent toggles share the same code.
       const m = L.marker([r.lat, r.lon], {
         icon: L.divIcon({
           className: 'rentmap-marker',
@@ -147,7 +165,7 @@
           popupAnchor: [0, -8],
           html: '<span class="rentmap-marker-dot" style="background:' + agencyColor(r.agency) + '"></span>',
         }),
-      }).addTo(map);
+      });
       const imgHtml = r.img1
         ? '<img class="popup-img" src="' + esc(safeUrl(imageSrc(r.img1, source))) + '" onerror="this.style.display=\'none\'">'
         : '';
@@ -339,12 +357,21 @@
       document.getElementById('countLabel').textContent = filtered.length + '건';
       const visibleIds = new Set(filtered.map(r => r.id));
 
+      // Diff the new visible set against the cluster's current membership and
+      // batch the difference into bulk addLayers/removeLayers. Previously this
+      // toggled a CSS dim class on every marker's DOM node (O(N) reflow) and
+      // left filtered-out markers in the DOM dimmed; with clustering they
+      // simply leave the cluster, which is the markercluster fast path.
+      const toAdd = [];
+      const toRemove = [];
       markerMap.forEach(({ marker, data }) => {
-        // divIcon markers don't respond to setStyle; toggle a class on the
-        // marker element so the dot fades via CSS.
-        const el = marker.getElement();
-        if (el) el.classList.toggle('marker-dim', !visibleIds.has(data.id));
+        const want = visibleIds.has(data.id);
+        const have = visibleMarkers.has(marker);
+        if (want && !have) { toAdd.push(marker); visibleMarkers.add(marker); }
+        else if (!want && have) { toRemove.push(marker); visibleMarkers.delete(marker); }
       });
+      if (toRemove.length) clusterGroup.removeLayers(toRemove);
+      if (toAdd.length) clusterGroup.addLayers(toAdd);
 
       const tbody = document.getElementById('tbody');
       const colspan = (document.querySelectorAll('#tbl thead th') || []).length || 13;
@@ -390,8 +417,12 @@
           if (e.target.closest('.reaction-btn, a, .detail-row')) return;
           const entry = markerMap.get(r.id);
           if (entry && r.lat && r.lon) {
-            map.flyTo([r.lat, r.lon], 17, { duration: 0.5 });
-            entry.marker.openPopup();
+            // zoomToShowLayer handles the cluster case (zooms in / spiderfies
+            // until the marker is individually visible) then runs the cb;
+            // when the marker is already exposed it just runs the cb. Without
+            // this the old flyTo + openPopup pair silently failed when the
+            // target marker was still inside an unexpanded cluster.
+            clusterGroup.zoomToShowLayer(entry.marker, () => entry.marker.openPopup());
           }
           // Toggle the detail sub-row (information from normal_common's
           // optional fields: description / options / parking / etc.).

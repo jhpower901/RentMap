@@ -13,7 +13,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
@@ -199,6 +202,22 @@ const centerMarker = L.marker([37.280062, 127.043688])
   .bindPopup('<b>아주대학교 정문</b>')
   .openPopup();
 
+// Marker cluster group — without this the page renders 8000+ raw markers and
+// every applyFilter() iterates all of them with hasLayer/addTo/remove. With
+// clustering only the markers in the current viewport's clusters land in the
+// DOM, and the cluster delegates show/hide to a spatial index.
+// chunkedLoading splits the initial bulk addLayers across animation frames so
+// the first paint isn't blocked by 8000+ marker insertions.
+const clusterGroup = L.markerClusterGroup({
+  chunkedLoading: true,
+  chunkInterval: 50,
+  chunkDelay: 50,
+  maxClusterRadius: 60,
+  showCoverageOnHover: false,
+  spiderfyOnMaxZoom: true,
+});
+clusterGroup.addTo(map);
+
 // Recenter on the active region. Without this, switching to a region whose
 // data is far away would leave the user looking at an empty Ajou viewport.
 fetch('/api/regions', { credentials: 'same-origin', cache: 'no-store' })
@@ -302,6 +321,10 @@ if (mapFilterPrefs) {
 }
 
 const allMarkers = [];
+// Set of marker objects currently in clusterGroup. applyFilter() diffs this
+// against the new visible set so we only call addLayers/removeLayers for the
+// markers that actually changed state, not all 8000+ on every filter tick.
+const visibleMarkers = new Set();
 
 function addMarkersForSource(src, rows) {
   const color = COLORS[src];
@@ -314,6 +337,8 @@ function addMarkersForSource(src, rows) {
     // Use a divIcon with a 44x44 invisible container around a small visible
     // dot — L.circleMarker's hit area = radius, so radius 6 gave a 12px touch
     // target (well under the 44px mobile minimum). Visual size is unchanged.
+    // No .addTo() — applyFilter() decides which markers land in clusterGroup
+    // so the initial filter pass + ongoing toggles share the same code path.
     const m = L.marker([r.lat, r.lon], {
       icon: L.divIcon({
         className: 'rentmap-marker',
@@ -322,7 +347,7 @@ function addMarkersForSource(src, rows) {
         popupAnchor: [0, -8],
         html: '<span class="rentmap-marker-dot" style="background:' + color + '"></span>',
       })
-    }).addTo(map);
+    });
 
     const agencyDisp = (src === 'daangn')
       ? (r.agency === 'DIRECT' ? '직거래' : r.agency === 'BROKER' ? '중개사' : (r.agency || ''))
@@ -372,18 +397,24 @@ function applyFilter() {
   const maxRent  = readLimit('maxRent', 999);
   const shown    = { dabang: 0, daangn: 0, zigbang: 0, naver: 0, peterpan: 0 };
 
+  // Build the next visible set in one pass, then diff against the previous
+  // one so we only call clusterGroup.addLayers/removeLayers for markers that
+  // actually changed state. Bulk add/remove is the markercluster fast path.
+  const toAdd = [];
+  const toRemove = [];
   allMarkers.forEach(({ marker, src, data }) => {
     const chk    = document.getElementById('chk_' + src).checked;
     const depOk  = data.deposit === null || data.deposit <= maxDep;
     const rentOk = data.rent    === null || data.rent    <= maxRent;
     const areaOk = AreaFilter.applies(data);
-    if (chk && depOk && rentOk && areaOk) {
-      if (!map.hasLayer(marker)) marker.addTo(map);
-      shown[src]++;
-    } else {
-      if (map.hasLayer(marker)) marker.remove();
-    }
+    const want   = chk && depOk && rentOk && areaOk;
+    const have   = visibleMarkers.has(marker);
+    if (want) shown[src]++;
+    if (want && !have) { toAdd.push(marker); visibleMarkers.add(marker); }
+    else if (!want && have) { toRemove.push(marker); visibleMarkers.delete(marker); }
   });
+  if (toRemove.length) clusterGroup.removeLayers(toRemove);
+  if (toAdd.length) clusterGroup.addLayers(toAdd);
 
   Object.keys(shown).forEach(src => {
     document.getElementById('cnt_' + src).textContent = shown[src];
