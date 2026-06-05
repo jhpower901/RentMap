@@ -33,7 +33,7 @@ class ScheduleError(Exception):
         self.reason = reason
 
 
-_VALID_SOURCES = ("all_light", "naver", "dabang", "zigbang", "daangn")
+_VALID_SOURCES = ("all_light", "naver", "dabang", "zigbang", "daangn", "peterpan")
 # Free-form on the DB side, but we constrain at the API layer so the admin
 # UI / scheduler runner can switch on these without worrying about
 # unexpected variants leaking in.

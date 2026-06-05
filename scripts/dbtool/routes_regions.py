@@ -27,7 +27,7 @@ from . import audit, deps
 
 router = APIRouter()
 
-_VALID_SOURCE = {"all_light", "naver", "dabang", "zigbang", "daangn"}
+_VALID_SOURCE = {"all_light", "naver", "dabang", "zigbang", "daangn", "peterpan"}
 _VALID_STATUS = {"pending", "approved", "disabled"}
 
 
@@ -322,7 +322,7 @@ def list_schedules(_: rm_auth.User = Depends(deps.require_admin)):
 
 class CreateScheduleBody(BaseModel):
     region_id: int
-    source: str = Field(pattern="^(all_light|naver|dabang|zigbang|daangn)$")
+    source: str = Field(pattern="^(all_light|naver|dabang|zigbang|daangn|peterpan)$")
     cron_expr: str = Field(min_length=3, max_length=80)
     enabled: bool = True
 
@@ -366,7 +366,7 @@ def create_schedule(body: CreateScheduleBody, request: Request,
 class UpdateScheduleBody(BaseModel):
     cron_expr: str | None = Field(default=None, min_length=3, max_length=80)
     enabled: bool | None = None
-    source: str | None = Field(default=None, pattern="^(all_light|naver|dabang|zigbang|daangn)$")
+    source: str | None = Field(default=None, pattern="^(all_light|naver|dabang|zigbang|daangn|peterpan)$")
 
 
 @router.patch("/api/tool/region-schedules/{schedule_id}")

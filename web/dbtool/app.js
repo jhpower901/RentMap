@@ -561,6 +561,182 @@ function kindChip(kind) {
   return '<span class="chip indigo">❤️ 좋아요</span>';
 }
 
+// ── Bookmarks ──────────────────────────────────────────────────────────
+// Same shape as favorites minus the like/dislike axis. sort_order is the
+// user's visit order; transfers carry it verbatim so "1번 본 방, 2번 본
+// 방" labels survive an account-restore. Tombstone semantics mirror the
+// favorites tab so client localStorage merges behave identically.
+tabs.bookmarks = {
+  state: { bms: [], selected: new Set(), total: 0 },
+
+  async load() {
+    await this.refreshUsers();
+    $('bmReload').addEventListener('click', () => this.reload().catch((e) => toast(e.message, 'err')));
+    $('bmUserSelect').addEventListener('change', () => this.reload().catch((e) => toast(e.message, 'err')));
+    $('bmSelectAll').addEventListener('change', (e) => this.toggleAll(e.target.checked));
+    $('bmRows').addEventListener('change', (e) => {
+      const cb = e.target.closest('input[type=checkbox][data-key]');
+      if (!cb) return;
+      if (cb.checked) this.state.selected.add(cb.dataset.key);
+      else this.state.selected.delete(cb.dataset.key);
+    });
+    $('bmTransferBtn').addEventListener('click', () => this.transferSelected().catch((e) => toast(e.message, 'err')));
+    $('bmTransferAllBtn').addEventListener('click', () => this.transferAll().catch((e) => toast(e.message, 'err')));
+    $('bmBulkDeleteBtn').addEventListener('click', () => this.bulkDelete(false).catch((e) => toast(e.message, 'err')));
+    $('bmDeleteAllBtn').addEventListener('click', () => this.bulkDelete(true).catch((e) => toast(e.message, 'err')));
+    this.loaded = true;
+  },
+
+  refresh() { this.refreshUsers().catch((e) => toast(e.message, 'err')); },
+
+  async refreshUsers() {
+    const res = await api('/api/tool/users');
+    const users = res.users || [];
+    const sel = $('bmUserSelect');
+    sel.innerHTML = users.map((u) =>
+      `<option value="${u.id}">#${u.id} ${esc(u.username)}</option>`,
+    ).join('');
+    if (users.length) await this.reload();
+  },
+
+  async reload() {
+    const userId = Number($('bmUserSelect').value);
+    if (!userId) return;
+    const params = new URLSearchParams({
+      user_id: String(userId), limit: '500',
+    });
+    const src = $('bmSourceFilter').value;
+    if (src) params.set('source', src);
+    const q = $('bmSearch').value.trim();
+    if (q) params.set('q', q);
+    $('bmStatus').textContent = '불러오는 중...';
+    const res = await api(`/api/tool/bookmarks?${params}`);
+    this.state.bms = res.bookmarks || [];
+    this.state.total = res.total || 0;
+    this.state.selected.clear();
+    $('bmSelectAll').checked = false;
+    $('bmRows').innerHTML = this.state.bms.map((b) => `
+      <tr>
+        <td><input type="checkbox" data-key="${esc(b.key)}"></td>
+        <td class="num"><b>${b.sortOrder}</b></td>
+        <td class="mono ellipsis">${esc(b.key)}</td>
+        <td><span class="chip">${esc(b.source || '-')}</span></td>
+        <td class="mono">${esc(b.listingNo || '-')}</td>
+        <td class="ellipsis">${esc((b.entry && b.entry.title) || '-')}</td>
+        <td class="muted">${fmtTime(b.savedAt)}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty">북마크가 없습니다.</td></tr>';
+    $('bmStatus').textContent = `${this.state.bms.length}건 표시 · 사용자 합계 ${this.state.total}`;
+  },
+
+  toggleAll(check) {
+    this.state.selected.clear();
+    $$('input[type=checkbox][data-key]', $('bmRows')).forEach((cb) => {
+      cb.checked = check;
+      if (check) this.state.selected.add(cb.dataset.key);
+    });
+  },
+
+  async _runTransfer(keys, scopeLabel) {
+    const userId = Number($('bmUserSelect').value);
+    const users = (await api('/api/tool/users')).users || [];
+    const opts = users.filter((u) => u.id !== userId)
+      .map((u) => `<option value="${u.id}">#${u.id} ${esc(u.username)}</option>`).join('');
+    if (!opts) return toast('이전할 다른 사용자가 없습니다', 'err');
+    const m = await confirmModal({
+      title: scopeLabel,
+      html: `
+        <label class="field">대상 사용자
+          <select data-input="to">${opts}</select>
+        </label>
+        <label class="field">충돌 시
+          <select data-input="conflict">
+            <option value="skip">skip (대상에 있으면 그대로)</option>
+            <option value="overwrite">overwrite (덮어쓰기)</option>
+          </select>
+        </label>
+        <label class="field">방식
+          <select data-input="mode">
+            <option value="copy">copy (원본 유지)</option>
+            <option value="move">move (원본 삭제)</option>
+          </select>
+        </label>
+        <div class="warn">sort_order는 원본 값을 그대로 가져갑니다. 대상의 기존 번호와 겹치면 그대로 표시됩니다.</div>`,
+      confirmLabel: '미리보기',
+      extraInputs: ['to', 'conflict', 'mode'],
+    });
+    if (!m.ok) return;
+    const body = {
+      from_user_id: userId,
+      to_user_id: Number(m.values.to),
+      keys: keys || null,
+      mode: m.values.mode,
+      on_conflict: m.values.conflict,
+    };
+    const plan = await api('/api/tool/bookmarks/transfer/preview', {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    const c = await confirmModal({
+      title: '이전 실행 확인',
+      html: `
+        <div class="preview-counts">
+          <div class="box"><b>${fmtNum(plan.source)}</b><span>원본</span></div>
+          <div class="box"><b>${fmtNum(plan.conflictsOnTarget)}</b><span>충돌</span></div>
+          <div class="box"><b>${fmtNum(plan.wouldCopy)}</b><span>복사 예정</span></div>
+          <div class="box"><b>${fmtNum(plan.wouldOverwrite)}</b><span>덮어쓰기</span></div>
+          <div class="box"><b>${fmtNum(plan.wouldDeleteSource)}</b><span>원본 삭제</span></div>
+        </div>`,
+      confirmLabel: '실행',
+      danger: true,
+    });
+    if (!c.ok) return;
+    const r = await api('/api/tool/bookmarks/transfer', {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    toast(`복사 ${r.copied}건, 원본 삭제 ${r.deletedSource}건`);
+    await this.reload();
+  },
+
+  async transferSelected() {
+    const keys = Array.from(this.state.selected);
+    if (!keys.length) return toast('항목을 선택하세요', 'err');
+    await this._runTransfer(keys, `선택 ${keys.length}개 북마크 이전`);
+  },
+
+  async transferAll() {
+    await this._runTransfer(null, '필터 결과 북마크 전체 이전');
+  },
+
+  async bulkDelete(all) {
+    const userId = Number($('bmUserSelect').value);
+    const keys = all ? null : Array.from(this.state.selected);
+    if (!all && !keys.length) return toast('항목을 선택하세요', 'err');
+    const body = { user_id: userId, keys, all };
+    const plan = await api('/api/tool/bookmarks/bulk-delete/preview', {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    const scopeLabel = all ? '이 사용자의 북마크 전체' : `선택 ${keys.length}개`;
+    const m = await confirmModal({
+      title: '북마크 삭제 확인',
+      html: `
+        <div class="${all ? 'danger' : 'warn'}">
+          ${scopeLabel}을 삭제합니다.
+        </div>
+        <div class="preview-counts">
+          <div class="box"><b>${fmtNum(plan.wouldDelete)}</b><span>삭제 예정</span></div>
+        </div>
+        <p class="muted">tombstone이 함께 기록되어 브라우저 캐시가 복원하지 않습니다.</p>`,
+      confirmLabel: `${plan.wouldDelete}건 삭제`,
+      danger: true,
+    });
+    if (!m.ok) return;
+    const r = await api('/api/tool/bookmarks/bulk-delete', {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    toast(`${r.deleted}건 삭제`);
+    await this.reload();
+  },
+};
+
 // ── Listings ───────────────────────────────────────────────────────────
 tabs.listings = {
   state: { meta: null, listings: [], selected: new Set(), total: 0, offset: 0, limit: 100 },
@@ -958,7 +1134,7 @@ tabs.regions = {
 
   renderDetail(r) {
     const schedules = this.state.schedules.filter((s) => s.regionId === r.id);
-    const sourceOpts = ['all_light', 'naver', 'dabang', 'zigbang', 'daangn']
+    const sourceOpts = ['all_light', 'naver', 'dabang', 'zigbang', 'daangn', 'peterpan']
       .map((s) => `<option value="${s}">${s}</option>`).join('');
     return `
       <div style="padding:14px">

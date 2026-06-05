@@ -37,6 +37,7 @@ from dbtool import deps  # noqa: E402
 from dbtool.routes_auth import router as auth_router  # noqa: E402
 from dbtool.routes_users import router as users_router  # noqa: E402
 from dbtool.routes_favorites import router as favorites_router  # noqa: E402
+from dbtool.routes_bookmarks import router as bookmarks_router  # noqa: E402
 from dbtool.routes_listings import router as listings_router  # noqa: E402
 from dbtool.routes_events import router as events_router  # noqa: E402
 from dbtool.routes_regions import router as regions_router  # noqa: E402
@@ -128,6 +129,7 @@ async def guard(request: Request, call_next):
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(favorites_router)
+app.include_router(bookmarks_router)
 app.include_router(listings_router)
 app.include_router(events_router)
 app.include_router(regions_router)
