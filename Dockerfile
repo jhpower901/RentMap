@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV TZ=Asia/Seoul
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -22,4 +23,4 @@ COPY . .
 EXPOSE 8000
 
 # Run the web server by default
-CMD ["python", "scripts/server.py"]
+CMD ["python", "app/server.py"]

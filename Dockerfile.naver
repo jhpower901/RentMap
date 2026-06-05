@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV TZ=Asia/Seoul
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -13,4 +14,4 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
-CMD ["python", "scripts/scheduler_naver.py"]
+CMD ["python", "app/scheduler/naver.py"]
