@@ -26,11 +26,21 @@ h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:ce
 .count{font-size:13px;color:#666;margin-left:auto;font-weight:600}
 .layout{display:grid;grid-template-columns:1fr minmax(360px,400px);gap:14px;align-items:start}
 .layout>div:last-child{position:sticky;top:60px;align-self:start}
-@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;align-self:stretch;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow-x:scroll;overflow-y:auto;touch-action:pan-x pan-y}.count{margin-left:0}}
+/* 주소 컬럼: 풀 주소를 받지만 셀 자체는 좁게 유지하고 우측 정렬한다.
+   `direction:rtl`로 잘림(ellipsis)을 왼쪽에 두면 "…매탄동 508-13"처럼
+   동/번지(꼬리)만 보이게 된다. 한글은 BiDi 처리에서 자기 방향이 없는
+   "weak" 문자라 RTL 컨텍스트에서도 표시 순서는 유지되므로 안전. */
+.addr-cell{width:140px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums;color:#333;direction:rtl}
+.addr-cell .addr-inner{unicode-bidi:plaintext}
+/* 상세 패널의 주소 행 — 매물번호 행과 동일 스타일을 쓰지만 긴 주소가
+   잘리지 않도록 줄바꿈 허용 */
+.addr-detail-row{align-items:flex-start}
+.addr-detail-text{white-space:normal !important;word-break:keep-all;line-height:1.45}
+@media(max-width:960px){nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}nav::-webkit-scrollbar{display:none}.page{padding:10px;display:flex;flex-direction:column;height:calc(100dvh - 48px);overflow:hidden}h1{display:none;margin:0}.controls{flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:8px}.controls label,.controls input,.controls select{flex:0 0 auto}.layout{display:flex;flex:1 1 auto;min-height:0;flex-direction:column}.layout>div:last-child{order:-1;flex:0 0 auto;align-self:stretch;position:relative;top:auto}.table-wrap{flex:1 1 auto;min-height:0;overflow-x:auto;overflow-y:auto;touch-action:pan-x pan-y}.count{margin-left:0}}
 .map-box{height:min(620px,calc(100vh - 80px));min-height:420px;border-radius:10px;overflow:hidden;border:1px solid #ddd}
 @media(max-width:960px){.map-box{height:34dvh;min-height:180px;max-height:320px;border-radius:8px;position:relative;top:auto}}
 .table-wrap{width:100%;max-width:100%;overflow-x:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scrollbar-gutter:stable;border-radius:10px;box-shadow:0 1px 4px #0001}
-table{width:100%;border-collapse:collapse;background:#fff;min-width:900px}
+table{width:100%;border-collapse:collapse;background:#fff;min-width:760px}
 th{background:#f0f0f0;padding:8px 10px;text-align:left;font-size:12px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid #e0e0e0;position:relative}
 th:hover{background:#e4e4e4}
 th.sorted{color:var(--accent)}
@@ -129,3 +139,32 @@ tr.detail-row:hover td{background:#fcfcfd;cursor:default}
 .rentmap-marker-dot{display:block;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.18);transition:transform .12s,opacity .15s;pointer-events:none}
 .rentmap-marker:hover .rentmap-marker-dot{transform:scale(1.18)}
 .rentmap-marker.marker-dim .rentmap-marker-dot{opacity:.25;border-color:rgba(255,255,255,.7)}
+
+/* === 모바일 오버라이드 (파일 맨 마지막에 두어 위쪽 데스크탑 규칙들을
+   확실히 덮어쓰도록 함) === */
+@media(max-width:768px){
+  .mobile-hide{display:none !important}
+  .table-wrap{box-shadow:none;border-radius:6px;overflow-x:hidden}
+  #tbl{min-width:0;width:100%}
+  #tbl th,#tbl td{padding:5px 4px;font-size:12px}
+  #tbl th{font-size:11px;text-align:center}
+  /* 컬럼별 너비 - 합계 ~ 355px 안에 맞춘다 (375 - 페이지 패딩 20) */
+  #tbl th:nth-child(1),#tbl td:nth-child(1){width:4px;padding:0}
+  #tbl th:nth-child(2),#tbl td:nth-child(2){width:48px;padding:4px}
+  #tbl th[data-col="deposit"]{width:50px}
+  #tbl th[data-col="rent"]{width:38px}
+  #tbl th[data-col="total"]{width:48px}
+  .price{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
+  .total-price{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
+  .img-thumb,.no-img{width:44px;height:34px;border-radius:4px}
+  .no-img{font-size:9px}
+  /* 모바일은 너비가 빠듯 — addr-cell를 좁게 잡아두면 풀 주소가
+     direction:rtl로 왼쪽이 잘려 동/번지 꼬리만 보이게 된다 */
+  .addr-cell{width:104px;max-width:104px;min-width:0;font-size:11px;padding-right:4px !important;padding-left:2px !important;text-align:right}
+  /* 좋아요/싫어요/북마크 3개 - 좁은 공간에 맞춰 아이콘만 보여줌 */
+  .reaction-cell{min-width:0;width:72px;text-align:right;white-space:nowrap;padding:4px 2px}
+  .reaction-cell .reaction-btn,.reaction-cell .heart-btn{padding:1px 1px;font-size:13px}
+  #tbl thead th:last-child{min-width:0;width:72px}
+  /* 모바일에서 지도는 너무 크지 않게 - 표가 핵심 */
+  .map-box{height:28dvh;min-height:160px;max-height:260px}
+}

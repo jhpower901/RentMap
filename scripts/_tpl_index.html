@@ -20,6 +20,14 @@ html,body{height:100%;overflow:hidden}
 body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
 a{color:inherit;text-decoration:none}
 nav{display:flex;align-items:center;gap:4px;padding:8px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:relative;z-index:600}
+/* 모바일에서 네비가 2~3줄로 늘어지지 않게 한 줄 가로 스크롤로. 스크롤바
+   자체는 숨겨서 깔끔하게 보이게 한다 (스와이프 인식은 유지). */
+@media(max-width:768px){
+  nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:6px 10px;scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
+  nav a{padding:4px 9px;font-size:12px}
+  nav .brand{font-size:14px;margin-right:4px;padding:4px 6px}
+}
 nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px}
 nav .brand:hover{background:#f0f0f0}
 nav .brand-logo{width:20px;height:20px;display:inline-block;vertical-align:middle}

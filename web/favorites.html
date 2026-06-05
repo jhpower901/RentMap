@@ -139,6 +139,13 @@ nav a.active-nav{background:#222;color:#fff}
 .fav-card{background:#fff;border-radius:10px;margin-bottom:10px;box-shadow:0 1px 4px #0002;overflow:hidden}
 .fav-header{padding:11px 14px;display:flex;align-items:flex-start;gap:8px;cursor:pointer;flex-wrap:wrap}
 .fav-header:hover{background:#fafafa}
+/* 주소는 풀 주소를 그대로 받지만 좁게 잘려 동/번지 꼬리만 보이게 한다.
+   direction:rtl로 ellipsis가 왼쪽에 와서 "…매탄동 508-13" 모양이 된다.
+   한글은 BiDi 약방향 문자라 RTL 컨텍스트에서도 표시 순서는 유지됨.
+   전체 주소는 카드를 펼친 상세 패널에서 한 번에 확인+복사 가능. (PC 공통) */
+.fav-addr{margin-left:auto;text-align:right;color:#444;font-weight:500;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:130px;direction:rtl}
+.fav-addr .addr-inner{unicode-bidi:plaintext}
+.fav-sub{display:flex;align-items:center;gap:6px}
 /* Thumbnail at the start of each card header. Sized to match a stock listing
    thumb — small enough to keep the row compact, large enough that the user
    can recognise the room while scrolling a long list. */
@@ -245,7 +252,8 @@ nav a.active-nav{background:#222;color:#fff}
      card itself at all. */
   html,body{height:100%;overflow:hidden}
   body{font-size:13px;display:flex;flex-direction:column}
-  nav{position:relative;top:auto;flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  nav{position:relative;top:auto;flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
   nav a{padding:4px 9px;font-size:12px}
   nav .brand{font-size:14px;margin-right:4px}
   .page{flex:1 1 auto;min-height:0;height:auto;width:100%;max-width:100vw;padding:8px;display:flex;flex-direction:column;overflow:hidden}
@@ -429,7 +437,7 @@ nav a.active-nav{background:#222;color:#fff}
 <script src="auth.js?v=20260525-auth1"></script>
 <script src="favorites.js?v=20260602-fieldmerge"></script>
 <script src="area-filter.js?v=20260602-areaundo"></script>
-<script src="listing-info.js?v=20260527-naverurl"></script>
+<script src="listing-info.js?v=20260605-mobile7"></script>
 <script>
 const CRITERIA = [
   { key: 'daylight',    label: '☀️ 채광',     desc: '자연채광·햇빛' },
@@ -768,6 +776,12 @@ function buildCard(fav) {
   const listingNoHtml = d.id != null && d.id !== ''
     ? `<span class="fav-listing-no" title="매물번호 (탭하여 복사)" data-listing-id="${esc(d.id)}">#${esc(d.id)}</span>`
     : '';
+  const fullAddrStr = d.address || d.region || '';
+  // 풀 주소를 그대로 표시하되 .fav-addr가 좁은 폭 + direction:rtl로 잘리게
+  // 두어 동/번지 꼬리만 보이게 한다. 전체 주소는 상세 패널에서 복사 가능.
+  const addrHtml = fullAddrStr
+    ? `<span class="fav-addr" title="${esc(fullAddrStr)}"><span class="addr-inner">${esc(fullAddrStr)}</span></span>`
+    : '';
   card.innerHTML = `
     <div class="fav-header">
       ${thumbHtml}
@@ -780,7 +794,7 @@ function buildCard(fav) {
         ${statusHtml}
         ${scoreHtml}
         <span class="fav-price">보${fmtDep(d.deposit)} / 월${fmtRent(d.rent)}</span>
-        <span class="fav-sub">${esc(d.address || d.region || '')} ${listingNoHtml}</span>
+        <span class="fav-sub">${listingNoHtml}${addrHtml}</span>
       </div>
       <div class="fav-actions">
         ${(() => {
@@ -1220,11 +1234,14 @@ function renderDetail(card, fav, sid) {
   const score = calcScore(fav.rating);
   const savedAt = new Date(fav.savedAt).toLocaleDateString('ko-KR');
   const infoSection = buildListingInfoSection(freshData(fav), fav.source);
-  // After this innerHTML lands, attach the sparkline. We do it via setTimeout
-  // so the DOM is settled before the lazy-loader queries for placeholders.
+  // After this innerHTML lands, attach the sparkline + wire copy buttons.
+  // setTimeout so the DOM is settled before the lazy-loader queries for placeholders.
   setTimeout(() => {
     if (window.ListingInfo && window.ListingInfo.attachSparklines) {
       window.ListingInfo.attachSparklines(el, fav.source);
+    }
+    if (window.ListingInfo && window.ListingInfo.wireCopyButtons) {
+      window.ListingInfo.wireCopyButtons(el);
     }
   }, 0);
 

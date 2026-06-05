@@ -268,27 +268,12 @@
     // their open state across re-renders (filter changes, sort clicks, etc.).
     const openIds = new Set();
 
+    // 매물번호/주소 복사 버튼은 모두 listing-info.js의 wireCopyButtons가
+    // 일괄 wire-up한다. 이 함수는 호환을 위해 thin wrapper로 남겨둠.
     function wireListingIdCopy(root) {
-      const btn = root.querySelector('.listing-id-copy');
-      if (!btn) return;
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        const id = btn.dataset.listingId || '';
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(id);
-          } else {
-            const ta = document.createElement('textarea');
-            ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
-            document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-            document.body.removeChild(ta);
-          }
-          const orig = btn.textContent;
-          btn.textContent = '✓';
-          btn.classList.add('copied');
-          setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1200);
-        } catch (_) { /* swallow — user can still read the visible number */ }
-      });
+      if (window.ListingInfo && window.ListingInfo.wireCopyButtons) {
+        window.ListingInfo.wireCopyButtons(root);
+      }
     }
 
     function detailRowFor(r, colspan) {
@@ -373,19 +358,23 @@
         const imgCell = r.img1
           ? '<img class="img-thumb" data-src="' + imageSrc(r.img1, source) + '" loading="lazy" decoding="async" alt="" onerror="this.outerHTML=\'<div class=\\\'no-img\\\'>사진없음</div>\'">'
           : '<div class="no-img">사진없음</div>';
+        // 주소 컬럼은 풀 주소 그대로 — addr-cell의 좁은 폭 + 우측정렬 +
+        // direction:rtl 조합으로 광역 prefix는 왼쪽에서 ellipsis 처리되어
+        // 자연스럽게 가려진다. 전체 주소는 상세 패널(매물 정보)에서 복사 가능.
+        const fullAddr = r.address || r.region || '-';
         tr.innerHTML =
           '<td style="padding:0;width:6px;background:' + agencyColor(r.agency) + '"></td>' +
           '<td>' + imgCell + '</td>' +
           '<td class="price">' + fmtDeposit(r.deposit) + '</td>' +
           '<td class="price">' + fmtRent(r.rent) + '</td>' +
-          '<td>' + fmtRent(r.maint) + '</td>' +
+          '<td class="mobile-hide">' + fmtRent(r.maint) + '</td>' +
           '<td class="total-price">' + fmtRent(r.total) + '</td>' +
-          '<td>' + esc(r.type || '-') + '</td>' +
-          '<td>' + esc(fmtArea(r.area)) + '</td>' +
-          '<td>' + esc(r.floor || '-') + '</td>' +
-          '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.address || r.region || '-') + '</td>' +
-          '<td class="agency-cell">' + esc(agencyLabel(r.agency, source)) + (r.phone ? '<br><span class="phone-small">' + esc(r.phone) + '</span>' : '') + '</td>' +
-          '<td><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
+          '<td class="mobile-hide">' + esc(r.type || '-') + '</td>' +
+          '<td class="mobile-hide">' + esc(fmtArea(r.area)) + '</td>' +
+          '<td class="mobile-hide">' + esc(r.floor || '-') + '</td>' +
+          '<td class="addr-cell" title="' + esc(fullAddr) + '"><span class="addr-inner">' + esc(fullAddr) + '</span></td>' +
+          '<td class="agency-cell mobile-hide">' + esc(agencyLabel(r.agency, source)) + (r.phone ? '<br><span class="phone-small">' + esc(r.phone) + '</span>' : '') + '</td>' +
+          '<td class="mobile-hide"><a href="' + r.url + '" target="_blank" class="link-btn">보기</a></td>' +
           '<td class="reaction-cell">' +
             '<button class="heart-btn reaction-btn fav-like-btn" type="button" title="좋아요" ' +
               'data-fav-id="' + favId + '" data-fav-source="' + favSource + '">🤍</button>' +

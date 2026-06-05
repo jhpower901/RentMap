@@ -20,6 +20,13 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font-family:'Noto Sans KR',sans-serif;font-size:14px;background:#f5f7fa;color:#222}
 a{color:inherit;text-decoration:none}
 nav{display:flex;align-items:center;gap:4px;padding:10px 16px;background:#fff;border-bottom:1px solid #e0e0e0;flex-wrap:wrap;position:sticky;top:0;z-index:500}
+/* 모바일에서 네비가 줄바꿈되지 않도록 가로 스크롤. 스크롤바는 숨겨 깔끔하게. */
+@media(max-width:760px){
+  nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:6px 10px;scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
+  nav a{padding:4px 9px;font-size:12px}
+  nav .brand{font-size:14px;margin-right:4px;padding:4px 6px}
+}
 nav .brand{font-weight:700;font-size:16px;margin-right:8px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px}
 nav .brand:hover{background:#f0f0f0}
 nav .brand-logo{width:20px;height:20px;display:inline-block;vertical-align:middle}
@@ -56,7 +63,11 @@ h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:ce
 .bm-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
 .bm-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
 .bm-price{font-size:13px;color:#c00;font-weight:700;white-space:nowrap}
-.bm-sub{font-size:12px;color:#888;flex-basis:100%;margin-top:2px}
+.bm-sub{font-size:12px;color:#888;flex-basis:100%;margin-top:2px;display:flex;align-items:center;gap:6px}
+/* 주소는 풀 주소 + direction:rtl 트릭으로 왼쪽이 잘려서 동/번지만 보이게.
+   전체 주소는 카드 상세 패널에서 한 번에 확인 + 복사 가능. (PC/모바일 공통) */
+.bm-addr{margin-left:auto;text-align:right;color:#444;font-weight:500;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:130px;direction:rtl}
+.bm-addr .addr-inner{unicode-bidi:plaintext}
 .bm-actions{display:flex;gap:5px;align-items:center;flex-shrink:0}
 .expand-arrow{font-size:12px;color:#bbb;margin-left:2px;transition:transform .2s;align-self:center}
 .bm-card.open .expand-arrow{transform:rotate(180deg)}
@@ -166,7 +177,7 @@ h1{font-size:20px;font-weight:700;margin-bottom:12px;display:flex;align-items:ce
 <script src="auth.js?v=20260525-auth1"></script>
 <script src="favorites.js?v=20260602-fieldmerge"></script>
 <script src="bookmarks.js?v=20260602-bm1"></script>
-<script src="listing-info.js?v=20260527-naverurl"></script>
+<script src="listing-info.js?v=20260605-mobile7"></script>
 <script>
 const SRC_COLOR = { dabang:'#326CF9', daangn:'#FF6F00', zigbang:'#EF4444', naver:'#03C75A', manual:'#607D8B', peterpan:'#7C3AED' };
 const SRC_NAME  = { dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버', manual:'직접추가', peterpan:'피터팬' };
@@ -233,7 +244,12 @@ function buildCard(bm, idx, total) {
           <span class="badge" style="background:${srcColor}">${esc(srcName)}</span>
           <span class="bm-title">${esc(d.title || d.address || '제목없음')}</span>
           <span class="bm-price">보${fmtDep(d.deposit)} / 월${fmtRent(d.rent)}</span>
-          <span class="bm-sub">${esc(d.address || d.region || '')}</span>
+          ${(() => {
+            const fullA = d.address || d.region || '';
+            return fullA
+              ? `<span class="bm-sub"><span class="bm-addr" title="${esc(fullA)}"><span class="addr-inner">${esc(fullA)}</span></span></span>`
+              : '<span class="bm-sub"></span>';
+          })()}
         </div>
         <div class="bm-actions">
           ${(() => {
@@ -300,6 +316,10 @@ function renderDetail(card, bm, sid) {
       <button class="btn detail-collapse" type="button">접기</button>
     </div>
   `;
+  // listing-info.js가 그린 매물번호/주소 복사 버튼 wire-up
+  if (window.ListingInfo && window.ListingInfo.wireCopyButtons) {
+    window.ListingInfo.wireCopyButtons(target);
+  }
   // ── Note (debounced save) ──
   const noteEl = document.getElementById('note_' + sid);
   noteEl.value = bm.note || '';
