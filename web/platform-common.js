@@ -5,7 +5,7 @@
     '#808000','#000075','#6F4E37','#C71585','#556B2F',
   ];
   const PLATFORM_NAMES = {
-    dabang: '다방', daangn: '당근부동산', zigbang: '직방', naver: '네이버부동산',
+    dabang: '다방', daangn: '당근부동산', zigbang: '직방', naver: '네이버부동산', peterpan: '피터팬',
   };
 
   function esc(v) {

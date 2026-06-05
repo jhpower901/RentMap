@@ -47,7 +47,8 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
 .chip.platform-dabang{background:#e8f0ff;color:#1a4abf}
 .chip.platform-daangn{background:#fff3e0;color:#b85c00}
 .chip.platform-zigbang{background:#fff0f0;color:#c0392b}
-.chip.platform-naver{background:#e8f5e9;color:#1b6b2b}
+.chip.platform-naver_land{background:#e8f5e9;color:#1b6b2b}
+.chip.platform-peterpan{background:#f1ebff;color:#5b21b6}
 .chip.event-discovered{background:#e8f5e9;color:#2e7d32}
 .chip.event-price_changed{background:#fff8e1;color:#8a5c00}
 .chip.event-removed{background:#ffebee;color:#c62828}
@@ -149,6 +150,7 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
         <label><input type="checkbox" value="daangn" checked> 당근</label>
         <label><input type="checkbox" value="zigbang" checked> 직방</label>
         <label><input type="checkbox" value="naver_land" checked> 네이버</label>
+        <label><input type="checkbox" value="peterpan" checked> 피터팬</label>
       </div>
     </div>
 
@@ -188,7 +190,7 @@ h2{font-size:18px;font-weight:700;margin-bottom:4px}
 <div class="toast" id="toast"></div>
 
 <script>
-const PLATFORM_LABELS = {dabang:'다방',daangn:'당근',zigbang:'직방',naver_land:'네이버'};
+const PLATFORM_LABELS = {dabang:'다방',daangn:'당근',zigbang:'직방',naver_land:'네이버',peterpan:'피터팬'};
 const EVENT_LABELS = {
   discovered:'🆕 신규',price_changed:'💰 가격변경',removed:'❌ 삭제됨',
   reappeared:'♻️ 재등장',detail_changed:'✏️ 상세변경',

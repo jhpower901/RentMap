@@ -471,7 +471,7 @@ document.addEventListener('visibilitychange', () => {
 // hydrate stale snapshots. Errors are non-fatal — without it the cards
 // just show the saved-at-bookmark-time payload.
 if (window.RegionData) {
-  RegionData.loadAll(['dabang', 'daangn', 'zigbang', 'naver'], render);
+  RegionData.loadAll(['dabang', 'daangn', 'zigbang', 'naver', 'peterpan'], render);
 }
 
 Bookmarks.ready.then(render);

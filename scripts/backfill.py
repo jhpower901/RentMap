@@ -50,7 +50,7 @@ DEFAULT_DATA_DIR = ROOT / "data"
 # region-architecture for how slug propagates from regions.slug through
 # RENTMAP_AREA_NAME into the CSV filename.
 FILENAME_RE = re.compile(
-    r"^(?P<src>dabang|zigbang|daangn|naver_land)_(?P<area>[a-z0-9][a-z0-9_-]*)_"
+    r"^(?P<src>dabang|zigbang|daangn|naver_land|peterpan)_(?P<area>[a-z0-9][a-z0-9_-]*)_"
     r"(?P<date>\d{4}-\d{2}-\d{2})\.csv$"
 )
 PLATFORM_ALIASES = {
@@ -59,6 +59,7 @@ PLATFORM_ALIASES = {
     "zigbang": "zigbang",
     "daangn": "daangn",
     "naver_land": "naver_land",
+    "peterpan": "peterpan",
 }
 
 

@@ -444,9 +444,9 @@ const CRITERIA = [
   { key: 'storage',     label: '📦 수납',     desc: '옷장·수납공간' },
 ];
 
-const SRC_COLOR = { dabang:'#326CF9', daangn:'#FF6F00', zigbang:'#EF4444', naver:'#03C75A', manual:'#607D8B' };
-const SRC_NAME  = { dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버', manual:'직접추가' };
-const DATA_KEY  = { dabang:'DATA_DABANG', daangn:'DATA_DAANGN', zigbang:'DATA_ZIGBANG', naver:'DATA_NAVER' };
+const SRC_COLOR = { dabang:'#326CF9', daangn:'#FF6F00', zigbang:'#EF4444', naver:'#03C75A', manual:'#607D8B', peterpan:'#7C3AED' };
+const SRC_NAME  = { dabang:'다방', daangn:'당근', zigbang:'직방', naver:'네이버', manual:'직접추가', peterpan:'피터팬' };
+const DATA_KEY  = { dabang:'DATA_DABANG', daangn:'DATA_DAANGN', zigbang:'DATA_ZIGBANG', naver:'DATA_NAVER', peterpan:'DATA_PETERPAN' };
 const DEFAULT_MAP_CENTER = [37.2779, 127.0438];
 const openFavKeys = new Set();
 let favoriteMap = null;
@@ -1531,7 +1531,7 @@ backfillVisitedFromRatings();
 // listing originally came from. A user who favourited a listing in 강남
 // while currently viewing 아주대 still sees its title/deposit/rent without
 // having to switch regions first. See loadAllRegions in region-data-loader.
-RegionData.loadAllRegions(['dabang', 'daangn', 'zigbang', 'naver'], renderList);
+RegionData.loadAllRegions(['dabang', 'daangn', 'zigbang', 'naver', 'peterpan'], renderList);
 </script>
 </body>
 </html>

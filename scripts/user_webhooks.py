@@ -30,11 +30,11 @@ VALID_EVENT_TYPES = frozenset([
     "discovered", "price_changed", "detail_changed",
     "removed", "reappeared", "agent_changed", "image_changed",
 ])
-VALID_PLATFORMS = frozenset(["dabang", "daangn", "zigbang", "naver_land"])
+VALID_PLATFORMS = frozenset(["dabang", "daangn", "zigbang", "naver_land", "peterpan"])
 MAX_WEBHOOKS_PER_USER = 5
 
 DEFAULT_EVENT_TYPES = ["discovered", "price_changed", "removed", "reappeared"]
-DEFAULT_PLATFORMS = ["dabang", "daangn", "zigbang", "naver_land"]
+DEFAULT_PLATFORMS = ["dabang", "daangn", "zigbang", "naver_land", "peterpan"]
 
 
 class WebhookError(Exception):

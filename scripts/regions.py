@@ -551,7 +551,7 @@ def _cleanup_region_files(slug: str) -> dict[str, int]:
     counts = {"csvs": 0, "json": 0, "web_js": 0}
 
     # CSVs the crawlers wrote: <source>_<slug>_<date>.csv
-    for prefix in ("dabang", "daangn", "zigbang", "naver_land"):
+    for prefix in ("dabang", "daangn", "zigbang", "naver_land", "peterpan"):
         for f in data_dir.glob(f"{prefix}_{slug}_*.csv"):
             try:
                 f.unlink()
@@ -575,7 +575,7 @@ def _cleanup_region_files(slug: str) -> dict[str, int]:
             pass
 
     # gen-web output: data_<source>_<slug>.js per platform.
-    for src in ("dabang", "daangn", "zigbang", "naver"):
+    for src in ("dabang", "daangn", "zigbang", "naver", "peterpan"):
         f = web_dir / f"data_{src}_{slug}.js"
         if f.exists():
             try:

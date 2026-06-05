@@ -2,8 +2,8 @@
 # Production deploy: git pull + rebuild + restart, preserving the auto-
 # generated web bundles that are no longer tracked.
 #
-# web/dabang.html, daangn.html, zigbang.html, naver.html, index.html, and
-# all data_*_<slug>.js files are produced by ``rentmap.py gen-web`` after
+# web/dabang.html, daangn.html, zigbang.html, naver.html, peterpan.html,
+# index.html, and all data_*_<slug>.js files are produced by ``rentmap.py gen-web`` after
 # every crawl. Since 69278e8 they're .gitignored, so ``git pull`` deletes
 # whatever was checked in before. Without preservation the platform pages
 # 404 until the next scheduled crawl regenerates them (up to ~6h).
@@ -79,7 +79,7 @@ log "backing up auto-generated web files to $BACKUP_DIR"
 # Globs may not match anything on a fresh clone; failglob would abort.
 # `|| true` keeps us going so the first-ever deploy doesn't break.
 cp web/dabang.html web/daangn.html web/zigbang.html \
-   web/naver.html  web/index.html  "$BACKUP_DIR"/ 2>/dev/null || true
+   web/naver.html  web/peterpan.html  web/index.html  "$BACKUP_DIR"/ 2>/dev/null || true
 cp web/data_*.js "$BACKUP_DIR"/ 2>/dev/null || true
 BACKUP_COUNT=$(find "$BACKUP_DIR" -maxdepth 1 -type f | wc -l)
 log "backed up $BACKUP_COUNT file(s)"

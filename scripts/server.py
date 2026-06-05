@@ -26,7 +26,7 @@ import uvicorn
 ROOT = Path(__file__).resolve().parent.parent
 RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
-MAIN_CRAWL_PLATFORM_CODES = ("dabang", "zigbang", "daangn")
+MAIN_CRAWL_PLATFORM_CODES = ("dabang", "zigbang", "daangn", "peterpan")
 MISSING_RETRY_LIMIT = 2
 # CRAWL_LOCK assigned after region_runner is imported below. We share
 # region_runner's container-global lock so the hourly missing-retry
@@ -38,7 +38,7 @@ CRAWL_LOCK: threading.Lock
 # Sources this container is the sole owner of. Naver runs in the playwright
 # image (rentmap-naver / scheduler_naver.py), so we never schedule it here
 # — region_scheduler_sync filters DB rows by this tuple.
-ALLOWED_SOURCES_SERVER: tuple[str, ...] = ("all_light", "dabang", "zigbang", "daangn")
+ALLOWED_SOURCES_SERVER: tuple[str, ...] = ("all_light", "dabang", "zigbang", "daangn", "peterpan")
 
 
 def _ts() -> str:
@@ -1201,13 +1201,14 @@ async def admin_delete_region_schedule(schedule_id: int,
 # ─────────────────────────────────────────────────────────────────────────────
 # Listings (global data, login required)
 # ─────────────────────────────────────────────────────────────────────────────
-_VALID_SOURCES = {"dabang", "daangn", "zigbang", "naver"}
+_VALID_SOURCES = {"dabang", "daangn", "zigbang", "naver", "peterpan"}
 _SOURCE_TO_PLATFORM_CODE = {
     # UI uses short codes; DB platforms table stores "naver_land" for naver.
     "dabang": "dabang",
     "daangn": "daangn",
     "zigbang": "zigbang",
     "naver": "naver_land",
+    "peterpan": "peterpan",
 }
 
 
