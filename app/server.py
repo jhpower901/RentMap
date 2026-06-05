@@ -25,7 +25,7 @@ import psycopg
 import uvicorn
 
 ROOT = Path(__file__).resolve().parent.parent
-RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
+RENTMAP_CLI = ROOT / "app" / "crawlers" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 MAIN_CRAWL_PLATFORM_CODES = ("dabang", "zigbang", "daangn", "peterpan")
 MISSING_RETRY_LIMIT = 2
@@ -80,8 +80,7 @@ def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
     'missing' in either the global listings row or any region row.
     """
     try:
-        sys.path.insert(0, str(ROOT / "scripts"))
-        from db import session  # noqa: WPS433
+        from app.db import session  # noqa: WPS433
         with session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -188,8 +187,7 @@ def run_webhook_flush(trigger: str = "manual") -> None:
     try:
         # Local import keeps DB / requests out of server startup if the worker
         # module ever gains heavier imports.
-        sys.path.insert(0, str(ROOT / "scripts"))
-        from webhook_worker import flush_once  # noqa: WPS433 — intentional late import
+        from app.scheduler.webhook_worker import flush_once  # noqa: WPS433 — intentional late import
         counts = flush_once()
         nonzero = {k: v for k, v in counts.items() if v}
         if nonzero:
@@ -207,8 +205,7 @@ def run_expired_session_cleanup() -> None:
     accumulating forever. A trivial hourly DELETE keeps the table bounded.
     """
     try:
-        sys.path.insert(0, str(ROOT / "scripts"))
-        from db import session  # noqa: WPS433
+        from app.db import session  # noqa: WPS433
         with session() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM sessions WHERE expires_at < now()")
             n = cur.rowcount or 0
@@ -318,19 +315,18 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # ─────────────────────────────────────────────────────────────────────────────
 # Auth (sessions, signup/login/logout, middleware)
 # ─────────────────────────────────────────────────────────────────────────────
-sys.path.insert(0, str(ROOT / "scripts"))
-import auth  # noqa: E402
-import favorites as fav_store  # noqa: E402
-import bookmarks as bookmark_store  # noqa: E402
-import area_filters as area_store  # noqa: E402
-import filter_preferences as filter_pref_store  # noqa: E402
-import invites as invite_store  # noqa: E402
-import user_webhooks as webhook_store  # noqa: E402
-import regions as region_store  # noqa: E402
-import region_schedules as schedule_store  # noqa: E402
-import region_runner  # noqa: E402
-import region_scheduler_sync  # noqa: E402
-from db import session as db_session  # noqa: E402
+from app.api import auth
+from app.api import favorites as fav_store
+from app.api import bookmarks as bookmark_store
+from app.api import area_filters as area_store
+from app.api import filter_preferences as filter_pref_store
+from app.api import invites as invite_store
+from app.api import user_webhooks as webhook_store
+from app.api import regions as region_store
+from app.api import region_schedules as schedule_store
+from app.crawlers import region_runner
+from app.crawlers import region_scheduler_sync
+from app.db import session as db_session
 
 # Bind the forward-declared CRAWL_LOCK to the shared region_runner one.
 CRAWL_LOCK = region_runner.CRAWL_LOCK
@@ -1266,7 +1262,7 @@ def price_history(source: str, listing_no: str, limit: int = 60,
 
     platform_code = _SOURCE_TO_PLATFORM_CODE[source]
     try:
-        from db import session, DBConfigError  # noqa: WPS433
+        from app.db import session, DBConfigError  # noqa: WPS433
     except ImportError as exc:
         raise HTTPException(status_code=503, detail=f"db module unavailable: {exc}")
 

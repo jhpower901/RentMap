@@ -32,8 +32,7 @@ from typing import Optional
 import bcrypt
 from fastapi import Cookie, HTTPException, Request, Response
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import session  # noqa: E402
+from app.db import session  # noqa: E402
 
 # bcrypt 4.x refuses passwords over 72 bytes outright (no silent truncation).
 # We SHA-256 → base64 the plaintext first so arbitrarily long passwords map to

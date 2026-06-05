@@ -15,9 +15,8 @@ from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-import auth as rm_auth  # noqa: E402
-from db import session as db_session  # noqa: E402
+from app.api import auth as rm_auth
+from app.db import session as db_session
 
 from . import deps
 from . import audit

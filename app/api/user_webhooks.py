@@ -16,8 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import session  # noqa: E402
+from app.db import session  # noqa: E402
 
 _DISCORD_URL_RE = re.compile(
     r'^https://discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$'

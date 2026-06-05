@@ -30,8 +30,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-ROOT = Path(__file__).resolve().parent.parent
-RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
+ROOT = Path(__file__).resolve().parent.parent.parent
+RENTMAP_CLI = ROOT / "app" / "crawlers" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 NAVER_PLATFORM_CODES = ("naver_land",)
 MISSING_RETRY_LIMIT = 1
@@ -46,9 +46,8 @@ def _ts() -> str:
     return datetime.now(TZ).strftime("%H:%M:%S")
 
 
-sys.path.insert(0, str(ROOT / "scripts"))
-import region_runner  # noqa: E402
-import region_scheduler_sync  # noqa: E402
+from app.crawlers import region_runner
+from app.crawlers import region_scheduler_sync
 
 # Reuse the container-global crawl lock that ``region_runner`` uses to
 # serialize cross-region crawls. Previously this file owned a separate
@@ -88,7 +87,7 @@ def _run_rentmap(args: list[str], *, timeout_s: int, label: str) -> int | None:
 def run_webhook_flush(trigger: str = "manual") -> None:
     """Drain pending listing_status_events to Discord after naver reconcile."""
     try:
-        from webhook_worker import flush_once  # noqa: WPS433
+        from app.scheduler.webhook_worker import flush_once  # noqa: WPS433
         counts = flush_once()
         nonzero = {k: v for k, v in counts.items() if v}
         if nonzero:
@@ -102,7 +101,7 @@ def _missing_queue_count(platform_codes: tuple[str, ...]) -> int:
     server._missing_queue_count. Per-region missing rows live in
     listing_regions post-migration 012; legacy globals stay valid too."""
     try:
-        from db import session  # noqa: WPS433
+        from app.db import session  # noqa: WPS433
         with session() as conn, conn.cursor() as cur:
             cur.execute(
                 """

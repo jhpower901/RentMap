@@ -2,9 +2,9 @@
 
 Usage:
 
-    python scripts/backfill.py            # all *_2026-*.csv in data/
-    python scripts/backfill.py --date 2026-05-24
-    python scripts/backfill.py --csv data/dabang_ajou_2026-05-24.csv
+    python app/tools/backfill.py            # all *_2026-*.csv in data/
+    python app/tools/backfill.py --date 2026-05-24
+    python app/tools/backfill.py --csv data/dabang_ajou_2026-05-24.csv
 
 Behavior:
 - Defaults to ``--dry-run-webhooks`` so reseeding never spams Discord. Pass
@@ -32,10 +32,8 @@ from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-# Local imports — make scripts/ importable when run directly.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import session  # noqa: E402
-from reconcile import reconcile_crawl  # noqa: E402
+from app.db import session
+from app.crawlers.reconcile import reconcile_crawl
 
 log = logging.getLogger(__name__)
 KST = ZoneInfo("Asia/Seoul")

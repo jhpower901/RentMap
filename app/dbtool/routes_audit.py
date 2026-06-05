@@ -19,8 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-import auth as rm_auth  # noqa: E402
+from app.api import auth as rm_auth
 
 from . import audit, deps
 

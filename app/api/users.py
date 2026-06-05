@@ -2,14 +2,14 @@
 
 Commands:
 
-    python scripts/users.py create-admin <username>     # prompts for password
-    python scripts/users.py create <username>           # non-admin
-    python scripts/users.py reset-password <username>
-    python scripts/users.py list
-    python scripts/users.py deactivate <username>
-    python scripts/users.py activate <username>
-    python scripts/users.py delete-user <username> [--yes]
-    python scripts/users.py migrate-globals --to <username>
+    python app/api/users.py create-admin <username>     # prompts for password
+    python app/api/users.py create <username>           # non-admin
+    python app/api/users.py reset-password <username>
+    python app/api/users.py list
+    python app/api/users.py deactivate <username>
+    python app/api/users.py activate <username>
+    python app/api/users.py delete-user <username> [--yes]
+    python app/api/users.py migrate-globals --to <username>
 
 ``migrate-globals`` is a one-shot tool for the Caddy-basic-auth → self-login
 transition: it assigns every existing favorites / favorite_deleted row to the
@@ -29,9 +29,8 @@ import sys
 import re
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import session  # noqa: E402
-import auth  # noqa: E402
+from app.db import session  # noqa: E402
+from app.api import auth  # noqa: E402
 
 log = logging.getLogger(__name__)
 

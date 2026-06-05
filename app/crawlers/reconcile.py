@@ -1398,11 +1398,7 @@ def reconcile_csv_rows_safely(
     try:
         # Late import — keeps every CLI command runnable in containers that
         # don't have psycopg installed yet (e.g. a CSV-only smoke environment).
-        import sys
-        from pathlib import Path as _Path
-
-        sys.path.insert(0, str(_Path(__file__).resolve().parent))
-        from db import session, DBConfigError  # noqa: WPS433
+        from app.db import session, DBConfigError  # noqa: WPS433
     except ImportError as exc:
         print(f"{_ts()} [reconcile] {label}: skipped - db module unavailable ({exc})")
         return None

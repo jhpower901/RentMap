@@ -28,8 +28,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-ROOT = Path(__file__).resolve().parent.parent
-RENTMAP_CLI = ROOT / "scripts" / "rentmap.py"
+ROOT = Path(__file__).resolve().parent.parent.parent
+RENTMAP_CLI = ROOT / "app" / "crawlers" / "rentmap.py"
 TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 
 
@@ -37,9 +37,8 @@ def _ts() -> str:
     return datetime.now(TZ).strftime("%H:%M:%S")
 
 
-sys.path.insert(0, str(ROOT / "scripts"))
-import regions as region_store  # noqa: E402
-import region_schedules as schedule_store  # noqa: E402
+from app.api import regions as region_store
+from app.api import region_schedules as schedule_store
 
 
 # Per-schedule mutex. APScheduler's ``max_instances=1`` covers the in-process
@@ -367,8 +366,7 @@ def _maybe_run_missing_retry(platforms: tuple[str, ...], env: dict[str, str],
 def _maybe_run_webhook_flush(trigger: str) -> None:
     """Drain pending listing_status_events. Failure never kills the run."""
     try:
-        sys.path.insert(0, str(ROOT / "scripts"))
-        from webhook_worker import flush_once  # noqa: WPS433
+        from app.scheduler.webhook_worker import flush_once  # noqa: WPS433
         counts = flush_once()
         nonzero = {k: v for k, v in counts.items() if v}
         if nonzero:

@@ -31,9 +31,7 @@ from typing import Any, Callable
 from apscheduler.schedulers.base import BaseScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-import region_schedules as schedule_store  # noqa: E402
+from app.api import region_schedules as schedule_store
 
 log = logging.getLogger(__name__)
 

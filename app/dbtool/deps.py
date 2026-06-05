@@ -21,11 +21,8 @@ from typing import Iterator, Optional
 import psycopg
 from fastapi import Cookie, HTTPException, Request, Response
 
-# Reuse the production password hashing + User dataclass.
-ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-import auth as rm_auth  # noqa: E402
-from db import connect, session as db_session  # noqa: E402
+from app.api import auth as rm_auth
+from app.db import connect, session as db_session
 
 from .audit import Actor  # noqa: E402
 

@@ -37,9 +37,8 @@ from typing import Any
 
 import requests
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import session  # noqa: E402
-import user_webhooks as webhook_store  # noqa: E402
+from app.db import session
+from app.api import user_webhooks as webhook_store
 
 log = logging.getLogger(__name__)
 

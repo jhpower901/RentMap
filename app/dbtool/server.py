@@ -31,17 +31,16 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
-from dbtool import deps  # noqa: E402
-from dbtool.routes_auth import router as auth_router  # noqa: E402
-from dbtool.routes_users import router as users_router  # noqa: E402
-from dbtool.routes_favorites import router as favorites_router  # noqa: E402
-from dbtool.routes_bookmarks import router as bookmarks_router  # noqa: E402
-from dbtool.routes_listings import router as listings_router  # noqa: E402
-from dbtool.routes_events import router as events_router  # noqa: E402
-from dbtool.routes_regions import router as regions_router  # noqa: E402
-from dbtool.routes_audit import router as audit_router  # noqa: E402
+from app.dbtool import deps
+from app.dbtool.routes_auth import router as auth_router
+from app.dbtool.routes_users import router as users_router
+from app.dbtool.routes_favorites import router as favorites_router
+from app.dbtool.routes_bookmarks import router as bookmarks_router
+from app.dbtool.routes_listings import router as listings_router
+from app.dbtool.routes_events import router as events_router
+from app.dbtool.routes_regions import router as regions_router
+from app.dbtool.routes_audit import router as audit_router
 
 
 WEB_ROOT = ROOT / "web" / "dbtool"

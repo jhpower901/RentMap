@@ -17,7 +17,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./web:/app/web
-      - ./scripts:/app/scripts
+      - ./app:/app/app
       - ./db:/app/db                # migration .sql files
     environment:
       - TZ=Asia/Seoul
@@ -86,7 +86,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./web:/app/web
-      - ./scripts:/app/scripts
+      - ./app:/app/app
       - ./db:/app/db
     environment:
       - TZ=Asia/Seoul
@@ -132,7 +132,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: rentmap-dbtool
-    command: python scripts/dbtool/server.py
+    command: python app/dbtool/server.py
     expose:
       - "8001"
     networks:
@@ -146,7 +146,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./web:/app/web
-      - ./scripts:/app/scripts
+      - ./app:/app/app
       - ./db:/app/db
     environment:
       - TZ=Asia/Seoul

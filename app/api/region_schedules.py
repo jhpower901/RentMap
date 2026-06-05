@@ -21,8 +21,7 @@ from typing import Any
 
 from apscheduler.triggers.cron import CronTrigger
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import session  # noqa: E402
+from app.db import session  # noqa: E402
 
 
 class ScheduleError(Exception):

@@ -32,9 +32,7 @@ from pathlib import Path
 
 import psycopg
 
-# Local import — adjust if you move db.py.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db import session, healthcheck  # noqa: E402
+from app.db import session, healthcheck
 
 ROOT = Path(__file__).resolve().parent.parent
 MIGRATIONS_DIR = ROOT / "db" / "migrations"

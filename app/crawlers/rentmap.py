@@ -26,7 +26,7 @@ from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
 import requests
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 # Today's date in the container/host local timezone (the rentmap-server image
 # sets TZ=Asia/Seoul). Schedulers always pass --date explicitly, so this only
 # affects manual CLI invocations — and there "today" is the expected default.
@@ -2913,7 +2913,7 @@ def _reconcile_after_crawl(platform_code: str, rows: list[dict[str, Any]], label
 def finalize_missing(args: argparse.Namespace) -> None:
     """Finalize the in-schedule missing retry queue for selected platforms."""
     try:
-        from db import session
+        from app.db import session
         from reconcile import finalize_missing_queue
     except ImportError as exc:
         raise RuntimeError(f"finalize-missing unavailable: {exc}") from exc
@@ -2953,7 +2953,7 @@ def _read_db_missing_candidates(platform_codes: list[str]) -> list[dict[str, Any
     Plus a legacy DISTINCT branch for pre-migration items still flagged
     in listings.current_status.
     """
-    from db import session  # type: ignore
+    from app.db import session  # type: ignore
 
     with session() as conn, conn.cursor() as cur:
         cur.execute(
@@ -3211,7 +3211,7 @@ def _probe_missing_row(
 def retry_missing(args: argparse.Namespace) -> int:
     """Probe only listings already marked missing and update that retry queue."""
     try:
-        from db import session
+        from app.db import session
         from reconcile import reconcile_missing_probe
     except ImportError as exc:
         raise RuntimeError(f"retry-missing unavailable: {exc}") from exc
@@ -3396,7 +3396,7 @@ def _read_db_active(platform_code: str, label: str,
     cold-start before migration 012 is applied.
     """
     # Late import so the CSV-only path (--source csv) doesn't pay for psycopg.
-    from db import session, DBConfigError  # type: ignore
+    from app.db import session, DBConfigError  # type: ignore
 
     try:
         with session() as conn, conn.cursor() as cur:
@@ -4180,7 +4180,7 @@ def _resolve_region_id_for_gen_web(slug: str, source: str) -> int | None:
     if source == "csv" or not slug:
         return None
     try:
-        from db import session, DBConfigError  # type: ignore
+        from app.db import session, DBConfigError  # type: ignore
     except ImportError:
         return None
     try:
@@ -4208,7 +4208,7 @@ def gen_web(args: argparse.Namespace) -> None:
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    tpl_dir = Path(__file__).resolve().parent
+    tpl_dir = ROOT / "web" / "templates"
     tpl_platform = (tpl_dir / "_tpl_platform.html").read_text(encoding="utf-8")
     tpl_index = (tpl_dir / "_tpl_index.html").read_text(encoding="utf-8")
 
@@ -4726,12 +4726,11 @@ def merge_cortarnos_cmd(args: argparse.Namespace) -> int:
 
     Example::
 
-        python scripts/rentmap.py merge-cortarnos \\
+        python app/crawlers/rentmap.py merge-cortarnos \\
             --region erica \\
             --cortarnos "4113510300,4127110100,4127110200,4127310100"
     """
-    sys.path.insert(0, str(ROOT / "scripts"))
-    import regions as region_store  # noqa: WPS433
+    from app.api import regions as region_store  # noqa: WPS433
 
     region = region_store.get_region_by_slug(args.region)
     if region is None:

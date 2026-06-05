@@ -7,7 +7,7 @@ and captures every XHR/fetch request so we can identify faster API
 endpoints than the current HTML-scraping approach.
 
 Usage:
-    python scripts/api_discovery.py [dabang|daangn|naver] [--headed]
+    python app/crawlers/api_discovery.py [dabang|daangn|naver] [--headed]
 """
 from __future__ import annotations
 
