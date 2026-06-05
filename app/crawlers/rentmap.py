@@ -21,10 +21,10 @@ from app.crawlers._utils import (
     RETRY_DEFERRED_EXIT,
     write_csv, read_csv,
 )
-from app.crawlers.dabang import crawl_dabang
+from app.crawlers.dabang import crawl_dabang, DABANG_DEFAULT_ZOOM, DABANG_DEFAULT_DELAY_MS
 from app.crawlers.zigbang import crawl_zigbang, default_zigbang_geohashes
 from app.crawlers.daangn import crawl_daangn, default_daangn_region_ids
-from app.crawlers.naver import crawl_naver, default_naver_urls, default_naver_cortarnos
+from app.crawlers.naver import crawl_naver, default_naver_urls, default_naver_cortarnos, NAVER_DEFAULT_MAX_PAGES
 from app.crawlers.peterpan import crawl_peterpan
 from app.crawlers.missing import finalize_missing, retry_missing
 from app.crawlers.gen_web import gen_web

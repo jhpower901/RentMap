@@ -1,13 +1,17 @@
 """Naver Land crawler."""
 from __future__ import annotations
 
+import shutil
+import string
+import sys
+from collections import Counter
+
 import argparse
 import asyncio
 import json
 import os
 import re
 import time
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -15,10 +19,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse, parse_qs, urlunparse
 
+import math
 import requests
 
 from app.crawlers._utils import (
     ROOT, DEFAULT_AREA, NO_PRICE_LIMIT_MANWON, UA, CRAWL_DETAIL_PROGRESS_EVERY,
+    DEFAULT_CENTER_LAT, DEFAULT_CENTER_LNG, DEFAULT_RADIUS_KM,
     print, env_int, env_float, default_max_deposit, default_max_rent,
     default_bbox_from_env,
     nested, to_text, to_number, round1, join_text_list,

@@ -1,6 +1,8 @@
 """PeterPan (피터팬) crawler."""
 from __future__ import annotations
 
+import string
+
 import argparse
 import html as html_mod
 import json

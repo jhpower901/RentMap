@@ -1,6 +1,8 @@
 """Zigbang crawler."""
 from __future__ import annotations
 
+import sys
+
 import argparse
 import json
 import os
@@ -10,10 +12,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import math
 import requests
 
 from app.crawlers._utils import (
     ROOT, DEFAULT_AREA, NO_PRICE_LIMIT_MANWON, UA, CRAWL_DETAIL_PROGRESS_EVERY,
+    DEFAULT_CENTER_LAT, DEFAULT_CENTER_LNG, DEFAULT_RADIUS_KM,
     print, env_int, env_float, default_max_deposit, default_max_rent,
     default_bbox_from_env,
     nested, to_text, to_number, round1, join_text_list,

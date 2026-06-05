@@ -1,6 +1,10 @@
 """Daangn (당근) crawler."""
 from __future__ import annotations
 
+import html
+import string
+import sys
+
 import argparse
 import json
 import os
