@@ -206,13 +206,23 @@ const centerMarker = L.marker([37.280062, 127.043688])
 // every applyFilter() iterates all of them with hasLayer/addTo/remove. With
 // clustering only the markers in the current viewport's clusters land in the
 // DOM, and the cluster delegates show/hide to a spatial index.
-// chunkedLoading splits the initial bulk addLayers across animation frames so
-// the first paint isn't blocked by 8000+ marker insertions.
+//
+// maxClusterRadius is intentionally tiny (1 px) so we only merge markers
+// whose screen position is effectively identical — i.e. multiple listings
+// from the same building (geocode landed on the same lat/lon). Different
+// buildings stay as individual dots so the exact location of each listing
+// is preserved; a bigger radius (the library default is 80) would hide
+// neighbouring buildings inside a single cluster.
+// disableClusteringAtZoom belt-and-suspenders: once the user has zoomed in
+// past 17 we always render raw markers regardless of radius math.
+// chunkedLoading splits the initial bulk addLayers across animation frames
+// so the first paint isn't blocked by 8000+ marker insertions.
 const clusterGroup = L.markerClusterGroup({
   chunkedLoading: true,
   chunkInterval: 50,
   chunkDelay: 50,
-  maxClusterRadius: 60,
+  maxClusterRadius: 1,
+  disableClusteringAtZoom: 17,
   showCoverageOnHover: false,
   spiderfyOnMaxZoom: true,
 });

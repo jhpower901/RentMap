@@ -117,11 +117,20 @@
     // tick walked the full set. Routing markers through L.markerClusterGroup
     // means only the markers whose cluster is currently expanded land in the
     // DOM, and render() only addLayers/removeLayers the diff.
+    //
+    // maxClusterRadius is intentionally tiny (1 px) so we only merge markers
+    // whose screen position is effectively identical — i.e. multiple listings
+    // from the same building. Different buildings stay as individual dots so
+    // the exact location of each listing stays visible; the library default
+    // (80 px) would hide neighbouring buildings inside one cluster.
+    // disableClusteringAtZoom is a safety net: past zoom 17 we always render
+    // raw markers regardless of how the radius math shakes out.
     const clusterGroup = L.markerClusterGroup({
       chunkedLoading: true,
       chunkInterval: 50,
       chunkDelay: 50,
-      maxClusterRadius: 60,
+      maxClusterRadius: 1,
+      disableClusteringAtZoom: 17,
       showCoverageOnHover: false,
       spiderfyOnMaxZoom: true,
     });
