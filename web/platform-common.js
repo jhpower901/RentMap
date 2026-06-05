@@ -123,14 +123,18 @@
     // from the same building. Different buildings stay as individual dots so
     // the exact location of each listing stays visible; the library default
     // (80 px) would hide neighbouring buildings inside one cluster.
-    // disableClusteringAtZoom is a safety net: past zoom 17 we always render
-    // raw markers regardless of how the radius math shakes out.
+    //
+    // No disableClusteringAtZoom: same-coord listings would otherwise stack
+    // unclickably at deep zooms. With clustering kept active at every zoom,
+    // a building with N listings always renders as a numbered circle that
+    // spiderfies open on click (markercluster spiders any zero-area cluster
+    // regardless of zoom). Neighbouring buildings still separate naturally
+    // because their pixel distance exceeds 1 px past z ~16.
     const clusterGroup = L.markerClusterGroup({
       chunkedLoading: true,
       chunkInterval: 50,
       chunkDelay: 50,
       maxClusterRadius: 1,
-      disableClusteringAtZoom: 17,
       showCoverageOnHover: false,
       spiderfyOnMaxZoom: true,
     });

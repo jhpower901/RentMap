@@ -213,8 +213,15 @@ const centerMarker = L.marker([37.280062, 127.043688])
 // buildings stay as individual dots so the exact location of each listing
 // is preserved; a bigger radius (the library default is 80) would hide
 // neighbouring buildings inside a single cluster.
-// disableClusteringAtZoom belt-and-suspenders: once the user has zoomed in
-// past 17 we always render raw markers regardless of radius math.
+//
+// We deliberately do NOT set disableClusteringAtZoom — when several listings
+// share the exact same coordinate (very common: 같은 건물의 매물 묶음) they
+// would otherwise stack on top of each other at deep zooms and become
+// unclickable. Keeping clustering active at every zoom means same-coord
+// markers always render as a numbered circle that users can spiderfy out
+// (the markercluster default behaviour for a zero-area cluster is to
+// spider on click regardless of zoom). Neighbouring buildings still
+// separate naturally because their pixel distance exceeds 1 px past z ~16.
 // chunkedLoading splits the initial bulk addLayers across animation frames
 // so the first paint isn't blocked by 8000+ marker insertions.
 const clusterGroup = L.markerClusterGroup({
@@ -222,7 +229,6 @@ const clusterGroup = L.markerClusterGroup({
   chunkInterval: 50,
   chunkDelay: 50,
   maxClusterRadius: 1,
-  disableClusteringAtZoom: 17,
   showCoverageOnHover: false,
   spiderfyOnMaxZoom: true,
 });
