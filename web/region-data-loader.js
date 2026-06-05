@@ -47,11 +47,67 @@
     return 'DATA_' + String(source).toUpperCase();
   }
 
-  // Cache-bust on every load so a fresh gen-web shows up without the user
-  // needing to hard-refresh. The penalty (one extra round-trip per page
-  // boot) is negligible compared to the confusion of stale data.
-  function buildSrc(source) {
-    return 'data_' + source + '_' + currentSlug() + '.js?v=' + Date.now();
+  // Per-page manifest of { slug → { source → mtime } }, fetched once from
+  // /api/regions and reused for every loadOne/loadAll/loadAllRegions call
+  // in the page. We previously cache-busted with ``?v=Date.now()`` so a
+  // freshly-crawled bundle was picked up without a hard refresh, but that
+  // also re-downloaded ~20 MB on *every* page load even when nothing had
+  // changed. Using the server-supplied mtime instead keeps the URL stable
+  // when crawls don't change anything (→ browser cache hit, no round-trip)
+  // and bumps it the moment a crawl rewrites the file (→ fresh download).
+  //
+  // /api/regions is the same call _tpl_index.html already issues to
+  // recenter the map, so a single fetch covers both concerns.
+  var manifestPromise = null;
+
+  function fetchManifest() {
+    if (manifestPromise) return manifestPromise;
+    manifestPromise = fetch('/api/regions', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+      .then(function (r) { return r.ok ? r.json() : { regions: [] }; })
+      .then(function (payload) {
+        var bySlug = {};
+        ((payload && payload.regions) || []).forEach(function (r) {
+          if (r && r.slug) bySlug[r.slug] = r.dataMtimes || {};
+        });
+        return bySlug;
+      })
+      .catch(function (err) {
+        console.warn('RegionData: manifest fetch failed, falling back to no-cache URLs', err);
+        return {};
+      });
+    return manifestPromise;
+  }
+
+  function buildSrc(source, slug, mtime) {
+    // Stable URL → browser caches across reloads. mtime=0 means "we don't
+    // know" (manifest fetch failed, or the file doesn't exist server-side
+    // yet); we still emit ?v=0 so the URL shape stays consistent.
+    return 'data_' + source + '_' + slug + '.js?v=' + (mtime || 0);
+  }
+
+  // Two helpers (instead of a single appendScript) so loadOne keeps its
+  // historical ``async = false`` (preserves execution order when callers
+  // chain multiple loadOnes) while loadAllRegions's inner sources keep the
+  // default async = true (maximum parallelism within one region — globals
+  // are per-source so there's no race).
+  function appendScriptOrdered(src, onload, onerror) {
+    var s = document.createElement('script');
+    s.src = src;
+    s.async = false;
+    s.onload = onload;
+    s.onerror = onerror;
+    document.head.appendChild(s);
+  }
+
+  function appendScriptParallel(src, onload, onerror) {
+    var s = document.createElement('script');
+    s.src = src;
+    s.onload = onload;
+    s.onerror = onerror;
+    document.head.appendChild(s);
   }
 
   function loadOne(source, callback) {
@@ -62,21 +118,24 @@
       callback(window[key]);
       return;
     }
-    var s = document.createElement('script');
-    s.src = buildSrc(source);
-    s.async = false;
-    s.onload = function () {
-      // The data_<source>_<slug>.js file sets window.DATA_<SOURCE>; if it
-      // didn't (e.g. empty CSV → empty array still set, we hope), fall
-      // back to [].
-      callback(Array.isArray(window[key]) ? window[key] : []);
-    };
-    s.onerror = function () {
-      console.warn('RegionData: missing data file', s.src);
-      window[key] = [];
-      callback([]);
-    };
-    document.head.appendChild(s);
+    var slug = currentSlug();
+    fetchManifest().then(function (manifest) {
+      var mtime = (manifest[slug] || {})[source];
+      appendScriptOrdered(
+        buildSrc(source, slug, mtime),
+        function () {
+          // The data_<source>_<slug>.js file sets window.DATA_<SOURCE>; if it
+          // didn't (e.g. empty CSV → empty array still set, we hope), fall
+          // back to [].
+          callback(Array.isArray(window[key]) ? window[key] : []);
+        },
+        function () {
+          console.warn('RegionData: missing data file', buildSrc(source, slug, mtime));
+          window[key] = [];
+          callback([]);
+        }
+      );
+    });
   }
 
   function loadAll(sources, callback) {
@@ -108,59 +167,52 @@
   // practice N=1–few and the 4 sources are still fetched in parallel within
   // each region, so total time is roughly N * single-region load time.
   function loadAllRegions(sources, callback) {
-    fetch('/api/regions', { credentials: 'same-origin', cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : { regions: [] }; })
-      .then(function (payload) {
-        var slugs = ((payload && payload.regions) || []).map(function (r) { return r.slug; });
-        if (!slugs.length) slugs = [currentSlug()];
-        var merged = {};
-        sources.forEach(function (s) { merged[s] = []; });
+    fetchManifest().then(function (manifest) {
+      var slugs = Object.keys(manifest);
+      if (!slugs.length) slugs = [currentSlug()];
+      var merged = {};
+      sources.forEach(function (s) { merged[s] = []; });
 
-        function loadRegion(i) {
-          if (i >= slugs.length) {
-            // Replace globals with the union so existing listing-data-source
-            // / favorites lookups (which already key off DATA_<SOURCE>)
-            // transparently see every region's rows.
-            sources.forEach(function (s) {
-              window[globalKey(s)] = merged[s];
-            });
-            callback(merged);
-            return;
-          }
-          var slug = slugs[i];
-          var pending = sources.length;
-          sources.forEach(function (source) {
-            var key = globalKey(source);
-            // Null the global before each load so we only capture what this
-            // particular script contributes, not whatever the prior region
-            // left behind.
-            window[key] = null;
-            var s = document.createElement('script');
-            s.src = 'data_' + source + '_' + slug + '.js?v=' + Date.now();
-            s.onload = function () {
+      function loadRegion(i) {
+        if (i >= slugs.length) {
+          // Replace globals with the union so existing listing-data-source
+          // / favorites lookups (which already key off DATA_<SOURCE>)
+          // transparently see every region's rows.
+          sources.forEach(function (s) {
+            window[globalKey(s)] = merged[s];
+          });
+          callback(merged);
+          return;
+        }
+        var slug = slugs[i];
+        var slugMtimes = manifest[slug] || {};
+        var pending = sources.length;
+        sources.forEach(function (source) {
+          var key = globalKey(source);
+          // Null the global before each load so we only capture what this
+          // particular script contributes, not whatever the prior region
+          // left behind.
+          window[key] = null;
+          appendScriptParallel(
+            buildSrc(source, slug, slugMtimes[source]),
+            function () {
               if (Array.isArray(window[key])) {
                 merged[source] = merged[source].concat(window[key]);
               }
               pending -= 1;
               if (pending === 0) loadRegion(i + 1);
-            };
-            s.onerror = function () {
+            },
+            function () {
               // Missing data file for a region = that region just hasn't
               // crawled yet. Not an error — keep going.
               pending -= 1;
               if (pending === 0) loadRegion(i + 1);
-            };
-            document.head.appendChild(s);
-          });
-        }
-        loadRegion(0);
-      })
-      .catch(function (err) {
-        // /api/regions failed (likely 401 / network blip). Fall back to
-        // the single-region path so the page still renders something.
-        console.warn('RegionData.loadAllRegions: falling back to single region', err);
-        loadAll(sources, callback);
-      });
+            }
+          );
+        });
+      }
+      loadRegion(0);
+    });
   }
 
   window.RegionData = {

@@ -17,6 +17,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, HTTPException, UploadFile, File, Body, Depends, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -305,6 +306,13 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# gzip every response > 1KB. Caddy already negotiates zstd/gzip with the
+# browser in front of us, but this also covers direct hits on :8000 (LAN dev,
+# health checks) and is a no-op when Caddy strips/replaces Content-Encoding.
+# The big win is the data_<source>_<slug>.js bundles (1–7 MB each, ~5–10× win
+# on JSON-shaped text) which the map page pulls on every load.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1058,6 +1066,31 @@ class ScheduleUpdateBody(BaseModel):
     source: str | None = None
 
 
+_WEB_DIR = ROOT / "web"
+_GENWEB_SOURCES: tuple[str, ...] = ("dabang", "daangn", "zigbang", "naver", "peterpan")
+
+
+def _data_mtimes_for_slug(slug: str) -> dict[str, int]:
+    """Per-source mtime (int seconds) of the gen-web data_<src>_<slug>.js bundles.
+
+    The map / favorites pages append these as ``?v=<mtime>`` to the data
+    bundle URLs. A stable URL for unchanged data means the browser uses its
+    own cache (zero round-trip), and a fresh crawl bumps the mtime so the
+    cached copy is bypassed automatically — without the old
+    ``?v=Date.now()`` which re-downloaded ~20 MB on every page load.
+    """
+    out: dict[str, int] = {}
+    for src in _GENWEB_SOURCES:
+        try:
+            out[src] = int((_WEB_DIR / f"data_{src}_{slug}.js").stat().st_mtime)
+        except OSError:
+            # File doesn't exist (region hasn't crawled yet, or this source
+            # is intentionally absent). 0 keeps the URL stable so a follow-up
+            # crawl appearing produces a real mtime that invalidates the URL.
+            out[src] = 0
+    return out
+
+
 @app.get("/api/regions")
 async def list_regions(user: auth.User = Depends(auth.current_user),
                        mine: bool = False):
@@ -1069,6 +1102,9 @@ async def list_regions(user: auth.User = Depends(auth.current_user),
     - admin caller, no ``mine``: every row, every status (used by admin.html).
     - regular caller, no ``mine``: only approved rows (the region selector
       should never offer something a user can't act on).
+
+    Each region carries ``dataMtimes`` so the web client can build cache-
+    stable URLs for ``data_<src>_<slug>.js`` — see ``_data_mtimes_for_slug``.
     """
     if mine:
         regions = region_store.list_regions(requested_by=user.id)
@@ -1076,6 +1112,8 @@ async def list_regions(user: auth.User = Depends(auth.current_user),
         regions = region_store.list_regions()
     else:
         regions = region_store.list_regions(statuses=("approved",))
+    for r in regions:
+        r["dataMtimes"] = _data_mtimes_for_slug(r["slug"])
     return {"regions": regions}
 
 
